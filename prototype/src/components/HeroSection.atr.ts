@@ -105,7 +105,7 @@ export const HeroSection = component(function HeroSection() {
         .hero__intro { max-width: 44em; min-height: 72px; color: var(--color-text); border-left: 3px solid var(--color-primary); padding: var(--space-sm) var(--space-md); background: color-mix(in srgb, var(--color-surface) 88%, transparent); border-radius: 0 var(--radius-md) var(--radius-md) 0; box-shadow: 0 10px 40px -18px color-mix(in srgb, var(--color-primary) 55%, transparent); }
         .hero__text { color: var(--color-muted); line-height: 1.8; }
         .hero__cursor { color: var(--color-primary); animation: blink 1s steps(1) infinite; }
-        @keyframes blink { 50% { opacity: 0; } }
+        /* blink keyframe 全局定义于 atelier-ui.css（决策 16 收口），此处不再重复 */
         .hero__art { position: relative; }
         .orb { position: relative; width: 230px; height: 230px; margin-inline: auto; }
         .orb__core { position: absolute; inset: 30%; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--color-primary) 34%, transparent), color-mix(in srgb, var(--color-bg) 82%, transparent) 68%); border: 1px solid color-mix(in srgb, var(--color-primary) 46%, transparent); box-shadow: 0 0 44px -6px color-mix(in srgb, var(--color-primary) 52%, transparent), inset 0 0 22px color-mix(in srgb, var(--color-primary) 26%, transparent); animation: breathe 3.6s ease-in-out infinite; }

@@ -1,0 +1,36 @@
+/*
+ * atelier-ui.css — 决策 16 recipe 层种子（手写维护，勿与生成产物 atelier-theme.css 混淆）。
+ * 收口跨面板重复的组件级样式：按钮 / 面板壳 / 页签 / 区块节奏 / 全局 keyframes。
+ * 取值一律 var(--token)（H3）；这是未来「基线组件库」的最小前身——
+ * 业务 AI 只组合 .btn/.ppanel/.tab，不再手搓按钮样式。
+ */
+@layer components {
+  .ppanel { background: var(--color-surface); border: 1px solid var(--color-surface-2); border-radius: var(--radius-lg); padding: var(--space-md) var(--space-lg); animation: panel-in .25s ease; }
+
+  .btn { display: inline-block; border: 0; border-radius: var(--radius-sm); padding: .52rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 600; transition: transform .15s, box-shadow .15s; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--color-primary); color: var(--color-bg); }
+  .btn-primary:hover { box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--color-primary) 80%, transparent); }
+  .btn-warn { background: var(--color-warn); color: var(--color-bg); }
+  .btn-warn:hover { box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--color-warn) 80%, transparent); }
+  .btn-danger { background: var(--color-danger); color: var(--color-text); font-weight: 400; }
+  .btn-ghost { background: transparent; border: 1px solid var(--color-surface-2); color: var(--color-muted); font-weight: 400; }
+  .btn-ghost:hover { color: var(--color-text); border-color: var(--color-primary); }
+  .btn-mini { padding: .18rem .55rem; font-size: .72rem; font-weight: 400; background: transparent; border: 1px solid var(--color-surface-2); color: var(--color-muted); }
+  .btn-mini:hover { color: var(--color-text); border-color: var(--color-primary); }
+
+  .tab { background: transparent; border: 1px solid var(--color-surface-2); color: var(--color-muted); padding: .42rem .95rem; border-radius: 999px; cursor: pointer; font-size: .84rem; transition: all .18s; }
+  .tab:hover { color: var(--color-text); border-color: var(--color-primary); }
+  .tab-on { background: linear-gradient(120deg, var(--color-primary), var(--color-primary-soft)); color: var(--color-bg); border-color: transparent; font-weight: 600; box-shadow: 0 8px 22px -10px color-mix(in srgb, var(--color-primary) 78%, transparent); }
+
+  .section-shell { margin-top: calc(var(--space-xl) * 1.35); scroll-margin-top: 90px; }
+  .eyebrow { color: var(--color-primary); font-size: .76rem; letter-spacing: .22em; margin-bottom: .35rem; }
+  .h-section { font-size: 1.65rem; margin-bottom: var(--space-sm); }
+  .h-section-fluid { font-size: 1.65rem; margin-bottom: var(--space-md); display: flex; align-items: baseline; gap: var(--space-sm); flex-wrap: wrap; }
+  .sub-section { color: var(--color-muted); margin-bottom: var(--space-md); max-width: 60em; font-size: .9rem; }
+}
+
+/* 全局 keyframes 唯一定义处（各组件不再重复声明） */
+@keyframes panel-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes pulse-dot { 50% { opacity: .45; } }
+@keyframes blink { 50% { opacity: 0; } }

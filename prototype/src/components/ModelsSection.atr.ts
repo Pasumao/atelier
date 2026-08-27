@@ -1,5 +1,6 @@
 /**
  * ModelsSection.atr.ts — 开放模型矩阵区。
+ * 【决策 16】区块节奏用 .section-shell/.eyebrow/.h-section/.sub-section recipe；scoped 已清空。
  * 数据与文案在本组件内常驻；ModelCard 通过 import 副作用注册进 registry。
  * 定价/参数为 2026-08 公开报道快照，以官方文档为准。
  */
@@ -43,23 +44,15 @@ const MODELS = [
 
 export const ModelsSection = component(function ModelsSection() {
   return html`
-    <section class="section" id="models">
-      <p class="section__eyebrow">MODELS</p>
-      <h2 class="section__title">开放模型矩阵</h2>
-      <p class="section__sub">两个官方端点覆盖对话与深度思考；Flash 主打性价比；权重全线开放。定价为公开报道快照，以官方文档为准。</p>
-      <div class="grid">
+    <section class="section-shell" id="models">
+      <p class="eyebrow">MODELS</p>
+      <h2 class="h-section">开放模型矩阵</h2>
+      <p class="sub-section">两个官方端点覆盖对话与深度思考；Flash 主打性价比；权重全线开放。定价为公开报道快照，以官方文档为准。</p>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-md">
         {#each MODELS as m}
           <ModelCard name={m.name} badge={m.badge} tagline={m.tagline} highlights={m.highlights} accent={m.accent} endpoint={m.endpoint ? m.endpoint : undefined} />
         {/each}
       </div>
-
-      <style scoped>
-        .section { margin-top: calc(var(--space-xl) * 1.35); scroll-margin-top: 90px; }
-        .section__eyebrow { color: var(--color-primary); font-size: .76rem; letter-spacing: .22em; margin-bottom: .35rem; }
-        .section__title { font-size: 1.65rem; margin-bottom: var(--space-sm); }
-        .section__sub { color: var(--color-muted); margin-bottom: var(--space-md); max-width: 60em; font-size: .9rem; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--space-md); }
-      </style>
     </section>
   `.locals({ props: {}, MODELS });
 }, { name: "ModelsSection" });

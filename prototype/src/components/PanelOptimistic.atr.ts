@@ -1,7 +1,6 @@
 /**
  * PanelOptimistic.atr.ts — 实验台：optimisticList 三态乐观列表。
- * 【决策 16 试点】样式改为 token 派生 Tailwind 工具类（bg-primary / gap-sm / bg-ok/17…）；
- * 仅 @keyframes 留在 <style scoped>（混合制：工具类管值，scoped 管动画等异形效果）。
+ * 【决策 16】样式全部迁移至 .ppanel/.btn recipe + 工具类；scoped 已清空。
  * 挂载时播种已确认项；异步提交 900ms 落定、故障注入 700ms 自动 revert。
  */
 import { component, $state, $derived, html, optimisticList } from "../runtime";
@@ -52,15 +51,9 @@ export const PanelOptimistic = component(function PanelOptimistic() {
         {/each}
       </ul>
       <div class="flex flex-wrap gap-sm mt-sm">
-        <button class="inline-block rounded-sm px-4 py-2 text-sm font-semibold transition-all duration-150 bg-primary text-bg hover:-translate-y-px hover:shadow-[0_10px_22px_-12px_color-mix(in_srgb,var(--color-primary)_80%,transparent)]" on:click={onAsyncAdd}>模拟 AI 异步提交（900ms 确定）</button>
-        <button class="inline-block rounded-sm px-4 py-2 text-sm font-semibold transition-all duration-150 bg-warn text-bg hover:-translate-y-px hover:shadow-[0_10px_22px_-12px_color-mix(in_srgb,var(--color-warn)_80%,transparent)]" on:click={onFailAdd}>模拟失败（700ms 自动回滚）</button>
+        <button class="btn btn-primary" on:click={onAsyncAdd}>模拟 AI 异步提交（900ms 确定）</button>
+        <button class="btn btn-warn" on:click={onFailAdd}>模拟失败（700ms 自动回滚）</button>
       </div>
-
-      <style scoped>
-        /* 混合制逃生舱：keyframes 定义留在此处（动画名文档全局，选择器不涉及值） */
-        @keyframes panel-in { from { opacity: 0; transform: translateY(8px); } }
-        @keyframes pulse-dot { 50% { opacity: .45; } }
-      </style>
     </div>
   `.locals({ props: {}, feats, revertCount, onAsyncAdd, onFailAdd, dotCls });
 }, { name: "PanelOptimistic" });

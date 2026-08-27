@@ -4,6 +4,7 @@
  */
 import config from "../atelier.config.json";
 import "./atelier-theme.css"; // 决策 16：token 派生的 Tailwind 主题（生成产物）
+import "./atelier-ui.css"; // 决策 16：recipe 层种子（.btn/.ppanel/.tab + 全局 keyframes）
 import { initTokens, mountComponent, registry, validateFlat } from "./runtime";
 import { DeepSeekIntro } from "./components/DeepSeekIntro.atr.ts";
 

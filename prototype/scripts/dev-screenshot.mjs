@@ -156,14 +156,23 @@ export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
     }
     await sleep(settleMs); // let microtask renders / fonts settle
 
-    // 诊断埋点：readiness 通过时页面到底长什么样（一次事故排查用，保留为捕获自检）
-    const diag = await cdp.send("Runtime.evaluate", {
-      expression: "JSON.stringify({href:location.href, appLen:(document.getElementById('app')?.innerHTML ?? '').length, sheets:document.querySelectorAll('style,link[rel=stylesheet]').length})",
-      returnByValue: true,
-    });
-    console.log(`[dev-screenshot] ${diag.result?.value}`);
-
-    const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
+    // 捕获 + 单次重试：captureScreenshot 偶发瞬态挂起（合成器），重试即成功；
+    // 重试前重验挂载——防止「优化重载清空 DOM 后把白屏当成功」污染基线
+    const mountOk = async () => {
+      const r = await cdp.send("Runtime.evaluate", {
+        expression: "!!document.querySelector('#app > *')",
+        returnByValue: true,
+      }, 8000);
+      return r.result?.value === true;
+    };
+    const shot = await (async () => {
+      try {
+        return await cdp.send("Page.captureScreenshot", { format: "png" }, 15000);
+      } catch {
+        if (!(await mountOk())) throw new Error("app wiped before capture (vite reload race)");
+        return await cdp.send("Page.captureScreenshot", { format: "png" }, 15000);
+      }
+    })();
     return shot.data; // base64 PNG
   } finally {
     try { ws?.close(); } catch { /* already closed */ }

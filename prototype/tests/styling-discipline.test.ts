@@ -1,10 +1,13 @@
 /**
  * styling-discipline.test.ts — 决策 16 的护栏：H3"token 单源"在 Tailwind 层的延伸。
  *
- * 规则（当前试点范围 = 颜色纪律；间距/字号纪律随 recipe 层落地再收紧）：
+ * 规则（当前试点范围 = 颜色纪律 + scoped 白名单；间距/字号纪律随 recipe 层落地再收紧）：
  *   R1 禁原生 Tailwind 调色板类（bg-blue-500…）——语义 token 派生类才是唯一入口
  *   R2 禁裸颜色字面量（#hex / rgb( / rgba( / hsl(）——颜色只能来自
  *      token 工具类（bg-ok/17）或 var(--color-*)（scoped CSS / 任意值内 color-mix）
+ *   R2b scoped CSS 只通过 var(--token) 取值
+ *   R3 <style scoped> 仅白名单组件可用（伪元素/keyframes/异形渐变逃生舱）——
+ *      其余组件一律工具类优先
  *
  * 扫描对象：src/components/*.atr.ts（模板类名 + scoped CSS 同文件同责）。
  */
@@ -14,6 +17,9 @@ import path from "node:path";
 
 const DIR = path.resolve(__dirname, "../src/components");
 const FILES = fs.readdirSync(DIR).filter((f) => f.endsWith(".atr.ts"));
+
+/** 混合制逃生舱白名单：伪元素 / keyframes / 异形渐变（component-library 层） */
+const SCOPED_ALLOWLIST = new Set(["HeroSection.atr.ts", "ModelCard.atr.ts", "BenchBar.atr.ts", "PillarCard.atr.ts"]);
 
 const PALETTE_CLASS =
   /\b(?:bg|text|border|ring|from|to|via|divide|outline|decoration|accent|caret|fill|stroke)-(?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)(?:-\d{2,3})?\b/;
@@ -42,7 +48,7 @@ describe("styling discipline (decision 16 — token-derived utilities only)", ()
     }
   });
 
-  it("R2b: scoped CSS 只通过 var(--token) 取色（含 color-mix 内层）", () => {
+  it("R2b: scoped CSS 只通过 var(--token) 取值（含 color-mix 内层）", () => {
     for (const { file, text } of atrFiles()) {
       const style = /<style[^>]*>([\s\S]*?)<\/style>/i.exec(text)?.[1] ?? "";
       const varRefs = [...style.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]);
@@ -52,4 +58,16 @@ describe("styling discipline (decision 16 — token-derived utilities only)", ()
       }
     }
   });
+
+  it("R3: scoped <style> 仅逃生舱白名单组件可用", () => {
+    for (const { file, text } of atrFiles()) {
+      const hasStyle = /<style[^>]*>/i.test(text);
+      if (!SCOPED_ALLOWLIST.has(file)) {
+        expect(hasStyle, `${file} 不在逃生舱白名单内——样式请用 token 工具类 / atelier-ui.css recipe（keyframes 已全局收口）`).toBe(false);
+      } else {
+        expect(hasStyle, `${file} 在白名单内却删除了 scoped 样式？若是永久迁移请同步更新 SCOPED_ALLOWLIST`).toBe(true);
+      }
+    }
+  });
 });
+
