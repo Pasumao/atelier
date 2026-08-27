@@ -105,6 +105,9 @@ function cmdRollback(repo, id) {
   git(repo, ["tag", backupTag]);
   git(repo, ["reset", "--hard", target.sha]);
   appendStore(repo, { type: "rollback", id: `rb-${cur ? cur.slice(0, 5) : "root"}`, target: target.id, backup: backupTag, at: new Date().toISOString() });
+  // fold the rollback row so the tree ends clean, otherwise the next gate would self-lock (same bug as in save)
+  git(repo, ["add", STORE_FILE]);
+  git(repo, ["commit", "-m", `timeline(rollback→${target.id})`]);
   console.log(`rolled back → ${target.id} "${target.name}". The discarded future stays reachable:`);
   console.log(`  time-travel forward:  git checkout ${backupTag}`);
   console.log(`  re-anchor it later:   atelier checkpoint save "<name>" after checking out that tag`);
