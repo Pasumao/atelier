@@ -9,7 +9,7 @@
 ## P0 — 承诺落空区（先还债再谈增长）
 
 ### P0-1 页面↔dev 命令下行通道 ★当前最大虚假面
-- **问题**：state/checkpoint 能力活在页面进程内，dev 面只做了单向推送桥——wire 上 `checkpoint.rollback/time_travel` 等标 implemented 实为不可达（已在本快照修正为 pending，live 口径 8→5）。
+- **问题**：state/checkpoint 能力活在页面进程内，dev 面只做了单向推送桥——wire 上 `checkpoint.rollback/time_travel` 等曾标 implemented 实为不可达（已在本快照修正为 pending；勘误：此前文档称 live 12/22 系口径虚高，wire 实达 **9/21**；锚点 8831edf 提交说明中"live 8→5"同为笔误）。
 - **技术**：dev 面 SSE 端点 `/__atelier/bridge/commands`（零依赖：`res.write` 持续流 + 模块级命令队列）；页面 bridge 注册 `EventSource` 监听 `{op:"rollback"|"time_travel", args}` → 调 store → POST ack；MCP dispatch 入队。顺带打通 `snapshot promote` 与未来 `audit` 事件流。
 - **验收**：MCP `checkpoint.rollback` 在无头实例上真实改变 `state.snapshot` 返回值；双向各一条断言。
 

@@ -91,7 +91,7 @@ ChatMessage.atr.ts
 | 审计 | `audit.log` | 全部写操作副作用日志 | P0 |
 | 审计 | `feedback.read` | 读取 specs/ 内人类点踩/批准反馈 | P1 |
 
-> **实现状态（v0.2 脚本态）**：live = registry×2 · tokens.list · state.snapshot · ui.screenshot · checkpoint.list/rollback · state.time_travel · structure.map/check · snapshot.diff/review_diff（**12/19**）。其余按优先级随对应包落地；工具描述由 `atelier/mcp/mcp-definitions.json` 单源生成。
+> **实现状态（v0.2 脚本态，wire 实达口径）**：live = registry×2 · tokens.list · state.snapshot · ui.screenshot · structure.map/check · snapshot.diff/review_diff（**9/21**）。`checkpoint.list/rollback`、`state.time_travel`、`test.run` 等 runtime 能力已存在但 wire 可达性依赖页面↔dev 命令下行通道（BACKLOG P0-1）；其余按优先级随对应包落地。工具描述由 `atelier/mcp/mcp-definitions.json` 单源生成。
 
 ## 7. atelier.config.json（单一扁平配置）
 

@@ -13,7 +13,7 @@
 | 契约 | 扁平 schema（reqProps/optProps，无 $ref/oneOf）：props 校验 ∪ MCP 参数 ∪ token 校验三用单源 |
 | dev 面 | `/__atelier/*` 六端点：registry·tokens·docs·stream·bridge-state·screenshot |
 | 检视桥 | 页面哨兵 effect → state.snapshot（15 信号实测）；瞬态 CDP 截图（74KB PNG 实测） |
-| Agent 面 | stdio MCP server **21 工具（12 live）**由 defs 单源生成；8 个技能包（dsh 实测热加载+调用）；structure.map/check 六层引擎本地计算 |
+| Agent 面 | stdio MCP server **21 工具（9 live 实达）**由 defs 单源生成；8 个技能包（dsh 实测热加载+调用）；structure.map/check 六层引擎本地计算 |
 | 时间线 | checkpoint.mjs 决策15 双轨（git 锚 + backup tag + jsonl 审计）；工作区 5 事件实跑 |
 | CLI v0.2 | init(FULL scaffold+agent 层) · struct/check/snapshot(mimi·MATCH 实测) · mcp/skills/checkpoint(FULL) · lint/test/e2e/build/package/review(STUB 诚实 exit4) |
 
@@ -44,7 +44,7 @@
 | Schema 契约 | 生态库(zod) | 库 | 库 | 库 | Forms/类型 | 类型系统 | **语言级扁平 schema 三用** |
 | 错误文化 | dev overlay | 一般 | 一般 | 一般 | 一般 | **传奇级报错** | 四段式+码页+fix 动作 |
 | 时间旅行 | devtools 外挂(态) | – | – | – | – | – | **双轨内建(态+源)** |
-| Agent 工具面 | 生态拼装* | 少量 | llms.txt 只读 | – | agentic 辅助 | – | **21 工具单源+12 live** |
+| Agent 工具面 | 生态拼装* | 少量 | llms.txt 只读 | – | agentic 辅助 | – | **21 工具单源+9 live 实达** |
 | 项目结构守卫 | 社区约定 | 约定 | 约定 | 约定 | 约定严格但非 agent 向 | 严格 | **六层规则机检(WARN 不假红)** |
 | 性能 | 强(先 compiler 后 RSC) | 强 | 强 | 最强梯队 | 中 | 强 | **未测** |
 | 生态/成熟 | 最大 | 大 | 中 | 小 | 大 | 小而稳 | **零(实验)** |
