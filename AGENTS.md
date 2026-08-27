@@ -19,6 +19,7 @@ Atelier 工作区围绕"为 AI 编程代理设计的新前端框架"调研展开
 | `docs/SKILLS-PLAN.md` | Agent Skills 包计划书：范围/设计原则（8 条带依据）/内容规格/验收口径/里程碑；拍板结果已标记。 |
 | `docs/AI-OPTIMAL-STRUCTURE.md` | 设计公理：六层 AI 友好结构模型 × Atelier 机制映射 + STRUCTURE-RULES v0.2 机检规则集与分级哲学。 |
 | `docs/TECH-ASSESSMENT.md` | 技术评估与竞品对照（v0.2 快照）：七维自评、主流+AI 向玩家矩阵、五优势/四劣势/定位声明、可证伪指标表。 |
+| `docs/TECH-COMPARISON.md` | 实现技术逐项对照：13 个技术站位 × 主流框架机制差异（信号/调度/模板解析/DOM 策略/契约/MCP server 实现…），含根源路线三分歧与借力清单。 |
 | `atelier/` | Atelier 工具链作者副本：`skills/` 多工具兼容技能包（8 个 kebab-case 目录包）、`mcp/server.mjs` 零依赖 stdio MCP Server（21 工具单源生成）、`scripts/checkpoint.mjs` 决策 15 源码双轨、`cli.mjs` 统一入口（init/skills/struct/checkpoint/snapshot/mcp，三级诚实标注）；README.md 有兼容矩阵/MCP 接入/checkpoint 说明。M1+M2+M2.5 已交付。 |
 | `prototype/` | Phase 0 最小可运行原型（Vite dev）：信号内核/模板解释器/事务层/契约校验/注册表查询面/dev 状态桥（`src/bridge.ts` → MCP `state.snapshot`）；`prototype/components/` 为演示组件（DeepSeek 介绍页）。 |
 | `research/` | 单路调研原始素材（含全部来源 URL 与未确认项标注）：`01`~`04` 为第一轮四路，`05`~`08` 为第二轮四路。 |

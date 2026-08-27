@@ -28,7 +28,7 @@
 | 维度 | 等级 | 依据与分析 |
 |---|---|---|
 | A 心智模型·首遍正确率 | ◐(假设) | 语法面极小+黄金代码+技能包补偿分布外风险；但 ⚠️ **新 DSL 不在 LLM 预训练分布**，与 React/Vue 海量语料相比是无实证的逆风——M3 对照实验是唯一裁判 |
-| B 反应性·渲染 | ○(现状)→◐(路线) | 区块级重挂而非细粒度；each O(n) 重建无 key。Solid/Svelte 编译期细粒度、Vue keyed diff 在此维度领先一个身位；追赶路径=决策3编译器（可视化调用图已在 spec） |
+| B 反应性·渲染 | ◐(现状) | 实测口径：**叶级细粒度**（textContent/setAttribute 各自 effect，template.ts:323/362）+ **块级重挂**（{#each} 全清重建无 key reconcile :407；模板无解析缓存）。混合策略可用但大列表/高频挂载场景落后 Vue keyed diff 与 lit-html Template 缓存一个身位；追赶路径 = 决策3编译器 + §15 借力清单（见 docs/TECH-COMPARISON.md） |
 | C 契约·类型纪律 | ●设计 | 扁平 schema 一份三用（props/MCP/token），LLM 各厂商安全子集（规避 $ref/oneOf 支持碎片化）；别家同类能力散在 zod+代码生成两个独立环节 |
 | D 错误·可恢复性 | ●(独特) | AtrError 四段式 + 每个 code 对应修法页 + fix 直连建议动作；**双轨时间旅行**（应用态快照 + git 源码锚/backup tag）内建为一等公民—— Redux DevTools time-travel 仅状态层且属外挂 devtools，无人覆盖源码轨 |
 | E Agent 表面 | ●(核心差异化) | 见 §4 对照——该维度主流框架得分为零或接近零 |
