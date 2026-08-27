@@ -1,1 +1,2 @@
 {"type":"rollback","id":"rb-d8da0","target":"219f731","backup":"atelier-backup-2026-08-27T10-31-25-940Z","at":"2026-08-27T10:31:25.995Z"}
+{"type":"save","id":"5d767c6","sha":"5d767c652e4e7fc1ac0570d7fba18c326ea8ef6e","name":"verify: dirty-lock fixed","at":"2026-08-27T10:32:02.902Z"}
