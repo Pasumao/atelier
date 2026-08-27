@@ -34,6 +34,7 @@ const DEFS = JSON.parse(fs.readFileSync(path.join(HERE, "mcp-definitions.json"),
 const SERVER_INFO = { name: "atelier", version: DEFS.$meta?.version ?? "0.1.0" };
 const PROTOCOL_LATEST = "2025-06-18";
 const BASE = (process.env.ATELIER_DEV_URL ?? "http://127.0.0.1:5173").replace(/\/$/, "");
+const PROJECT_ROOT_ENV = process.env.ATELIER_PROJECT_ROOT;
 
 /** dev-surface routes used by implemented tools (extend as endpoints land) */
 const ENDPOINT_MAP = {
@@ -68,8 +69,61 @@ function toolError(codeText, fixText) {
   return new Error(`${codeText}\nfix: ${fixText}`);
 }
 
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+const DEV_TOKEN = (() => {
+  for (const p of [path.join(PROJECT_ROOT_ENV ?? process.cwd(), ".atelier", "dev-token"), path.join(PROJECT_ROOT_ENV ?? process.cwd(), "prototype", ".atelier", "dev-token")]) {
+    try { return fs.readFileSync(p, "utf8").trim(); } catch { /* next */ }
+  }
+  return "";
+})();
+async function devJson(pathWithQuery, init = {}) {
+  const headers = { ...(init.headers ?? {}), "x-atelier-token": DEV_TOKEN };
+  const r = await fetch(`${BASE}${pathWithQuery}`, { signal: AbortSignal.timeout(45000), ...init, headers }).catch((e) => {
+    throw toolError(
+      `ATR-4xx-dev: dev surface unreachable at ${BASE} (${e.cause?.code ?? e.name})`,
+      "start the dev server ('pnpm dev' inside prototype/) or set ATELIER_DEV_URL",
+    );
+  });
+  if (!r.ok && r.status === 401) {
+    throw toolError("ATR-402: dev token rejected", "read .atelier/dev-token next to the app root and send it as x-atelier-token");
+  }
+  return r.json();
+}
+
+/** P0-1 downlink: enqueue a command for the open page over SSE, then poll its ack. */
+async function bridgeCall(op, args = {}) {
+  const enq = await devJson("/__atelier/bridge/enqueue", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ op, args }),
+  });
+  const clients = enq.clients ?? 0;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 10000) {
+    await sleepMs(250);
+    const st = await devJson(`/__atelier/bridge/cmd-status?id=${encodeURIComponent(enq.id)}`);
+    if (st.status === "done") {
+      if (st.ok) return st.result;
+      throw toolError("ATR-4xx-dev: downlink op failed on the page", st.error ?? "see the page console");
+    }
+  }
+  throw toolError(
+    `ATR-4xx-dev: no open page answered "${op}" within 10s${clients ? "" : ` (SSE subscribers: ${clients})`}`,
+    "keep the app open in a dev preview — transient screenshot/headless instances are closed by design",
+  );
+}
+
 async function callTool(name, args) {
   const PROJECT_ROOT = process.env.ATELIER_PROJECT_ROOT ?? process.cwd();
+
+  /* ---- downlink-executed tools (runtime lives in the open page; P0-1 SSE channel) ---- */
+  if (name === "checkpoint.list") return bridgeCall("checkpoint.list", {});
+  if (name === "checkpoint.rollback") return bridgeCall("checkpoint.rollback", args ?? {});
+  if (name === "state.time_travel") return bridgeCall("state.time_travel", args ?? {});
+  if (name === "audit.log") {
+    const j = await devJson(`/__atelier/audit?lines=${Math.max(1, Math.min(500, Number(args?.lines ?? 50)))}`);
+    return j.rows;
+  }
 
   /* ---- locally computed tools (no dev-surface round trip) ---- */
   if (name === "structure.map") return inspectStructure(args?.root ?? PROJECT_ROOT);

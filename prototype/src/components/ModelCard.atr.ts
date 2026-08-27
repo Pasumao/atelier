@@ -2,7 +2,7 @@
  * ModelCard.atr.ts — Atelier 组件示例（决策 1/6/8 演示）。
  * 完整版差异：scheme 由编译器从类型 AST 提取；作用域由编译器闭包捕获（本原型用 .locals 显式注入）。
  */
-import { component, $state, html } from "../src/runtime";
+import { component, $state, html } from "../runtime";
 
 export const modelCardSchema = {
   type: "object",

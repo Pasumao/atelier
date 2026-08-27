@@ -3,95 +3,119 @@ import { createRequire } from "node:module";
 import { capturePage } from "./scripts/dev-screenshot.mjs";
 
 /**
- * Atelier prototype dev 插件（v0.1 最小版）：
- * 模拟决策 7「内建 MCP Server 查询面」的 HTTP 面（完整 MCP 协议接入为下一步）：
- *  - GET /__atelier/registry   → 组件注册表（名称/schema/源码路径），供代理自查询
- *  - GET /__atelier/docs       → 框架 API 速查（llms.txt 雏形）
- *  - GET /__atelier/stream-intro → 流式文本模拟（SSE），接 streamValue 原语
+ * Atelier prototype dev 插件（v0.2）：决策 7「内建代理面」+ 决策 9/12 安全与审计基线。
+ *
+ * 查询（GET，需 token）
+ *  - /__atelier/registry · tokens · docs · state-snapshot
+ *  - /__atelier/screenshot                 瞬态无头实例截图（视觉真相）
+ *  - /__atelier/audit?lines=N              审计日志尾读
+ *  - /__atelier/bridge/commands?token=     SSE 命令下行流（页面 EventSource 订阅）
+ * 桥接
+ *  - POST /__atelier/bridge/state          页面状态推送（缓存给 state.snapshot）
+ *  - POST /__atelier/bridge/enqueue        MCP/CLI 下发命令 {op,args} → SSE 广播
+ *  - POST /__atelier/bridge/ack            页面执行结果回执
+ *  - GET  /__atelier/bridge/cmd-status     命令执行状态轮询（done/pending）
+ * 安全：/__atelier/* 一律校验 token（页面经 transformIndexHtml 注入；工具从 .atelier/dev-token 读取）。
+ * 审计：非 GET 的 /__atelier/* 与命令回执均追加 .atelier/audit.jsonl。
  */
 function atelierDevPlugin(): Plugin {
   const require = createRequire(import.meta.url);
   const fs = require("node:fs") as typeof import("node:fs");
+  const path = require("node:path") as typeof import("node:path");
+  const crypto = require("node:crypto") as typeof import("node:crypto");
   const ROOT = process.cwd();
-  let latestBridgeState: unknown; // 页面状态桥最近一次上报（决策 7 状态可检视性）
-  let screenshotInflight: Promise<string> | null = null; // ui.screenshot 并发互斥
+
+  const TOKEN = crypto.randomUUID();
+  fs.mkdirSync(path.join(ROOT, ".atelier"), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, ".atelier", "dev-token"), TOKEN, "utf8");
+  const AUDIT_FILE = path.join(ROOT, ".atelier", "audit.jsonl");
+  const audit = (kind: string, detail: unknown) => {
+    try {
+      fs.appendFileSync(AUDIT_FILE, JSON.stringify({ kind, detail, at: new Date().toISOString() }) + "\n");
+    } catch { /* audit must never break the app */ }
+  };
+
+  let latestBridgeState: unknown;
+  let screenshotInflight: Promise<string> | null = null;
+
+  /* ---- downlink (P0-1): queue → SSE broadcast → ack → status poll ---- */
+  const sseClients = new Set<any>();
+  const resolved = new Map<string, { status: "done"; ok: boolean; result?: unknown; error?: string; at: string }>();
+  let cmdSeq = 0;
+  function readBody(req: any): Promise<string> {
+    return new Promise((resolve) => {
+      let b = "";
+      req.on("data", (c: Buffer) => (b += c.toString("utf-8")));
+      req.on("end", () => resolve(b));
+    });
+  }
 
   return {
     name: "atelier-dev-plugin",
+    transformIndexHtml(html) {
+      // 页面注入一次性 dev token（EventSource 无法带自定义 header，走 query）
+      return html.replace(/<head[^>]*>/i, (m) => `${m}\n<script>window.__ATELIER_TOKEN__=${JSON.stringify(TOKEN)};</script>`);
+    },
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        const url = req.url ?? "";
+        const rawUrl = req.url ?? "";
+        if (!rawUrl.startsWith("/__atelier/")) return next();
+
+        // token gate（决策 9/12）：全部代理面路由统一校验
+        const hasToken =
+          req.headers["x-atelier-token"] === TOKEN || rawUrl.includes(`token=${TOKEN}`);
+        if (!hasToken) {
+          res.statusCode = 401;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.end(JSON.stringify({ ok: false, error: "ATR-402: invalid or missing X-Atelier-Token", fix: `read ${ROOT}\\.atelier\\dev-token and send header x-atelier-token` }));
+          return;
+        }
+
+        // 审计策略：查询（GET）不入账；一切非 GET（命令/上报回执之外的实际动作）入账
+        if (req.method !== "GET") audit("access", { method: req.method, url: rawUrl.split("?")[0] });
+
+        const url = rawUrl.split("?")[0];
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+
+        /* ---------- query face ---------- */
         if (url === "/__atelier/registry") {
           const manifest = JSON.parse(fs.readFileSync(`${ROOT}/src/manifest.json`, "utf-8"));
-          res.setHeader("Content-Type", "application/json; charset=utf-8");
-          res.end(JSON.stringify({ ok: true, meta: { atelier: "v0.1-prototype", server: "dev" }, ...manifest }));
+          res.end(JSON.stringify({ ok: true, meta: { atelier: "v0.2-prototype", server: "dev" }, ...manifest }));
           return;
         }
         if (url === "/__atelier/tokens") {
-          // semantic design tokens (atelier.config.json SSOT) — feeds the MCP tool `tokens.list`
           let groups: unknown = {};
           try {
-            const cfg = JSON.parse(fs.readFileSync(`${ROOT}/atelier.config.json`, "utf-8"));
-            groups = cfg.tokens ?? {};
-          } catch {
-            // config missing/unreadable → empty surface; guidance comes from the skills layer
-          }
-          res.setHeader("Content-Type", "application/json; charset=utf-8");
+            groups = JSON.parse(fs.readFileSync(`${ROOT}/atelier.config.json`, "utf-8")).tokens ?? {};
+          } catch { /* guidance via skills layer */ }
           res.end(JSON.stringify({ ok: true, meta: { source: "atelier.config.json" }, groups }));
           return;
         }
-        if (url === "/__atelier/bridge/state") {
-          // 页面状态桥上报入口：缓存最近快照，供 /__atelier/state-snapshot（MCP state.snapshot）读取
-          let body = "";
-          req.on("data", (c: Buffer) => (body += c.toString("utf-8")));
-          req.on("end", () => {
-            try {
-              latestBridgeState = JSON.parse(body);
-            } catch {
-              latestBridgeState = { ok: false, parseError: true };
-            }
-            res.setHeader("Content-Type", "application/json; charset=utf-8");
-            res.end(JSON.stringify({ ok: true }));
-          });
-          return;
-        }
         if (url === "/__atelier/state-snapshot") {
-          res.setHeader("Content-Type", "application/json; charset=utf-8");
-          res.end(
-            JSON.stringify(
-              latestBridgeState ?? { ok: false, note: "no browser has reported yet — open the app once in dev preview" },
-            ),
-          );
+          res.end(JSON.stringify(latestBridgeState ?? { ok: false, note: "no browser has reported yet — open the app once in dev preview" }));
           return;
         }
-        if (url === "/__atelier/screenshot") {
-          // 决策 12 视觉真相：瞬态无头实例拍当前应用页（bridge 亦随之刷新 → 检视面一致）
-          const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/`;
-          res.setHeader("Content-Type", "application/json; charset=utf-8");
+        if (url === "/__atelier/audit") {
+          const lines = Math.max(1, Math.min(500, Number(new URL(rawUrl, "http://x").searchParams.get("lines") ?? 50)));
+          let rows: unknown[] = [];
           try {
-            screenshotInflight ??= capturePage({ url: appUrl }).finally(() => { screenshotInflight = null; });
-            const imageBase64 = await screenshotInflight;
-            res.end(JSON.stringify({ ok: true, format: "png", imageBase64, capturedFrom: appUrl, at: Date.now() }));
-          } catch (e) {
-            res.statusCode = 500;
-            const msg = e instanceof Error ? e.message : String(e);
-            res.end(JSON.stringify({ ok: false, error: msg }));
-          }
+            rows = fs.readFileSync(AUDIT_FILE, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).slice(-lines);
+          } catch { /* empty */ }
+          res.end(JSON.stringify({ ok: true, rows }));
           return;
         }
         if (url === "/__atelier/docs") {
-          const docs = fs.readFileSync(`${ROOT}/src/llms.txt`, "utf-8");
           res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          res.end(docs);
+          res.end(fs.readFileSync(`${ROOT}/src/llms.txt`, "utf-8"));
           return;
         }
         if (url === "/__atelier/stream-intro") {
+          res.setHeader("Content-Type", "text/plain; charset=utf-8");
+          res.setHeader("Cache-Control", "no-store");
           const intro =
             "DeepSeek 是一家人工智能公司，专注于通用人工智能（AGI）的研究与工程实践。" +
             "其开源大语言模型 DeepSeek-V3 与 DeepSeek-R1 以极低的推理成本对标一线闭源模型，" +
             "并保持 API 与 OpenAI 格式兼容，支持 128K 上下文与原生工具调用。";
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          res.setHeader("Cache-Control", "no-store");
           const chunked = Array.from(intro);
           let i = 0;
           const timer = setInterval(() => {
@@ -106,6 +130,80 @@ function atelierDevPlugin(): Plugin {
           req.on("close", () => clearInterval(timer));
           return;
         }
+        if (url === "/__atelier/screenshot") {
+          const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/`;
+          try {
+            screenshotInflight ??= capturePage({ url: appUrl }).finally(() => { screenshotInflight = null; });
+            const imageBase64 = await screenshotInflight;
+            audit("screenshot", { bytes: imageBase64.length });
+            res.end(JSON.stringify({ ok: true, format: "png", imageBase64, capturedFrom: appUrl, at: Date.now() }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+          }
+          return;
+        }
+
+        /* ---------- bridge: up-push / downlink ---------- */
+        if (url === "/__atelier/bridge/state") {
+          const body = await readBody(req);
+          try {
+            latestBridgeState = JSON.parse(body);
+          } catch {
+            latestBridgeState = { ok: false, parseError: true };
+          }
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+        if (url === "/__atelier/bridge/commands") {
+          // SSE downlink stream
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("Connection", "keep-alive");
+          res.writeHead(200);
+          res.write("retry: 2000\n\n");
+          sseClients.add(res);
+          req.on("close", () => sseClients.delete(res));
+          return;
+        }
+        if (url === "/__atelier/bridge/enqueue") {
+          const body = await readBody(req);
+          let op = "", args: unknown;
+          try {
+            const j = JSON.parse(body);
+            op = String(j.op ?? "");
+            args = j.args ?? {};
+          } catch {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ ok: false, error: "invalid json" }));
+            return;
+          }
+          const id = `cmd-${++cmdSeq}`;
+          audit("command.enqueue", { id, op, args });
+          const payload = `data: ${JSON.stringify({ id, op, args })}\n\n`;
+          for (const c of sseClients) c.write(payload);
+          res.end(JSON.stringify({ ok: true, id, clients: sseClients.size }));
+          return;
+        }
+        if (url === "/__atelier/bridge/ack") {
+          const body = await readBody(req);
+          try {
+            const j = JSON.parse(body);
+            resolved.set(j.id, { status: "done", ok: !!j.ok, result: j.result, error: j.error, at: new Date().toISOString() });
+            audit("command.ack", { id: j.id, ok: j.ok });
+            res.end(JSON.stringify({ ok: true }));
+          } catch {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ ok: false, error: "invalid ack" }));
+          }
+          return;
+        }
+        if (url === "/__atelier/bridge/cmd-status") {
+          const id = new URL(rawUrl, "http://x").searchParams.get("id") ?? "";
+          const st = resolved.get(id);
+          res.end(JSON.stringify(st ? { ...st, status: "done" } : { status: "pending" }));
+          return;
+        }
         next();
       });
     },
@@ -118,12 +216,10 @@ export default defineConfig({
     strictPort: true,
     host: "127.0.0.1",
     watch: {
-      // 忽略工具链临时文件，避免 Windows 上 EBUSY 崩溃（write 工具的 .tmpdir 机制）
       ignored: ["**/.debug*", "**/*.tmpdir", "**/*.tmp", "**/.edge-debug"],
     },
   },
   resolve: {
-    // .atr.ts 为 Atelier 组件扩展名（决策 3：仅组件文件走编译管线）
     extensions: [".atr.ts", ".ts", ".mts", ".js", ".mjs", ".json"],
   },
   plugins: [atelierDevPlugin()],

@@ -3,8 +3,8 @@
  * 展示：流式原语（识别手写打字机模式）、三态乐观列表、事务 checkpoint/回滚、
  *       契约校验四段式、$derived、自描述注册表。
  */
-import { component, $state, $derived, html, streamValue, optimisticList, store, validateUnknown } from "../src/runtime";
-import type { AtrError } from "../src/runtime";
+import { component, $state, $derived, html, streamValue, optimisticList, store, validateUnknown } from "../runtime";
+import type { AtrError } from "../runtime";
 import { modelCardSchema } from "./ModelCard.atr.ts";
 
 const MODELS = [

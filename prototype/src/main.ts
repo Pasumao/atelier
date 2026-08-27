@@ -13,7 +13,11 @@ mountComponent(DeepSeekIntro, {}, app, registry, (schema, data) => validateFlat(
 
 // dev 状态桥（决策 7）：$state 图 → dev 面 → MCP `state.snapshot`。须在挂载后安装以捕获既有信号集。
 import { installStateBridge } from "./bridge";
+import { store } from "./runtime";
 installStateBridge();
+
+// 会话初始锚点：代理经 MCP `checkpoint.list` 即有非空时间线可依
+store.commit("session-start");
 
 // 控制台自检：注册表查询面（决策 7 雏形）
 fetch("/__atelier/registry")

@@ -50,7 +50,10 @@ function push(): void {
   pushing = true;
   fetch("/__atelier/bridge/state", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-atelier-token": (window as never as { __ATELIER_TOKEN__?: string }).__ATELIER_TOKEN__ ?? "",
+    },
     body: JSON.stringify(serialize()),
   })
     .catch(() => {}) // dev 面不可达绝不影响应用本身
@@ -63,7 +66,39 @@ function push(): void {
     });
 }
 
-/** main.ts 在挂载完成后调用一次：建立哨兵依赖并做初次上报 */
+/** 页面侧命令执行器：dev 面经 SSE 下发 {op,args}，这里调 runtime 并 ack 回执 */
+async function execCommand(c: { id: string; op: string; args?: Record<string, unknown> }): Promise<void> {
+  const payload: { id: string; ok: boolean; result?: unknown; error?: string } = { id: c.id, ok: true };
+  try {
+    switch (c.op) {
+      case "checkpoint.list":
+        payload.result = store.list();
+        break;
+      case "checkpoint.rollback":
+        payload.result = store.rollback();
+        break;
+      case "state.time_travel": {
+        const id = String((c.args as { id?: string })?.id ?? "");
+        if (!store.timeTravel(id)) throw new Error(`ATR-404-like: no such checkpoint "${id}" (see timeline)`);
+        payload.result = { traveledTo: id };
+        break;
+      }
+      default:
+        payload.ok = false;
+        payload.error = `ATR-4xx-dev: unknown downlink op "${c.op}"`;
+    }
+  } catch (e) {
+    payload.ok = false;
+    payload.error = e instanceof Error ? e.message : String(e);
+  }
+  await fetch("/__atelier/bridge/ack", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-atelier-token": (window as never as { __ATELIER_TOKEN__: string }).__ATELIER_TOKEN__ ?? "" },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+
+/** main.ts 在挂载完成后调用一次：建立哨兵依赖做初次上报，并订阅下行命令流 */
 export function installStateBridge(): void {
   if (typeof window === "undefined") return;
   // 哨兵效应：读取全部 $state 登记 deps；任一变更 → flush 重跑 → 节流跟推
@@ -71,4 +106,12 @@ export function installStateBridge(): void {
     for (const s of store._signals) void s.get();
     push();
   });
+  // 下行命令（P0-1）：EventSource 无法自定义 header，token 由 transformIndexHtml 注入走 query
+  const token = (window as never as { __ATELIER_TOKEN__?: string }).__ATELIER_TOKEN__ ?? "";
+  const es = new EventSource(`/__atelier/bridge/commands?token=${encodeURIComponent(token)}`);
+  es.onmessage = (ev) => {
+    try {
+      void execCommand(JSON.parse(ev.data));
+    } catch { /* malformed command line — ignore */ }
+  };
 }

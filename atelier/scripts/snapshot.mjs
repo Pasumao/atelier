@@ -23,8 +23,24 @@ const CURR = path.join(SNAPDIR, "current.png");
 
 const sha256 = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 
+/** dev one-time token (P1-7): the app writes .atelier/dev-token at boot; tools read and send it */
+function devToken() {
+  const candidates = [
+    path.join(process.cwd(), ".atelier", "dev-token"),
+    path.join(process.cwd(), "prototype", ".atelier", "dev-token"),
+  ];
+  for (const p of candidates) {
+    try { return fs.readFileSync(p, "utf8").trim(); } catch { /* next */ }
+  }
+  return "";
+}
+
 async function captureTo(file) {
-  const r = await fetch(`${DEV}/__atelier/screenshot`, { signal: AbortSignal.timeout(40000) });
+  const r = await fetch(`${DEV}/__atelier/screenshot`, {
+    signal: AbortSignal.timeout(40000),
+    headers: { "x-atelier-token": devToken() },
+  });
+  if (r.status === 401) throw new Error("ATR-402: dev token rejected — read .atelier/dev-token from the app root");
   if (!r.ok) throw new Error(`dev face HTTP ${r.status} (is 'atelier dev' running at ${DEV}?)`);
   const j = await r.json();
   if (!j.ok || !j.imageBase64) throw new Error(j.error ?? "screenshot payload missing");
