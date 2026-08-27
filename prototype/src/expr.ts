@@ -125,7 +125,12 @@ class Parser {
       this.next();
       const r = this.and();
       const lf = l;
-      l = (s) => booly(lf(s)) || booly(r(s));
+      // JS value semantics: return the operand itself, not a boolean (bug found by vitest —
+      // template idiom {{ a || "fallback" }} requires the value, coerced-true breaks it)
+      l = (s) => {
+        const lv = lf(s);
+        return booly(lv) ? lv : r(s);
+      };
     }
     return l;
   }
@@ -135,7 +140,10 @@ class Parser {
       this.next();
       const r = this.cmp();
       const lf = l;
-      l = (s) => booly(lf(s)) && booly(r(s));
+      l = (s) => {
+        const lv = lf(s);
+        return booly(lv) ? r(s) : lv;
+      };
     }
     return l;
   }

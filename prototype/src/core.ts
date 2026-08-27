@@ -1,21 +1,37 @@
 /**
- * Atelier prototype — 信号内核（决策 2 雏形）
- * 语义：显式信号 + 依赖追踪 + 微任务批处理调度。
- * 模板表达式读取信号时自动登记依赖（track）；信号写入后批处理通知（flush 于 microtask）。
- * 完整版差异：依赖图/派生值由编译器从调用图改写为静态图（本原型为运行时追踪）。
+ * Atelier prototype — 信号内核（决策 2，v0.2 订阅模型重构）
+ *
+ * 语义：显式信号 + 运行时依赖追踪 + 微任务批处理调度。
+ *
+ * v0.2 订阅模型（由 vitest staleness-repro 驱动的修正）：
+ *   每个 Subscription 携带 batched 标志，由统一的 deliver() 分发：
+ *     · batched=true  （$effect）→ run 入微任务队列（同 tick 多写去重、跨组件稳定次序）
+ *     · batched=false （$derived 失效）→ 同步执行
+ *   于是「上游写入后、微任务前直读 derived」必得新值（对齐 Solid/Vue computed
+ *   同步失效语义）；真正的 DOM/effect 重跑仍享受批处理。
+ *
+ * 完整版差异：依赖图由编译器静态化（本原型为运行时追踪）。
  */
+
+export type Subscription = { run: () => void; batched?: boolean };
 
 export type Signal<T = unknown> = {
   value: T;
   readonly get: () => T;
   set: (v: T) => void;
-  /** @internal 订阅者（flush 时被调用） */
-  _subs: Set<() => void>;
+  /** @internal 订阅者集合 */
+  _subs: Set<Subscription>;
 };
 
-let tracking: Set<Signal> | null = null; // 当前求值上下文（effect/表达式求值期间）
-const pending = new Set<() => void>(); // 微任务批处理队列
+let tracking: Set<Signal> | null = null;
+const pending = new Set<() => void>();
 let flushing = false;
+
+/** 统一分发：批量订阅入队延迟执行；失效类订阅立即同步执行 */
+function deliver(sub: Subscription): void {
+  if (sub.batched) pending.add(sub.run);
+  else sub.run();
+}
 
 function scheduleFlush(): void {
   if (flushing) return;
@@ -27,7 +43,7 @@ function scheduleFlush(): void {
       try {
         fn();
       } catch (e) {
-        // P2-1 调度健壮性：单个订阅失败不得中断同批其他订阅（错误同时暴露给工具面）
+        // P2-1 调度健壮性：单个订阅失败不得中断同批其他订阅
         (globalThis as { __ATELIER_LAST_ERROR__?: unknown }).__ATELIER_LAST_ERROR__ = e;
         console.error("[atelier] effect error:", e);
       }
@@ -42,7 +58,8 @@ function track(sig: Signal): void {
 }
 
 function notify(sig: Signal): void {
-  for (const fn of sig._subs) pending.add(fn);
+  const subs = [...sig._subs];
+  for (const sub of subs) deliver(sub);
   scheduleFlush();
 }
 
@@ -82,31 +99,33 @@ export function $state<T>(init: T): Signal<T> {
 export function $derived<T>(fn: () => T): Signal<T> {
   let cached!: T;
   let dirty = true;
-  const subs = new Set<() => void>();
-  const upSubs = new Map<Signal, () => void>();
+  const subs = new Set<Subscription>(); // 下游订阅者（与 sig._subs 同一引用）
 
-  const invalidate = () => {
+  /** 上游变化到来时：同步标脏一次，并把失效沿下游按各自策略继续分发 */
+  function onUpstreamChange(): void {
+    if (dirty) return;
     dirty = true;
-    for (const f of subs) pending.add(f);
+    const out = [...subs];
+    for (const sub of out) deliver(sub);
     scheduleFlush();
-  };
+  }
 
   const compute = (): T => {
     if (!dirty) return cached;
-    for (const [s, u] of upSubs) s._subs.delete(u);
+    for (const [s, e] of upSubs) s._subs.delete(e);
     upSubs.clear();
     dirty = false;
     const { result, deps } = withTrack(fn);
     cached = result;
     for (const s of deps) {
-      if (!upSubs.has(s)) {
-        const u = () => invalidate();
-        upSubs.set(s, u);
-        s._subs.add(u);
-      }
+      const entry: Subscription = { batched: false, run: onUpstreamChange };
+      upSubs.set(s, entry);
+      s._subs.add(entry);
     }
     return cached;
   };
+
+  const upSubs = new Map<Signal, Subscription>();
 
   const sig: Signal<T> = {
     _subs: subs,
@@ -114,12 +133,14 @@ export function $derived<T>(fn: () => T): Signal<T> {
       track(sig as Signal);
       return compute();
     },
+    set value(_: T) {
+      throw new Error("ATR-305: 派生信号只读（$derived 由依赖计算）");
+    },
     get: () => sig.value,
     set: () => {
       throw new Error("ATR-305: 派生信号只读（$derived 由依赖计算）");
     },
   };
-  // 派生信号不进入事务快照（其值由上游 $state 推导，恢复上游后自动重算）
   return sig;
 }
 
@@ -127,24 +148,27 @@ export function $effect(fn: () => void): () => void {
   let deps = new Set<Signal>();
   let alive = true;
 
-  const run = () => {
-    if (!alive) return;
-    for (const s of deps) s._subs.delete(run);
-    deps = new Set<Signal>();
-    const prev = tracking;
-    tracking = deps;
-    try {
-      fn();
-    } finally {
-      tracking = prev;
-    }
-    for (const s of deps) s._subs.add(run);
+  const sub: Subscription = {
+    batched: true,
+    run: () => {
+      if (!alive) return;
+      for (const d of deps) d._subs.delete(sub);
+      deps = new Set<Signal>();
+      const prev = tracking;
+      tracking = deps;
+      try {
+        fn();
+      } finally {
+        tracking = prev;
+      }
+      for (const s of deps) s._subs.add(sub);
+    },
   };
 
-  run();
+  sub.run();
   return () => {
     alive = false;
-    for (const s of deps) s._subs.delete(run);
+    for (const d of deps) d._subs.delete(sub);
   };
 }
 
@@ -164,7 +188,6 @@ export const store = {
     this._checkpoints.push({ id, name, at: Date.now(), snap });
     return id;
   },
-  /** 回退到最近一个 checkpoint 并移除它（对应"上一命名 checkpoint"语义） */
   rollback(): string | null {
     const cp = this._checkpoints.pop();
     if (!cp) return null;

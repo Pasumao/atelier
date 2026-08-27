@@ -76,7 +76,7 @@ export function validateUnknown(schema: unknown, data: unknown, component = "Con
     return {
       ok: false,
       error: {
-        code: "ATR-201",
+        code: "ATR-205",
         message: "输入必须是 JSON 对象",
         context: { component },
         fix: "粘贴一个 JSON 对象，例如 {\"name\": \"deepseek-chat\"}",
