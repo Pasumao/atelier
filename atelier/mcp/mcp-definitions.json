@@ -94,8 +94,8 @@
       "name": "checkpoint.list",
       "face": "operation",
       "priority": "P0",
-      "status": "implemented",
-      "summary": "List named checkpoints (the human-visible timeline).",
+      "status": "pending",
+      "summary": "List named checkpoints (the human-visible timeline). Runtime store exists in prototype; wiring requires the page↔dev command downlink channel.",
       "params": { "type": "object", "reqProps": {}, "optProps": {} },
       "confirmDefault": "auto",
       "errors": []
@@ -104,8 +104,8 @@
       "name": "checkpoint.rollback",
       "face": "operation",
       "priority": "P0",
-      "status": "implemented",
-      "summary": "Restore app state to previous named checkpoint (pops it). App state only — see checkpoint.source_rollback for files.",
+      "status": "pending",
+      "summary": "Restore app state to previous named checkpoint (pops it). App state only — see checkpoint.source_rollback for files. Wiring requires the page↔dev command downlink.",
       "params": { "type": "object", "reqProps": {}, "optProps": { "id": { "type": "string" } } },
       "confirmDefault": "auto",
       "errors": ["ATR-402", "ATR-305"]
@@ -114,8 +114,9 @@
       "name": "state.time_travel",
       "face": "operation",
       "priority": "P0",
-      "status": "implemented",
-      "summary": "Replay UI state to an arbitrary checkpoint id (history preserved).",
+      "status": "pending",
+      "summary": "Replay UI state to an arbitrary checkpoint id (history preserved). Wiring requires the page↔dev command downlink.",
+      "params": { "type": "object", "reqProps": { "id": { "type": "string" } }, "optProps": {} },
       "params": { "type": "object", "reqProps": { "id": { "type": "string" } }, "optProps": {} },
       "confirmDefault": "auto",
       "errors": []
