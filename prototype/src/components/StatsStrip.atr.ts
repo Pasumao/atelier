@@ -3,11 +3,11 @@
  * 数字全部来自活体框架：store._signals 计数、checkpoint 时间线、
  * 自描述注册表（/__atelier/registry）。refresh 作为手动 tick 触发重读全局 store。
  */
-import { component, $state, $derived, html, store } from "../runtime";
+import { component, $state, $derived, html, store, devFetch } from "../runtime";
 
 export const StatsStrip = component(function StatsStrip() {
   const meta = $state<{ components?: number; primitives?: number }>({});
-  fetch("/__atelier/registry")
+  devFetch("/__atelier/registry")
     .then((r) => r.json())
     .then((j) => {
       meta.value = { components: j.components.length, primitives: j.primitives.length };
@@ -15,6 +15,11 @@ export const StatsStrip = component(function StatsStrip() {
     .catch(() => {});
 
   const refresh = $state(0);
+  // _checkpoints 是普通数组（不可响应），派生只依赖 refresh tick；
+  // 挂载后补一拍，让 main.ts 的 session-start 进时间线计数。
+  setTimeout(() => {
+    refresh.value += 1;
+  }, 350);
   const signalCount = $derived(() => {
     refresh.value;
     return store._signals.size;

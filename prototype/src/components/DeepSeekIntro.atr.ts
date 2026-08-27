@@ -31,9 +31,11 @@ const TABS = [
 
 export const DeepSeekIntro = component(function DeepSeekIntro() {
   const tab = $state("stream");
-  const pickTab = (id: string) => () => (tab.value = id);
-  // 动态属性只支持整值表达式：类名在 TS 侧拼好
-  const tabCls = (id: string) => () => (tab.value === id ? "lab__tab lab__tab--on" : "lab__tab");
+  // 模板表达式不支持带参函数调用：类名用纯三元；点击经 data-tab + 事件委托读目标。
+  const pickFromEvent = (e: Event) => {
+    const id = (e.currentTarget as HTMLElement | null)?.closest("[data-tab]")?.getAttribute("data-tab") ?? "";
+    if (id) tab.value = id;
+  };
 
   return html`
     <div class="page">
@@ -60,21 +62,26 @@ export const DeepSeekIntro = component(function DeepSeekIntro() {
           <h2 class="section__title">交互实验台</h2>
           <div class="lab__tabs">
             {#each TABS as t}
-              <button class={tabCls(t.id)()} on:click={pickTab(t.id)}>{t.label}</button>
+              <button class={tab.value === t.id ? "lab__tab lab__tab--on" : "lab__tab"} data-tab={t.id} on:click={pickFromEvent}>{t.label}</button>
             {/each}
           </div>
 
           {#if tab.value === "stream"}
             <PanelStream />
-          {:else if tab.value === "optimistic"}
+          {/if}
+          {#if tab.value === "optimistic"}
             <PanelOptimistic />
-          {:else if tab.value === "timetravel"}
+          {/if}
+          {#if tab.value === "timetravel"}
             <PanelTimeTravel />
-          {:else if tab.value === "derive"}
+          {/if}
+          {#if tab.value === "derive"}
             <PanelDerive />
-          {:else if tab.value === "contract"}
+          {/if}
+          {#if tab.value === "contract"}
             <PanelContract />
-          {:else if tab.value === "tokens"}
+          {/if}
+          {#if tab.value === "tokens"}
             <PanelTokens />
           {/if}
         </section>
@@ -110,5 +117,5 @@ export const DeepSeekIntro = component(function DeepSeekIntro() {
         }
       </style>
     </div>
-  `.locals({ props: {}, tab, TABS, pickTab, tabCls });
+  `.locals({ props: {}, tab, TABS, pickFromEvent });
 }, { name: "DeepSeekIntro" });

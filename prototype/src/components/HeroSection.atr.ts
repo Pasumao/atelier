@@ -4,7 +4,7 @@
  * 注：子组件 props 在父级渲染时一次性求值，故流式播放状态由本组件内部持有，
  *     与实验台 PanelStream 是两个独立实例（各自 fetch dev 面）。
  */
-import { component, $state, $derived, html, streamValue } from "../runtime";
+import { component, $state, $derived, html, streamValue, devFetch } from "../runtime";
 import type { StreamValue } from "../runtime";
 
 const FALLBACK_INTRO = "（dev 面 stream-intro 暂不可达）这里是离线兜底文案：DeepSeek-V4 已经上线。";
@@ -15,9 +15,17 @@ export const HeroSection = component(function HeroSection() {
   const heroText = $derived(() => (player.value.sv ? player.value.sv.values.join("") : ""));
   const heroDone = $derived(() => (player.value.sv ? player.value.sv.done : false));
 
+  const SNAP = typeof location !== "undefined" && new URLSearchParams(location.search).has("snapshot");
+
   async function pump(sv: StreamValue<string>): Promise<void> {
     try {
-      const r = await fetch("/__atelier/stream-intro");
+      const r = await devFetch("/__atelier/stream-intro");
+      if (SNAP) {
+        // 快照模式：整段一次性落定，保证视觉回归逐字节稳定
+        for (const ch of await r.text()) sv.push(ch);
+        sv.finish();
+        return;
+      }
       const reader = r.body!.getReader();
       const dec = new TextDecoder();
       for (;;) {

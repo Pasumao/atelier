@@ -51,7 +51,7 @@
     { "name": "PanelTokens", "file": "components/PanelTokens.atr.ts", "schema": { "type": "object", "reqProps": {}, "optProps": {} } }
   ],
   "primitives": [
-    "$state", "$derived", "$effect", "streamValue", "optimisticList",
+    "$state", "$derived", "$effect", "streamValue", "optimisticList", "devFetch",
     "store.commit", "store.rollback", "store.timeTravel", "validateFlat"
   ]
 }

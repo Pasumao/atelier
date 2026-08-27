@@ -13,6 +13,16 @@
     </style>
   </head>
   <body>
+    <script>
+      // 快照确定性钩子：dev 截图带 ?snapshot=1 时冻结一切动画/过渡，
+      // 使逐字节视觉回归稳定（DoD 第 4 条"像素稳定"的前提）
+      if (new URLSearchParams(location.search).has("snapshot")) {
+        document.documentElement.classList.add("atr-snap");
+      }
+    </script>
+    <style>
+      .atr-snap * { animation: none !important; transition: none !important; }
+    </style>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

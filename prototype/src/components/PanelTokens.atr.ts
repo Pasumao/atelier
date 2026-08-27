@@ -11,8 +11,9 @@ export const PanelTokens = component(function PanelTokens() {
   const colors = $derived(() =>
     pick("color.").map(([k, v]) => ({ k, v, swatch: `background:${v}` }))
   );
-  const spaces = $derived(() => pick("space."));
-  const radii = $derived(() => pick("radius."));
+  // 注意：模板表达式内不做字符串拼接，样式串在 TS 侧预拼好（动态属性整值表达式约束）
+  const spaces = $derived(() => pick("space.").map(([k, v]) => ({ k, style: `height:${v};background:var(--color-primary)` })));
+  const radii = $derived(() => pick("radius.").map(([k, v]) => ({ k, style: `border-radius:${v};background:color-mix(in srgb,var(--color-primary) 30%,transparent);border:1px solid var(--color-primary)` })));
 
   return html`
     <div class="ppanel">
@@ -31,7 +32,7 @@ export const PanelTokens = component(function PanelTokens() {
       <div class="tok-row">
         {#each spaces.value as s}
           <div class="tok-cell">
-            <i class="tok-space" style={`height:${s.v};background:var(--color-primary)`}></i>
+            <i class="tok-space" style={s.style}></i>
             <code>{s.k}</code>
           </div>
         {/each}
@@ -40,7 +41,7 @@ export const PanelTokens = component(function PanelTokens() {
       <div class="tok-row">
         {#each radii.value as rr}
           <div class="tok-cell">
-            <i class="tok-radius" style={`border-radius:${rr.v};background:color-mix(in srgb,var(--color-primary) 30%,transparent);border:1px solid var(--color-primary)`}></i>
+            <i class="tok-radius" style={rr.style}></i>
             <code>{rr.k}</code>
           </div>
         {/each}

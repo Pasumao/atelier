@@ -423,7 +423,6 @@ function renderNode(
       const anchor = document.createElement("span");
       anchor.style.display = "contents";
       let currentBlock = -1;
-      let current: DocumentFragment | null = null;
       $effect(() => {
         let chosen = -1;
         for (let i = 0; i < node.blocks.length; i++) {
@@ -438,12 +437,13 @@ function renderNode(
           }
         }
         if (chosen !== currentBlock) {
-          if (current) current.remove();
+          // 注意：不能对 appendChild 之后的 DocumentFragment 调 remove()——
+          // appendChild 会把 fragment 的子节点搬进 DOM 并清空 fragment，remove 落空导致旧分支残留。
+          // 与 each 分支一致：逐个清空 anchor 子节点再挂新分支。
+          while (anchor.firstChild) anchor.removeChild(anchor.firstChild);
           if (chosen >= 0) {
-            current = renderNodes(node.blocks[chosen].children, scope, registry, validate, file, componentName);
-            anchor.appendChild(current);
-          } else {
-            current = null;
+            const frag = renderNodes(node.blocks[chosen].children, scope, registry, validate, file, componentName);
+            anchor.appendChild(frag);
           }
           currentBlock = chosen;
         }

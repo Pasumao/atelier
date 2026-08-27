@@ -29,9 +29,30 @@ src/
   main.ts                  # 入口：token 注入 → 组件注册 → 挂载
 components/
   ModelCard.atr.ts         # 示例组件（props 契约 + #if/#each + 事件）
-  DeepSeekIntro.atr.ts     # 演示页（流式/乐观列表/事务/契约/派生信号）
+  ModelCard.atr.md         # 组件级意图与验收（共置 spec：goal/constraints/acceptance）
+  ModelCard.atr.spec.ts    # 组件可执行验收（vitest 自动收集 *.spec.ts）
+  DeepSeekIntro.atr.ts     # 演示页编排层（薄壳：导航/页签/页脚）
+  HeroSection / StatsStrip / ModelsSection / BenchSection / PillarsSection .atr.ts
+  Panel*.atr.ts            # 实验台六个自持状态面板
 vite.config.ts             # dev 插件：查询面 + 流式端点（完整 MCP 协议为下一步）
 ```
+
+## 复合扩展名约定（`.atr.*` 文件族）
+
+复合扩展名 = 文件自带的机器可读类型标签。原则：**有消费者才立扩展名**（struct 门禁 /
+vitest / dev 面 / MCP 至少其一），没有消费者的类型一律不立（与 CLI 的 FULL/MINI/STUB
+诚实分级同哲学）。
+
+| 扩展名 | 层（六层模型） | 内容 | 消费者 | 状态 |
+|---|---|---|---|---|
+| `.atr.ts` | facts | 组件实现 + flat schema | registry / dev 面 | 落地 |
+| `.atr.md` | intent | 组件级意图 + 验收清单（改组件前必读） | struct 门禁（INTENT_SPECS 识别；缺失时 WARN 给出两种落点建议） | 落地 |
+| `.atr.spec.ts` | intent→机检 | 把 `.atr.md` 的机检条款写成断言，直测组件导出的真实 schema | vitest（默认 include `*.spec.ts`，零配置） | 落地 |
+| `.atr.story.ts` | knowledge | 多状态定妆（每个 prop 组合一张快照基线） | 待 review/story 面落地 | 提案（暂不立，无消费者） |
+| `.atr.schema.json` | facts | 组件契约外置（供无 TS 场景/跨语言消费） | 可聚合进 registry | 提案（schema 已单源于 `.atr.ts`，暂不重复） |
+
+刻意**不立**的：`.atr.css`（违反 H3 token 单源——样式值只能来自 atelier.config.json）、
+`.atr.route.ts`（框架尚无路由）。
 
 ## 原型局限（完整版各自出处）
 

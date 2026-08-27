@@ -151,19 +151,27 @@ function probeChecks(root) {
     add({ id: "FACT_MANIFEST", layer: 3, severity: "INFO", detail: "no component registry found yet (fine before first component)", fix: "exporting a component creates one automatically in full Atelier" });
 
   /* ---- 4 intent ---- */
+  const coSpecs = [...findSuffixDeep(root, ".atr.md", 6)];
+  const coSpecTests = [...findSuffixDeep(root, ".atr.spec.ts", 6)];
   if (has("specs")) {
     const specs = fs.readdirSync(path.join(root, "specs")).filter((x) => x.endsWith(".md"));
     const tpl = specs.some((s) => /_?template/i.test(s));
     add(tpl ? { id: "INTENT_TEMPLATE", layer: 4, severity: null, detail: `specs/ with ${specs.length} md file(s), template present` } : { id: "INTENT_TEMPLATE", layer: 4, severity: "INFO", detail: `specs/ has ${specs.length} md file(s), no _spec-template`, fix: "copy the goal/constraints/acceptance template so new features start structured" });
+    if (coSpecs.length > 0)
+      add({ id: "INTENT_COLOCATED", layer: 4, severity: null, detail: `co-located component specs (*.atr.md): ${coSpecs.map((p) => path.relative(root, p)).join(", ")}` });
+  } else if (coSpecs.length > 0) {
+    add({ id: "INTENT_SPECS", layer: 4, severity: null, detail: `intent home = co-located component specs (${coSpecs.length}): ${coSpecs.map((p) => path.relative(root, p)).join(", ")}` });
   } else {
     add({
       id: "INTENT_SPECS",
       layer: 4,
       severity: "WARN",
-      detail: "no specs/ directory — human intent has no home",
-      fix: "mkdir specs && add _spec-template.md (goal / constraints / acceptance checklist)",
+      detail: "no specs/ directory and no co-located *.atr.md — human intent has no home",
+      fix: "either mkdir specs && add _spec-template.md, or co-locate <Component>.atr.md (goal/constraints/acceptance) next to the component",
     });
   }
+  if (coSpecs.length > 0 && coSpecTests.length === 0)
+    add({ id: "INTENT_SPEC_NO_TEST", layer: 4, severity: "INFO", detail: `${coSpecs.length} *.atr.md but no co-located *.atr.spec.ts — acceptance list may be human-only`, fix: "mirror each machine-checkable acceptance item as <Component>.atr.spec.ts" });
 
   /* ---- 5 errors ---- */
   const errCatalog =
@@ -200,6 +208,19 @@ function* findFilesDeep(dir, name, maxDepth, depth = 0) {
     const st = fs.statSync(p);
     if (st.isDirectory()) yield* findFilesDeep(p, name, maxDepth, depth + 1);
     else if (e === name) yield p;
+  }
+}
+
+/** 复合扩展名扫描（如 *.atr.md / *.atr.spec.ts）：按后缀匹配，跳过 node_modules 与点目录 */
+function* findSuffixDeep(dir, suffix, maxDepth, depth = 0) {
+  if (depth > maxDepth || !fs.existsSync(dir)) return;
+  for (const e of fs.readdirSync(dir)) {
+    const p = path.join(dir, e);
+    const st = fs.statSync(p);
+    if (st.isDirectory()) {
+      if (e === "node_modules" || e.startsWith(".")) continue;
+      yield* findSuffixDeep(p, suffix, maxDepth, depth + 1);
+    } else if (e.endsWith(suffix)) yield p;
   }
 }
 

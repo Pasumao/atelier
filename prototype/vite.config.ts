@@ -132,7 +132,8 @@ function atelierDevPlugin(): Plugin {
           return;
         }
         if (url === "/__atelier/screenshot") {
-          const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/`;
+          // snapshot=1 → 页面进入确定性渲染（动画冻结、流式文本一次性落定），见 index.html
+          const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?snapshot=1`;
           try {
             screenshotInflight ??= capturePage({ url: appUrl }).finally(() => { screenshotInflight = null; });
             const imageBase64 = await screenshotInflight;

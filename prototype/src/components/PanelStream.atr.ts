@@ -3,7 +3,7 @@
  * 自持 streamValue 实例（挂载即播）；每次切回本页签会重新挂载并重播——
  * 这正是「组件即边界」的语义，而不是缺陷。
  */
-import { component, $state, $derived, html, streamValue } from "../runtime";
+import { component, $state, $derived, html, streamValue, devFetch } from "../runtime";
 import type { StreamValue } from "../runtime";
 
 const FALLBACK = "（dev 面不可达）streamValue 原语依旧工作：这段是离线兜底文本。";
@@ -13,9 +13,17 @@ export const PanelStream = component(function PanelStream() {
   const text = $derived(() => (player.value.sv ? player.value.sv.values.join("") : ""));
   const done = $derived(() => (player.value.sv ? player.value.sv.done : false));
 
+  const SNAP = typeof location !== "undefined" && new URLSearchParams(location.search).has("snapshot");
+
   async function pump(sv: StreamValue<string>): Promise<void> {
     try {
-      const r = await fetch("/__atelier/stream-intro");
+      const r = await devFetch("/__atelier/stream-intro");
+      if (SNAP) {
+        // 快照模式：整段一次性落定，保证视觉回归逐字节稳定
+        for (const ch of await r.text()) sv.push(ch);
+        sv.finish();
+        return;
+      }
       const reader = r.body!.getReader();
       const dec = new TextDecoder();
       for (;;) {
