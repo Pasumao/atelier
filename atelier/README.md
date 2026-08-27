@@ -41,6 +41,24 @@ node atelier/scripts/init-ai.mjs --target <项目目录> --name <项目名>
 
 > 未来框架自带 init 后保持与 `docs/` 规范零漂移（`docs/SPEC`/`ARCHITECTURE` 为命令与错误码唯一源）。
 
+## CLI 统一入口（`cli.mjs`）
+
+v0.1 为脚本形态：子命令命名空间与 ARCHITECTURE §8 规格对齐，各包就绪一个接管一个：
+
+```
+node atelier/cli.mjs skills install [--target <dir>] [--name <N>]     # 技能包 + MCP 配置安装（幂等）
+node atelier/cli.mjs skills check                                     # 一致性校验（CI exit code）
+node atelier/cli.mjs mcp                                              # stdio MCP Server
+node atelier/cli.mjs checkpoint save <name> | list [--json] | rollback <id>
+```
+
+### 决策 15 源码 checkpoint（git 双轨，已交付）
+
+- `save <name>`：**零变更拒绝**（一轮 = 一个 checkpoint，诚实优先）；自动 commit，id = 内容锚短 sha；`.atelier/checkpoints.jsonl` 时间线自身入库可审计
+- `rollback <id>`：**脏树拒绝**（fix 引导先 save）；`reset --hard` 回内容锚，**backup tag 保住未来**（time-travel 回去：`git checkout <tag>`）
+- **自举**：首次 save 自动 `git init`（无需预先手工建库）
+- e2e 实测：baseline → junk → save → rollback 全链通过；过程中抓出并修复 **两个真实 dirty-lock 自锁 bug**（jsonl 时间线行污染工作树 → meta-commit 折叠方案）
+
 ## MCP 接入（决策 7：内嵌代理层落地）
 
 Atelier 内置 **零依赖 stdio MCP Server**（`mcp/server.mjs`）——任何支持 MCP 的编码代理即插即用获得全部 **19 个框架工具**（工具描述由 `mcp-definitions.json` 单源自动生成）：

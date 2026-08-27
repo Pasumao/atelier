@@ -24,6 +24,19 @@ function atelierDevPlugin(): Plugin {
           res.end(JSON.stringify({ ok: true, meta: { atelier: "v0.1-prototype", server: "dev" }, ...manifest }));
           return;
         }
+        if (url === "/__atelier/tokens") {
+          // semantic design tokens (atelier.config.json SSOT) — feeds the MCP tool `tokens.list`
+          let groups: unknown = {};
+          try {
+            const cfg = JSON.parse(fs.readFileSync(`${ROOT}/atelier.config.json`, "utf-8"));
+            groups = cfg.tokens ?? {};
+          } catch {
+            // config missing/unreadable → empty surface; guidance comes from the skills layer
+          }
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.end(JSON.stringify({ ok: true, meta: { source: "atelier.config.json" }, groups }));
+          return;
+        }
         if (url === "/__atelier/docs") {
           const docs = fs.readFileSync(`${ROOT}/src/llms.txt`, "utf-8");
           res.setHeader("Content-Type", "text/plain; charset=utf-8");
