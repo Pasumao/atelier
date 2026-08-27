@@ -1,0 +1,27 @@
+{
+  "components": [
+    {
+      "name": "ModelCard",
+      "file": "components/ModelCard.atr.ts",
+      "schema": {
+        "type": "object",
+        "reqProps": {
+          "name": { "type": "string" },
+          "badge": { "type": "string" },
+          "tagline": { "type": "string" },
+          "highlights": { "type": "array", "items": { "type": "string" } }
+        },
+        "optProps": { "accent": { "type": "string" } }
+      }
+    },
+    {
+      "name": "DeepSeekIntro",
+      "file": "components/DeepSeekIntro.atr.ts",
+      "schema": { "type": "object", "reqProps": {}, "optProps": {} }
+    }
+  ],
+  "primitives": [
+    "$state", "$derived", "$effect", "streamValue", "optimisticList",
+    "store.commit", "store.rollback", "store.timeTravel", "validateFlat"
+  ]
+}

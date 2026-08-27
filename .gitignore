@@ -1,0 +1,7 @@
+# Atelier workspace — minimal ignore (decision 15: source checkpoints need a clean tree)
+node_modules/
+.dsh/
+*.tmpdir
+.edge-debug*
+*.log
+prototype/dist/

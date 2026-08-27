@@ -1,0 +1,194 @@
+{
+  "$meta": {
+    "name": "atelier-mcp-definitions",
+    "version": "0.1.0",
+    "purpose": "Single source for Atelier built-in MCP tool surface (names/faces/params). Skills and future MCP server must stay consistent with this file (enforced by scripts/check-skills.mjs).",
+    "syncWith": ["docs/ARCHITECTURE.md#6-mcp-tool-list", "docs/SPEC-Agentic-DX-v0.1.md", "design-decisions.md decision 7/12/15"],
+    "schemaRules": "Flat schema only: type / reqProps / optProps / enum / items — no $ref, no oneOf, no generics (H1/decision 6)",
+    "faces": ["query", "operation", "audit"],
+    "statusVocabulary": "implemented = prototype already exposes it (HTTP/dev surface); pending = designed, wiring planned"
+  },
+  "tools": [
+    {
+      "name": "registry.list_components",
+      "face": "query",
+      "priority": "P0",
+      "status": "implemented",
+      "summary": "List registered components with names/files/contract summaries (from app.registry.json SSOT).",
+      "params": { "type": "object", "reqProps": {}, "optProps": {} },
+      "errors": []
+    },
+    {
+      "name": "registry.get_component",
+      "face": "query",
+      "priority": "P0",
+      "status": "implemented",
+      "summary": "Get one component's full contract (flat schema + usage) by name.",
+      "params": { "type": "object", "reqProps": { "name": { "type": "string" } }, "optProps": {} },
+      "errors": ["ATR-401"]
+    },
+    {
+      "name": "tokens.list",
+      "face": "query",
+      "priority": "P0",
+      "status": "implemented",
+      "summary": "Semantic design tokens available values (from atelier.config.json single source).",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "group": { "type": "string", "enum": ["color", "space", "radius", "font"] } } },
+      "errors": []
+    },
+    {
+      "name": "state.snapshot",
+      "face": "query",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Serialize current UI signal state (signal dependency graph inspectable).",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "root": { "type": "string" } } },
+      "errors": []
+    },
+    {
+      "name": "state.get",
+      "face": "query",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Read a single state path from the live signal graph.",
+      "params": { "type": "object", "reqProps": { "path": { "type": "string" } }, "optProps": {} },
+      "errors": []
+    },
+    {
+      "name": "ui.screenshot",
+      "face": "query",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Capture current rendered UI screenshot (same source as review UI).",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "format": { "type": "string", "enum": ["png", "jpeg"] } } },
+      "errors": []
+    },
+    {
+      "name": "docs.search",
+      "face": "query",
+      "priority": "P1",
+      "status": "pending",
+      "summary": "Search framework docs / SKILL packages / llms.txt; prefer over guessing APIs.",
+      "params": { "type": "object", "reqProps": { "q": { "type": "string" } }, "optProps": {} },
+      "errors": []
+    },
+    {
+      "name": "checkpoint.list",
+      "face": "operation",
+      "priority": "P0",
+      "status": "implemented",
+      "summary": "List named checkpoints (the human-visible timeline).",
+      "params": { "type": "object", "reqProps": {}, "optProps": {} },
+      "confirmDefault": "auto",
+      "errors": []
+    },
+    {
+      "name": "checkpoint.rollback",
+      "face": "operation",
+      "priority": "P0",
+      "status": "implemented",
+      "summary": "Restore app state to previous named checkpoint (pops it). App state only — see checkpoint.source_rollback for files.",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "id": { "type": "string" } } },
+      "confirmDefault": "auto",
+      "errors": ["ATR-402", "ATR-305"]
+    },
+    {
+      "name": "state.time_travel",
+      "face": "operation",
+      "priority": "P0",
+      "status": "implemented",
+      "summary": "Replay UI state to an arbitrary checkpoint id (history preserved).",
+      "params": { "type": "object", "reqProps": { "id": { "type": "string" } }, "optProps": {} },
+      "confirmDefault": "auto",
+      "errors": []
+    },
+    {
+      "name": "checkpoint.source_list",
+      "face": "operation",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "List source checkpoints (git anchors created per signed-off AI turn; decision 15).",
+      "params": { "type": "object", "reqProps": {}, "optProps": {} },
+      "confirmDefault": "auto",
+      "errors": []
+    },
+    {
+      "name": "checkpoint.source_commit",
+      "face": "operation",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Anchor current working tree as a source checkpoint (git commit). Gated by atelier check + test pass (decision 15).",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "message": { "type": "string" } } },
+      "confirmDefault": "auto",
+      "errors": ["ATR-402"]
+    },
+    {
+      "name": "checkpoint.source_rollback",
+      "face": "operation",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Roll back filesystem to a source checkpoint (git reset --soft + working-tree restore).",
+      "params": { "type": "object", "reqProps": { "id": { "type": "string" } }, "optProps": {} },
+      "confirmDefault": "ask",
+      "errors": ["ATR-402"]
+    },
+    {
+      "name": "test.run",
+      "face": "operation",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Run unit/component tests (Vitest surface); returns structured results.",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "filter": { "type": "string" } } },
+      "confirmDefault": "auto",
+      "errors": []
+    },
+    {
+      "name": "snapshot.diff",
+      "face": "operation",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Compare rendered screenshots against .atr/snapshots baseline; never auto-accept regressions.",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "update": { "type": "boolean" } } },
+      "confirmDefault": "auto",
+      "errors": []
+    },
+    {
+      "name": "snapshot.review_diff",
+      "face": "operation",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Return diff image + baseline for mandatory human/agent review.",
+      "params": { "type": "object", "reqProps": {}, "optProps": {} },
+      "confirmDefault": "auto",
+      "errors": []
+    },
+    {
+      "name": "diff.report",
+      "face": "operation",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Generate human-readable change report (per-change semantic summary, before/after, affected files) for atelier review approval.",
+      "params": { "type": "object", "reqProps": {}, "optProps": {} },
+      "confirmDefault": "auto",
+      "errors": []
+    },
+    {
+      "name": "audit.log",
+      "face": "audit",
+      "priority": "P0",
+      "status": "pending",
+      "summary": "Side-effect log of all write operations (files/resources/network touched).",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "since": { "type": "string" } } },
+      "errors": []
+    },
+    {
+      "name": "feedback.read",
+      "face": "audit",
+      "priority": "P1",
+      "status": "pending",
+      "summary": "Read human approve/disapprove feedback recorded under specs/ (agent must read next round).",
+      "params": { "type": "object", "reqProps": {}, "optProps": {} },
+      "errors": []
+    }
+  ]
+}

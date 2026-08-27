@@ -1,0 +1,54 @@
+# Atelier — API Reference (llms.txt)
+
+> Machine-consumable index. Deep detail: `atelier` skill package; runtime queries via MCP (`registry.*`, `tokens.list`, `state.*`).
+
+## Core primitives (atelier/runtime)
+
+| API | Signature | Notes |
+|---|---|---|
+| `<?>` state | `$state<T>(init) → Signal<T>` | `signal.value` read/write; write triggers microtask-batched update |
+| derive | `$derived<T>(fn) → Signal<T>` | lazy cache; read-only (ATR-305 on write) |
+| effect | `$effect(fn) → cleanup` | subscribes to deps read inside fn |
+| component | `component(fn, { name, schema }) → ComponentDef` | fn returns `html\`...\`.locals({...})` |
+| html | `html\`...\`` (tagged template) | `.locals(obj)` injects scope (compiler captures later) |
+| stream | `streamValue<T>() → { values, value, done, push, finish }` | streaming text/values; no manual setInterval |
+| optimistic | `optimisticList<T>() → { values, optimisticAdd, commit, revert }` | pending → committed / rollback |
+| store | `store.commit/rollback/timeTravel/list` | named checkpoints; app-state only (source = git, decision 15) |
+| validate | `validateFlat(schema, data)` → `{ ok, error?: AtrError }` | flat schema (no $ref/oneOf) |
+
+## Template DSL
+
+`{expr}` · `{#if expr}{:else}{/if}` · `{#each arr as item, idx}{/each}` · `on:click={handler}` · `attr={expr}` · `<StyleBlock scoped>` — expressions are compiled in v0.1 (prototype: subset evaluator).
+
+## Contract (flat schema)
+
+```json
+{ "type": "object", "reqProps": { "name": { "type": "string" } },
+  "optProps": { "status": { "type": "string", "enum": ["running", "done"] } } }
+```
+Rules: pure data, literal discriminants, no generics, no $ref/oneOf.
+
+## CLI
+
+| Command | Flags |
+|---|---|
+| `atelier init [--ai]` | --ai generates AGENTS.md/SKILL.md/llms.txt/specs |
+| `atelier dev` | — |
+| `atelier review` | — |
+| `atelier check` / `lint` / `test` | — |
+| `atelier snapshot [--update]` | — |
+| `atelier e2e` | — |
+| `atelier build [--static]` | --static = SSG |
+| `atelier package [--electron]` | Tauri 2 default |
+
+## Errors
+
+`{ code, message, context, fix }` — domains: 1xx compile / 2xx contract / 3xx runtime / 4xx MCP. Table: `skills/errors/codes.md`.
+
+## Design tokens
+
+`atelier.config.json → tokens` is the only source; `--color-primary` etc.; missing token = ATR-204.
+
+## Packages
+
+`atelier` (runtime/cli) · `@atelier/compiler` · `@atelier/eslint` · `@atelier/config` · `@atelier/review` · `create-atelier`
