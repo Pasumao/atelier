@@ -83,12 +83,15 @@ ChatMessage.atr.ts
 | 查询 | `state.snapshot` / `state.get` | 当前 UI 状态序列化（信号依赖图可查询） | P0 |
 | 查询 | `ui.screenshot` | 当前渲染截图（与 review 同源） | P0 |
 | 查询 | `docs.search` / `llms.txt` | 框架文档、SKILL.md、AGENTS.md | P1 |
+| 查询 | `structure.map` / `structure.check` | 六层结构事实与矛盾门禁（MCP server 本地计算，无需 dev 进程；公理见 `docs/AI-OPTIMAL-STRUCTURE.md`） | P0 |
 | 操作 | `checkpoint.list` / `checkpoint.rollback` / `state.time_travel` | 事务层操作（写审计；confirm 档见 §9） | P0 |
 | 操作 | `checkpoint.source_list` / `checkpoint.source_rollback` | 源码 checkpoint（git 提交锚点/回滚文件树，决策 15；走 confirm 档） | P0 |
-| 操作 | `test.run` / `snapshot.diff` / `snapshot.review_diff` | 验收；diff 返回图片与基线，**须审阅** | P0 |
+| 操作 | `test.run` / `snapshot.diff` / `snapshot.review_diff` | 验收；diff 返回图片与基线，**须审阅**（晋升是 CLI/人的行为，不对 MCP 暴露） | P0 |
 | 操作 | `diff.report` | 生成人类可读 diff 报告 | P0 |
 | 审计 | `audit.log` | 全部写操作副作用日志 | P0 |
 | 审计 | `feedback.read` | 读取 specs/ 内人类点踩/批准反馈 | P1 |
+
+> **实现状态（v0.2 脚本态）**：live = registry×2 · tokens.list · state.snapshot · ui.screenshot · checkpoint.list/rollback · state.time_travel · structure.map/check · snapshot.diff/review_diff（**12/19**）。其余按优先级随对应包落地；工具描述由 `atelier/mcp/mcp-definitions.json` 单源生成。
 
 ## 7. atelier.config.json（单一扁平配置）
 
@@ -109,13 +112,14 @@ ChatMessage.atr.ts
 
 | 命令 | 用途 |
 |---|---|
-| `atelier init` / `atelier init --ai` | 脚手架；`--ai` 额外生成 AGENTS.md + SKILL.md + llms.txt + specs/ 模板 |
-| `atelier dev` | Bun 开发服务（亚秒 HMR，127.0.0.1 + token）+ **内嵌 MCP Server** |
+| `atelier init` / `atelier init --ai` | 脚手架（prototype starter 全拷 = 可运行示例即模板）；`--ai` 叠加 agent 层：AGENTS.md + SKILL.md + llms.txt + specs/ + `.mcp.json` 等客户端配置 + 技能包双落点安装 |
+| `atelier dev` | 开发服务（当前 Bun/Vite 脚本态：127.0.0.1）+ **内嵌 MCP Server 与 `/__atelier/*` 检视面** |
 | `atelier review` | 打开 L5 本地验收界面（dev server 的 HTTP 面） |
-| `atelier check` | 类型严格检查 + 契约提取 + token 校验（硬门槛） |
+| `atelier check` | 硬门槛聚合器：v0.2 = 六层结构矛盾检查（`structure.check` 同源）；类型严格检查 + 契约提取 + token 校验随编译器包并入 |
 | `atelier lint` | @atelier/eslint 规则集（软约束） |
 | `atelier test` | Vitest 单元/组件断言 |
-| `atelier snapshot [--update]` | Playwright 截图基准库管理（`.atr/snapshots/`） |
+| `atelier struct [map|check]` | 六层结构地图/门禁（`docs/AI-OPTIMAL-STRUCTURE.md` 公理的机检执行件；OK/WARN/INFO 分级不假红） |
+| `atelier snapshot save \| check [--update]` | 截图基准库管理（`.atr/snapshots/`）：dev-face 无头通道拍摄，sha256 对比，双图人审后 `--update` 才晋升 |
 | `atelier e2e` | 浏览器回环（结构断言 + 截图 diff） |
 | `atelier build [--static]` | 产物 `dist/`（静态、相对路径、零依赖）；`--static` 启用 SSG |
 | `atelier package [--electron]` | 默认 Tauri 2 打包 exe；`--electron` 备选模板 |

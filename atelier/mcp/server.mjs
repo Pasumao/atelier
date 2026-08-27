@@ -26,6 +26,8 @@ import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
 import readline from "node:readline";
+import crypto from "node:crypto";
+import { inspectStructure } from "../scripts/struct.mjs";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const DEFS = JSON.parse(fs.readFileSync(path.join(HERE, "mcp-definitions.json"), "utf8"));
@@ -67,6 +69,38 @@ function toolError(codeText, fixText) {
 }
 
 async function callTool(name, args) {
+  const PROJECT_ROOT = process.env.ATELIER_PROJECT_ROOT ?? process.cwd();
+
+  /* ---- locally computed tools (no dev-surface round trip) ---- */
+  if (name === "structure.map") return inspectStructure(args?.root ?? PROJECT_ROOT);
+  if (name === "structure.check") {
+    const res = inspectStructure(args?.root ?? PROJECT_ROOT);
+    return { verdict: res.summary.errors > 0 ? "FAILED" : "PASSED", ...res };
+  }
+  if (name === "snapshot.diff" || name === "snapshot.review_diff") {
+    const shot = await fetch(`${BASE}/__atelier/screenshot`, { signal: AbortSignal.timeout(40000) }).catch((e) => {
+      throw toolError(`ATR-4xx-dev: dev surface unreachable at ${BASE} (${e.cause?.code ?? e.name})`, "start the dev server ('atelier dev') first");
+    });
+    const j = await shot.json();
+    if (!j.ok) throw toolError("ATR-4xx-dev: capture failed", j.error ?? "inspect dev server logs");
+    const dir = path.join(PROJECT_ROOT, ".atr", "snapshots");
+    fs.mkdirSync(dir, { recursive: true });
+    const curPath = path.join(dir, "current.png");
+    const basePath = path.join(dir, "baseline.png");
+    fs.writeFileSync(curPath, Buffer.from(j.imageBase64, "base64"));
+    const out = { paths: { current: curPath, baseline: fs.existsSync(basePath) ? basePath : null } };
+    if (!fs.existsSync(basePath)) {
+      out.match = null;
+      out.note = "no baseline yet — review current; promote intentionally via 'atelier snapshot check --update' or save a first baseline";
+    } else {
+      const h = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+      out.match = h(curPath) === h(basePath);
+      out.note = out.match ? "pixel-stable against baseline" : "differs from baseline — review both images side by side; promotion is a CLI/human act";
+    }
+    if (name === "snapshot.review_diff") out.imageBase64 = j.imageBase64;
+    return out;
+  }
+
   const def = DEFS.tools.find((t) => t.name === name);
   if (!def) {
     throw toolError(`ATR-404: unknown tool "${name}"`, "pick a tool from tools/list output");

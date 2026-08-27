@@ -34,7 +34,7 @@ export const Greeting = component(function Greeting(props: { name: string }) {
 ## Work loop (always)
 
 1. Read `specs/` (intent + acceptance, human-owned)
-2. Query MCP: component registry → tokens → state snapshot (see `atelier-mcp-tools/SKILL.md`)
+2. Ground truth before edits: MCP `structure.map` → registry → tokens → state snapshot (see `atelier-mcp-tools/SKILL.md`)
 3. Edit `.atr.ts` — explicit `$state/$derived/$effect`, no magic
 4. `atelier dev` — watch compile errors + HMR
 5. Self-verify: `atelier check` → `atelier lint` → `atelier test` → `atelier snapshot` (diff MUST be reviewed, not auto-accepted)

@@ -9,7 +9,7 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 
 | Face | Tools | Power |
 |---|---|---|
-| **Query (read-only)** | `registry.list_components` · `registry.get_component` · `tokens.list` · `state.snapshot` · `state.get` · `ui.screenshot` · `docs.search` (llms.txt) | inspect only |
+| **Query (read-only)** | `structure.map` · `structure.check` · `registry.list_components` · `registry.get_component` · `tokens.list` · `state.snapshot` · `state.get` · `ui.screenshot` · `docs.search` | inspect only — `structure.*` computed server-locally, no dev server needed |
 | **Operation** | `checkpoint.list` · `checkpoint.rollback` · `checkpoint.source_list` · `checkpoint.source_rollback` · `state.time_travel` · `test.run` · `snapshot.diff` · `snapshot.review_diff` · `diff.report` | changes state; **audit-logged**, confirm tier applies |
 | **Audit** | `audit.log` · `feedback.read` | read side effects + human feedback |
 

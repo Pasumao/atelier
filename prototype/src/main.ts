@@ -4,7 +4,7 @@
  */
 import config from "../atelier.config.json";
 import { initTokens, mountComponent, registry, validateFlat } from "./runtime";
-import { DeepSeekIntro } from "../components/DeepSeekIntro.atr.ts";
+import { DeepSeekIntro } from "./components/DeepSeekIntro.atr.ts";
 
 initTokens(config as { tokens: Record<string, Record<string, string>> });
 

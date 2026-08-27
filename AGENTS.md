@@ -29,7 +29,10 @@ Atelier 工作区围绕"为 AI 编程代理设计的新前端框架"调研展开
 |---|---|
 | 启动原型 dev server | 在 `prototype/` 下 `pnpm dev`（http://127.0.0.1:5173，strictPort） |
 | 技能包一致性校验 | `node atelier/scripts/check-skills.mjs`（exit code 可接 CI；改动 skills/mcp-definitions 后必跑） |
-| 一键安装技能到项目 | `node atelier/scripts/init-ai.mjs --target <dir> --name <Name>`（双落点 + 模板渲染 + specs 骨架，幂等） |
+| 一键安装技能到项目 | `node atelier/cli.mjs skills install --target <dir> --name <Name>`（双落点 + 模板渲染 + specs 骨架，幂等） |
+| 脚手架新应用 | `node atelier/cli.mjs init --target <dir> --name <Name>`（prototype starter 全拷 + agent 层；cd && pnpm install && pnpm dev 即跑） |
+| 结构地图/结构检查 | `node atelier/cli.mjs struct map` / `check`（六层 OK-WARN-ERROR 分级；亦可用 MCP `structure.map` 本地计算） |
+| 视觉回归快照 | `node atelier/cli.mjs snapshot save` / `check [--update]`（经 dev 面 `/__atelier/screenshot`；绝不自动晋升） |
 | 读中文 UTF-8 文件 | PowerShell 一律 `Get-Content -Encoding UTF8`（默认 ANSI 会把 em dash 显示成乱码，文件未必真坏） |
 | 源码 checkpoint（决策 15） | `node atelier/cli.mjs checkpoint save "<名称>"` / `list` / `rollback <id>`（首次 save 自动 git init；改代码前先看时间线） |
 

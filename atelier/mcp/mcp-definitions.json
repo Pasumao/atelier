@@ -73,6 +73,24 @@
       "errors": []
     },
     {
+      "name": "structure.map",
+      "face": "query",
+      "priority": "P0",
+      "status": "implemented",
+      "summary": "Six-layer structural ground truth (entry/knowledge/facts/intent/errors/timeline). One call replaces repo exploration — layers checked with severity-tagged findings.",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "root": { "type": "string" } } },
+      "errors": []
+    },
+    {
+      "name": "structure.check",
+      "face": "query",
+      "priority": "P0",
+      "status": "implemented",
+      "summary": "Hard gate over declared-vs-real contradictions (ghost registry entries, broken configs, missing trust guards). WARN/INFO advisory by severity policy.",
+      "params": { "type": "object", "reqProps": {}, "optProps": { "root": { "type": "string" } } },
+      "errors": []
+    },
+    {
       "name": "checkpoint.list",
       "face": "operation",
       "priority": "P0",
@@ -146,9 +164,9 @@
       "name": "snapshot.diff",
       "face": "operation",
       "priority": "P0",
-      "status": "pending",
-      "summary": "Compare rendered screenshots against .atr/snapshots baseline; never auto-accept regressions.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "update": { "type": "boolean" } } },
+      "status": "implemented",
+      "summary": "Capture a fresh render and sha256-compare against .atr/snapshots/baseline.png (returns both paths). Promoting is a human-reviewed CLI act — deliberately not exposed here.",
+      "params": { "type": "object", "reqProps": {}, "optProps": {} },
       "confirmDefault": "auto",
       "errors": []
     },
@@ -156,8 +174,8 @@
       "name": "snapshot.review_diff",
       "face": "operation",
       "priority": "P0",
-      "status": "pending",
-      "summary": "Return diff image + baseline for mandatory human/agent review.",
+      "status": "implemented",
+      "summary": "Fresh capture as base64 PNG alongside the baseline path — mandatory side-by-side review before any promotion.",
       "params": { "type": "object", "reqProps": {}, "optProps": {} },
       "confirmDefault": "auto",
       "errors": []
