@@ -1,5 +1,35 @@
 # Atelier 技术缺口与改进 Backlog（2026-08-27 快照）
 
+> **进度面板（backlog-blitz 回合后）**
+> | 项 | 状态 |
+> |---|---|
+> | P0-1 命令下行通道 | ✅ SSE→页面执行→ack 全链实证（checkpoint.list/time_travel/rollback 五断言过）；live 9→12/21 |
+> | P0-2 编译器 MVP | ⏳ 分期①地基（Template 缓存已随 P1-2 落地）②AST dump ③代码生成 未动 |
+> | P0-3 M3 实验台 | ⏳ 待建 |
+> | P0-4 性能基线台 | ⏳ 待建 |
+> | P1-1 keyed each | ✅ `{#each … by keyExpr}` reconcile 落地（无 by 保持旧语义） |
+> | P1-2 Template 缓存 | ✅ strings-key AST 缓存（容量 500 兜底清空） |
+> | P1-3 expr fuzz-lite | ✅ vitest 差分对拍 200 样本 + 运算符矩阵；**抓出并修复 ‖/&& 值语义 bug** |
+> | P1-4 vitest 接入 | ✅ **26/26 绿**（core/contract/primitives/expr）；`pnpm test` |
+> | P1-5 HMR 保态实验 | ⏳ 待做 |
+> | P1-6 audit.log | ✅ JSONL 入账（写路由/命令 enqueue/ack/截图）+ MCP 尾读工具 |
+> | P1-7 requireToken | ✅ UUID 门禁 401 断言过；transformIndexHtml 注入页面；.atelier/dev-token 供工具读取 |
+> | P1-8 像素级对比 | ⏳ 待做（方案：自研 lite PNG decoder 或截图实例 canvas evaluate） |
+> | P1-9 契约 demo | ⏳ 待做 |
+> | P2-1 错误边界泛化 | ✅ bindExpr catch→错误卡文本 / mount 层兜底 / flush 循环保活 + __ATELIER_LAST_ERROR__ 暴露 |
+> | P2-2 baseline 提交守卫 | ⏳ 待做 |
+> | P2-3 skill 触发器自动化 | ⏳ 待做 |
+> | P2-4 CI 矩阵 | ⏳ workflow 文件待写 |
+> | P2-5 review UI | ⏳ 待做 |
+> | P2-6 决策14 卫生化 | ⏳ 待做 |
+>
+> **额外收获**：内核同步失效缺陷修复（derived 写后同 tick stale → 订阅模型重构为 deliver() 双策略分发）；‖/&& 从布尔改回 JS 值语义；ATR-205 与实现对齐；TRUST_GITIGNORE/幽灵注册表在实战各抓一例。
+> 诚实性修正：checkpoint 三件曾虚标 implemented，本轮真正转绿（见 P0-1）。
+
+---
+
+# 原始条目（保留作为详细规格）
+
 > 来源：v0.2 全仓盘点 + TECH-COMPARISON 借力清单 + 自查发现的诚实性问题。
 > 分级：**P0 = 不做则核心承诺落空 · P1 = 结构性提升 · P2 = 增强**。
 > 估量：S(半天) / M(1-3天) / L(一周+)。每项含「问题 → 技术 → 验收」。
