@@ -65,7 +65,7 @@ type Node =
   | { kind: "expr"; expr: string }
   | { kind: "element"; tag: string; component: boolean; attrs: Attr[]; children: Node[] }
   | { kind: "if"; blocks: { test: string | null; children: Node[] }[] }
-  | { kind: "each"; expr: string; item: string; index: string; children: Node[] };
+  | { kind: "each"; expr: string; item: string; index: string; keyExpr?: string; children: Node[] };
 
 class Parser {
   src: string;
@@ -116,12 +116,12 @@ class Parser {
           nodes.push({ kind: "if", blocks });
           continue;
         }
-        const mEach = /^\{#each\s+([^}]+?)\s+as\s+([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*))?\}/.exec(rest);
+        const mEach = /^\{#each\s+([^}]+?)\s+as\s+([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*))?(?:\s+by\s+(.+?))?\}/.exec(rest);
         if (mEach) {
           this.pos += mEach[0].length;
           const children = this.parseContent();
           if (this.src.startsWith("{/each}", this.pos)) this.pos += 7;
-          nodes.push({ kind: "each", expr: mEach[1].trim(), item: mEach[2], index: mEach[3] ?? "__i", children });
+          nodes.push({ kind: "each", expr: mEach[1].trim(), item: mEach[2], index: mEach[3] ?? "__i", keyExpr: mEach[4]?.trim(), children });
           continue;
         }
         const mExpr = /^\{([^{}]+)\}/.exec(rest);
@@ -209,8 +209,19 @@ class Parser {
   }
 }
 
+/**
+ * P1-2 解析缓存：html`` 同一处字面量的 raw 恒定 → 同组件重挂零解析成本；
+ * 动态拼接的 raw 若频繁变化由容量上限兜底清空（AST 只读共享，渲染期不改树）。
+ */
+const parseCache = new Map<string, Node[]>();
 function parseTemplate(src: string): Node[] {
-  return new Parser(src).parseContent();
+  let ast = parseCache.get(src);
+  if (!ast) {
+    ast = new Parser(src).parseContent();
+    if (parseCache.size >= 500) parseCache.clear();
+    parseCache.set(src, ast);
+  }
+  return ast;
 }
 
 function stringify(v: unknown): string {
@@ -219,11 +230,27 @@ function stringify(v: unknown): string {
   return String(v);
 }
 
-/** 表达式 effect 绑定：求值（track 依赖）→ 变化时执行 write */
+/** 表达式 effect 绑定：求值（track 依赖）→ 变化时执行 write；求值失败渲染 ATR 错误卡而非抛穿白屏 */
 function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unknown) => void): void {
   $effect(() => {
-    write(evalExpr(expr, scope));
+    let v: unknown;
+    try {
+      v = evalExpr(expr, scope);
+    } catch (e) {
+      const err = e as { code?: string; message?: string; fix?: string };
+      recordRuntimeError(err);
+      write(`⚠ ${err.code ?? "ATR"} ${err.message ?? String(e)}${err.fix ? ` — fix: ${err.fix}` : ""}`);
+      return;
+    }
+    write(v);
   });
+}
+
+/** P2-1 全局最近错误暴露（dev 面经由桥上报；工具侧可查） */
+function recordRuntimeError(e: unknown): void {
+  const w = window as never as { __ATELIER_LAST_ERROR__?: unknown };
+  w.__ATELIER_LAST_ERROR__ = e;
+  console.error("[atelier] render error:", e);
 }
 
 /** —— 渲染上下文 —— */
@@ -270,6 +297,27 @@ const scopeClasses = new Map<string, string>();
 let scopeSeq = 0;
 
 export function mountComponent(
+  def: ComponentDef,
+  props: Record<string, unknown>,
+  container: Element,
+  registry: ComponentRegistry,
+  validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError }
+): HTMLElement {
+  try {
+    return mountComponentInner(def, props, container, registry, validate);
+  } catch (e) {
+    // P2-1 组件级错误边界：契约/style/渲染抛出的 ATR 错误渲染为可行动卡片，绝不白屏
+    const err = e as { code?: string; message?: string; fix?: string };
+    recordRuntimeError(e);
+    const card = document.createElement("div");
+    card.className = "atr-error-card";
+    card.textContent = `${err.code ?? "ATR-ERR"} ${err.message ?? String(e)} — fix: ${err.fix ?? ""}`;
+    container.appendChild(card);
+    return card as unknown as HTMLElement;
+  }
+}
+
+function mountComponentInner(
   def: ComponentDef,
   props: Record<string, unknown>,
   container: Element,
@@ -402,6 +450,42 @@ function renderNode(
     case "each": {
       const host = document.createElement("span");
       host.style.display = "contents";
+      if (node.keyExpr) {
+        // P1-1 keyed reconcile：按 by-key 复用已渲染子树（移动 = appendChild 重排，活动 effect 不丢）；
+        // 语义边界：key 稳定的项其内容更新必须走 $state 信号（H1）——纯非信号数据变化不会触发该项重渲。
+        const live = new Map<string, HTMLElement>();
+        $effect(() => {
+          const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
+          const nextKeys = new Set<string>();
+          arr.forEach((item, i) => {
+            const childScope: Record<string, unknown> = { ...scope, [node.item]: item, [node.index]: i };
+            let k: string;
+            try {
+              k = stringify(evalExpr(node.keyExpr!, childScope));
+            } catch {
+              k = `${i}`; // key 求值失败退化为位置 key（诚实降级而非白屏）
+            }
+            nextKeys.add(k);
+            let el = live.get(k);
+            if (!el) {
+              const box = document.createElement("span");
+              box.style.display = "contents";
+              box.appendChild(renderNodes(node.children, { ...scope, [node.item]: item, [node.index]: i }, registry, validate, file, componentName));
+              el = box;
+              live.set(k, el);
+            }
+            host.appendChild(el); // 相同顺序时为 no-op；乱序时即完成重排
+          });
+          for (const [k, el] of [...live]) {
+            if (!nextKeys.has(k)) {
+              el.remove();
+              live.delete(k);
+            }
+          }
+        });
+        return host;
+      }
+      // 旧语义（无 by）：全清重建
       $effect(() => {
         const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
         while (host.firstChild) host.removeChild(host.firstChild);

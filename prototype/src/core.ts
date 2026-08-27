@@ -23,7 +23,15 @@ function scheduleFlush(): void {
     flushing = true;
     const fns = [...pending];
     pending.clear();
-    for (const fn of fns) fn();
+    for (const fn of fns) {
+      try {
+        fn();
+      } catch (e) {
+        // P2-1 调度健壮性：单个订阅失败不得中断同批其他订阅（错误同时暴露给工具面）
+        (globalThis as { __ATELIER_LAST_ERROR__?: unknown }).__ATELIER_LAST_ERROR__ = e;
+        console.error("[atelier] effect error:", e);
+      }
+    }
     flushing = false;
     if (pending.size > 0) scheduleFlush();
   });
