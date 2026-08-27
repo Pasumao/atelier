@@ -283,9 +283,12 @@ function injectScopedStyle(componentName: string, css: string, file: string): vo
     } as AtrError;
   }
   const scopeClass = `atr-scope-${scopeSeq++}`;
+  // 作用域前缀跳过 @规则头与 @keyframes 的内部选择器（0% / 50% / from / to），
+  // 修复：此前 keyframes 百分比帧被误加前缀导致动画静默失效
+  const kfSel = /^(?:[\d.,%\s]+|from(?:\s*,.*)?|to(?:\s*,.*)?)$/;
   const prefixed = css.replace(/([^{}]+)\{/g, (all, sel: string) => {
     const s = sel.trim();
-    if (!s || s.startsWith("@")) return all;
+    if (!s || s.startsWith("@") || kfSel.test(s)) return all;
     return `.${scopeClass} ${s} {`;
   });
   const el = document.createElement("style");

@@ -113,9 +113,10 @@ function atelierDevPlugin(): Plugin {
           res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.setHeader("Cache-Control", "no-store");
           const intro =
-            "DeepSeek 是一家人工智能公司，专注于通用人工智能（AGI）的研究与工程实践。" +
-            "其开源大语言模型 DeepSeek-V3 与 DeepSeek-R1 以极低的推理成本对标一线闭源模型，" +
-            "并保持 API 与 OpenAI 格式兼容，支持 128K 上下文与原生工具调用。";
+            "2026 年 8 月，DeepSeek-V4 正式接棒：deepseek-chat 与 deepseek-reasoner 统一升级至 V4 架构，" +
+            "1M 超长上下文与 MoE 架构带来旗舰级推理表现；7 月 31 日发布的轻量旗舰 V4-Flash 把输出价格打到每百万 token 约 $0.28。" +
+            "V3.2 开源的 DSA 稀疏注意力继续延用，权重保持开放下载，并适配华为昇腾生态。" +
+            "本页面本身，就是 Atelier —— 一个 AI 原生前端框架的现场演示。";
           const chunked = Array.from(intro);
           let i = 0;
           const timer = setInterval(() => {
