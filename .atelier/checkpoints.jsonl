@@ -14,3 +14,4 @@
 {"type":"save","id":"9806fb3","sha":"9806fb3334a6f548ed1f12d2c42ec358f94ad5bb","name":"backlog blitz checkpoint: waves A/B/C delivered (downlink channel, token gate, audit, keyed each, template cache, error boundaries, vitest 26-green, kernel sync-invalidation rebuild); remaining P0-2/3/4 P1-8/9 P2-* tracked in BACKLOG","at":"2026-08-27T13:03:33.706Z"}
 {"type":"save","id":"12010c8","sha":"12010c8f7e24b77148a1f77843e5edd64af58348","name":"DeepSeek-V4 介绍页重构：15 组件拆分 + 新版内容","at":"2026-08-27T13:25:31.965Z"}
 {"type":"save","id":"7ef9d7d","sha":"7ef9d7dd59df3f099b63e1ec4816b0be64e187a6","name":"确定性快照钩子(?snapshot=1 冻结动画+流式落定) + 复合扩展名约定(.atr.md/.atr.spec.ts)","at":"2026-08-27T22:40:27.109Z"}
+{"type":"save","id":"37ad499","sha":"37ad499b4e9b0f7ebd7a62e85fa32f172d9e12de","name":"Tailwind v4 工具类层落地（决策16 试点）：token→@theme 管线 + 纪律门禁 + PanelOptimistic 试点","at":"2026-08-27T23:06:36.218Z"}
