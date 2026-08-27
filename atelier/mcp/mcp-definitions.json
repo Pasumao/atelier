@@ -58,8 +58,8 @@
       "name": "ui.screenshot",
       "face": "query",
       "priority": "P0",
-      "status": "pending",
-      "summary": "Capture current rendered UI screenshot (same source as review UI).",
+      "status": "implemented",
+      "summary": "Capture current rendered UI as PNG via a transient headless browser (waits for framework mount). Serves as the visual truth for agents.",
       "params": { "type": "object", "reqProps": {}, "optProps": { "format": { "type": "string", "enum": ["png", "jpeg"] } } },
       "errors": []
     },

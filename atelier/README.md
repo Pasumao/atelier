@@ -75,7 +75,8 @@ Atelier 内置 **零依赖 stdio MCP Server**（`mcp/server.mjs`）——任何�
 - **运行前提**：dev surface 可达（默认 `http://127.0.0.1:5173`，env `ATELIER_DEV_URL` 覆盖；仅 localhost，符合安全基线）
 - **行为语义**：`implemented` 工具转发 dev 面；`pending` 工具不隐藏，返回 `ATR-4xx-dev` 结构化错误 + fix 引导（代理可见完整设计面）
 - **状态桥**（决策 7「状态可检视性」）：页面侧哨兵 `$effect` 读尽 `$state` 集 → flush 批次收敛后 POST `/__atelier/bridge/state` → MCP `state.snapshot` 直读缓存；`rollback()/timeTravel()` 经 notify 同通路自动跟推（回滚可观测）。v0.1 边界：仅覆盖安装时点已存在的信号集。
-- **已实证**：initialize 握手 / tools:list(19, flat schema→JSON Schema 翻译) / 真实数据调用（ModelCard · tokens · **state.snapshot** 15 信号全图）/ ATR-401 未注册组件 / pending 错误路径
+- **截图通道**（决策 12 视觉真相）：`/__atelier/screenshot` 由 dev 面自管瞬态无头浏览器拍当前应用页（CDP mini-client，等框架挂载断言 `#app > *` 通过才快门；并发互斥；用完即焚）。附带收益：新实例也走 bridge 上报 → 截图后 `state.snapshot` 同步刷新，检视面一致。
+- **已实证**：initialize 握手 / tools:list(19, flat schema→JSON Schema 翻译) / 真实数据调用（ModelCard · tokens · **state.snapshot** 15 信号全图 · **ui.screenshot** 74KB PNG）/ ATR-401 未注册组件 / pending 错误路径
 
 ## 与工具无关的约定
 

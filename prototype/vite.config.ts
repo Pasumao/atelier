@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import { createRequire } from "node:module";
+import { capturePage } from "./scripts/dev-screenshot.mjs";
 
 /**
  * Atelier prototype dev 插件（v0.1 最小版）：
@@ -13,11 +14,12 @@ function atelierDevPlugin(): Plugin {
   const fs = require("node:fs") as typeof import("node:fs");
   const ROOT = process.cwd();
   let latestBridgeState: unknown; // 页面状态桥最近一次上报（决策 7 状态可检视性）
+  let screenshotInflight: Promise<string> | null = null; // ui.screenshot 并发互斥
 
   return {
     name: "atelier-dev-plugin",
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
+      server.middlewares.use(async (req, res, next) => {
         const url = req.url ?? "";
         if (url === "/__atelier/registry") {
           const manifest = JSON.parse(fs.readFileSync(`${ROOT}/src/manifest.json`, "utf-8"));
@@ -60,6 +62,21 @@ function atelierDevPlugin(): Plugin {
               latestBridgeState ?? { ok: false, note: "no browser has reported yet — open the app once in dev preview" },
             ),
           );
+          return;
+        }
+        if (url === "/__atelier/screenshot") {
+          // 决策 12 视觉真相：瞬态无头实例拍当前应用页（bridge 亦随之刷新 → 检视面一致）
+          const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/`;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          try {
+            screenshotInflight ??= capturePage({ url: appUrl }).finally(() => { screenshotInflight = null; });
+            const imageBase64 = await screenshotInflight;
+            res.end(JSON.stringify({ ok: true, format: "png", imageBase64, capturedFrom: appUrl, at: Date.now() }));
+          } catch (e) {
+            res.statusCode = 500;
+            const msg = e instanceof Error ? e.message : String(e);
+            res.end(JSON.stringify({ ok: false, error: msg }));
+          }
           return;
         }
         if (url === "/__atelier/docs") {
