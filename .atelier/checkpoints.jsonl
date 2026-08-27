@@ -3,3 +3,4 @@
 {"type":"save","id":"8aa6de8","sha":"8aa6de8f0eca7c16f7f497db4a29a102f23ab727","name":"framework round: cli entry + decision15 source checkpoints + tokens endpoint","at":"2026-08-27T10:34:15.358Z"}
 {"type":"save","id":"a384cd5","sha":"a384cd5fcec57938307450091c6b886c58247ec7","name":"framework round: dev-browser state bridge -> MCP state.snapshot live (7/19)","at":"2026-08-27T11:45:53.101Z"}
 {"type":"save","id":"42cdcdc","sha":"42cdcdc9a8bc666f9c324c31b85a32b5a3d46cae","name":"framework round: ui.screenshot via transient headless CDP (8/19 live) + async middleware fix","at":"2026-08-27T11:53:58.952Z"}
+{"type":"save","id":"ececbc1","sha":"ececbc1919d2c088f6c46787eb0ad549b6aeeacd","name":"framework round: six-layer structure engine (struct map/check) + agent-first CLI v0.2 + scaffold starter relocation","at":"2026-08-27T12:15:59.694Z"}
