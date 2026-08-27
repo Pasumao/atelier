@@ -1,0 +1,27 @@
+/* GENERATED from atelier.config.json — token 单源派生，勿手改（决策 16）。
+ * 粒度引入：theme + utilities，不含 preflight（基线 reset 归 index.html）。
+ * @source 显式声明扫描范围：类名都在组件模板串里，自动检测在粒度引入下不可靠。
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@source "./components";
+
+@theme {
+  --color-primary: #4D6BFE;
+  --color-primary-soft: #2B3A7A;
+  --color-bg: #0E1117;
+  --color-surface: #171C28;
+  --color-surface-2: #1F2634;
+  --color-text: #E6E9F0;
+  --color-muted: #98A2B3;
+  --color-ok: #3FB968;
+  --color-warn: #F0A93B;
+  --color-danger: #E5484D;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 40px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}

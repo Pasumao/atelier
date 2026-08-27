@@ -21,6 +21,8 @@
 | 12 | 安全模型 | 源码变更模型 + MCP 权限分层（查询/操作/审计）+ dev 127.0.0.1+token + 远程数据白名单渲染 |
 | 13 | 工程配套 | Bun 官方运行时 + Vite 7（Rolldown 可选）；pnpm workspace；Tauri 2 默认壳 + Electron 备选 |
 | 14 | 框架命名 | **Atelier**（工坊）；旧前缀 fnh/Fnh 全体系映射为 atelier/ATR/atr（见决策 14 映射表） |
+| 15 | 源码回滚与版本基线 | git 为源码版本基线；状态 checkpoint（决策 5）与源码 checkpoint 双轨；无 git 时降级文件树快照 |
+| 16 | 工具类样式层 | Tailwind v4 作为 H3「生成 utility」的实现：config 单源派生 @theme；只准 token 派生类（机检护栏）；scoped 降级为动画逃生舱 |
 
 > 总原则：「框架不内嵌 LLM」（一切生成/理解由外部代理完成，框架只提供原语、协议、执行器）。
 
@@ -161,6 +163,16 @@
   - 用户禁用 git 时：源码回滚降级为 `.atr/backups/` 文件树快照（每次变更前拷贝），CLI 明示"无版本基线，回滚能力降级"。
 - 取舍弃：自研文件版本库（重造 git，且 agent 生态已理解 git diff/commit 语义）；仅状态回滚（决策 5 的 checkpoint 只覆盖应用状态——agent 每轮真正改的是文件系统，缺源码回滚则"可逆是自治前提"落空）。
 - 时间：原型验证（prototype）暴露该缺口后确立；为 v0.2 强制项，v0.1 实现 `init/checkpoint.source_rollback` 最小路径。
+
+## 决策 16：工具类样式层（Tailwind v4）
+- **定论**：引入 **Tailwind v4** 作为决策 8 中「编译期生成 utility」层的实现。`atelier.config.json` 保持唯一样式值真值：dev/build 前 `scripts/gen-tailwind-theme.mjs` 将 token 派生为 `@theme` 块（`color.*`→`--color-*`、`space.*`→`--spacing-*`、`radius.*`→`--radius-*`），生成 `src/atelier-theme.css`（产物勿手改）。
+- **粒度引入**：只取 `theme + utilities` 两层、**不含 preflight**——基线 reset 仍归应用 `index.html`，避免接入即改变全站默认渲染（保快照像素稳定）。
+- **护栏（机检）**：`tests/styling-discipline.test.ts`（`atelier test` 门禁）——R1 禁原生调色板类；R2 禁裸颜色字面量（hex/rgb/hsl）；R2b scoped CSS 取色只准 `var(--color-*/space-*/radius-*)`。ATR-204 运行时校验继续生效。
+- **混合制**：工具类管值；`<style scoped>` 降级为逃生舱（`@keyframes`、异形渐变/遮罩等），不追求 100% Tailwind 化。
+- **取舍**：+1 构建依赖（`tailwindcss`/`@tailwindcss/vite`）；接受类名即样式（无语义 class 命名）——换取 AI 首遍正确率（分布内词汇，收窄"DSL 分布外"风险敞口）、样式错误可 grep、组件内样式代码量约减半。模板表达式限制（整值属性、无带参调用）不受影响，条件类名仍在 TS 侧拼装。
+- **已知边界**：`@theme` 内联字面量值——改 `atelier.config.json` 后需重启 dev（或重跑生成脚本）同步工具类；运行时注入的 CSS 变量仍供 scoped CSS 使用，两处同源同值。
+- **状态**：试点（PanelOptimistic）已落地，机检 40/40 通过、视觉复查通过；其余组件按混合制渐进迁移。
+- 时间：2026-08-27。
 
 ## 未决项
 - 需要用户确认的可选 slogan 未定稿：「意图进，界面出」（中文） / *Intent in, interface out.*（英文），待命名正式对外时再定稿。——当前仅存档备选。

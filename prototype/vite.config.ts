@@ -1,6 +1,11 @@
 import { defineConfig, type Plugin } from "vite";
 import { createRequire } from "node:module";
+import tailwindcss from "@tailwindcss/vite";
 import { capturePage } from "./scripts/dev-screenshot.mjs";
+import { generateThemeFile } from "./scripts/gen-tailwind-theme.mjs";
+
+// 决策 16：token 单源 → @theme 派生（dev/build 前重生成，src/atelier-theme.css 为产物）
+generateThemeFile();
 
 /**
  * Atelier prototype dev 插件（v0.2）：决策 7「内建代理面」+ 决策 9/12 安全与审计基线。
@@ -224,5 +229,5 @@ export default defineConfig({
   resolve: {
     extensions: [".atr.ts", ".ts", ".mts", ".js", ".mjs", ".json"],
   },
-  plugins: [atelierDevPlugin()],
+  plugins: [atelierDevPlugin(), tailwindcss()],
 });

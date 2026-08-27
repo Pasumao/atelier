@@ -54,6 +54,18 @@ vitest / dev 面 / MCP 至少其一），没有消费者的类型一律不立（
 刻意**不立**的：`.atr.css`（违反 H3 token 单源——样式值只能来自 atelier.config.json）、
 `.atr.route.ts`（框架尚无路由）。
 
+## Tailwind 工具类层（决策 16）
+
+样式值唯一来源仍是 `atelier.config.json`：`scripts/gen-tailwind-theme.mjs` 在 dev/build 前
+把 token 派生成 `src/atelier-theme.css` 的 `@theme` 块（产物勿手改），产出**语义工具类**
+（`bg-primary` / `text-muted` / `p-md` / `rounded-lg` / `bg-ok/17`…）。
+
+- 粒度引入 `theme + utilities`，**无 preflight**——基线 reset 归 `index.html`，像素快照不受接入影响
+- 护栏机检：`tests/styling-discipline.test.ts`——禁原生调色板类、禁裸颜色字面量、scoped 取色只准 token 变量
+- 混合制：工具类管值；`<style scoped>` 留给 `@keyframes` / 异形渐变等逃生舱场景
+- 已知边界：改 `atelier.config.json` 后需重启 dev（或 `node scripts/gen-tailwind-theme.mjs`）同步工具类
+- 试点：`PanelOptimistic.atr.ts`；其余组件按混合制渐进迁移
+
 ## 原型局限（完整版各自出处）
 
 | 原型 | 完整版 |

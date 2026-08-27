@@ -1,5 +1,7 @@
 /**
  * PanelOptimistic.atr.ts — 实验台：optimisticList 三态乐观列表。
+ * 【决策 16 试点】样式改为 token 派生 Tailwind 工具类（bg-primary / gap-sm / bg-ok/17…）；
+ * 仅 @keyframes 留在 <style scoped>（混合制：工具类管值，scoped 管动画等异形效果）。
  * 挂载时播种已确认项；异步提交 900ms 落定、故障注入 700ms 自动 revert。
  */
 import { component, $state, $derived, html, optimisticList } from "../runtime";
@@ -29,44 +31,36 @@ export const PanelOptimistic = component(function PanelOptimistic() {
     setTimeout(() => feats.revert(id), 700);
   };
 
+  // 动态属性只接受整值表达式：完整类名串在 TS 侧拼好（模板内无调用/拼接）
+  const dotCls = (pending: boolean) =>
+    "inline-flex w-5 h-5 items-center justify-center rounded-full text-xs shrink-0 " +
+    (pending
+      ? "bg-warn/18 text-warn animate-[pulse-dot_1s_ease-in-out_infinite]"
+      : "bg-ok/17 text-ok");
+
   return html`
-    <div class="ppanel">
-      <h3 class="ppanel__title">🧪 optimisticList 三态</h3>
-      <p class="ppanel__hint">pending 先上屏给即时反馈，确认后 commit、失败自动 revert——历史回滚次数：{revertCount.value}</p>
-      <ul class="feature-list">
+    <div class="rounded-lg border border-surface-2 bg-surface px-lg py-md animate-[panel-in_.25s_ease]">
+      <h3 class="text-base mb-1">🧪 optimisticList 三态</h3>
+      <p class="text-sm text-muted mb-sm">pending 先上屏给即时反馈，确认后 commit、失败自动 revert——历史回滚次数：{revertCount.value}</p>
+      <ul class="list-none flex flex-col gap-sm my-sm">
         {#each feats.values as f}
-          <li class="feature">
-            <span class={f.status === "pending" ? "feature__dot feature__dot--pending" : "feature__dot feature__dot--ok"}>{f.status === "pending" ? "…" : "✓"}</span>
-            <span class="feature__label">{f.it.label}</span>
-            {#if f.status === "pending"}<em class="feature__pending">pending</em>{/if}
+          <li class="flex items-center gap-sm animate-[panel-in_.3s_ease_both]">
+            <span class={dotCls(f.status === "pending")}>{f.status === "pending" ? "…" : "✓"}</span>
+            <span class="text-sm">{f.it.label}</span>
+            {#if f.status === "pending"}<em class="text-warn not-italic text-xs">pending</em>{/if}
           </li>
         {/each}
       </ul>
-      <div class="ppanel__actions">
-        <button class="pbtn pbtn--primary" on:click={onAsyncAdd}>模拟 AI 异步提交（900ms 确定）</button>
-        <button class="pbtn pbtn--warn" on:click={onFailAdd}>模拟失败（700ms 自动回滚）</button>
+      <div class="flex flex-wrap gap-sm mt-sm">
+        <button class="inline-block rounded-sm px-4 py-2 text-sm font-semibold transition-all duration-150 bg-primary text-bg hover:-translate-y-px hover:shadow-[0_10px_22px_-12px_color-mix(in_srgb,var(--color-primary)_80%,transparent)]" on:click={onAsyncAdd}>模拟 AI 异步提交（900ms 确定）</button>
+        <button class="inline-block rounded-sm px-4 py-2 text-sm font-semibold transition-all duration-150 bg-warn text-bg hover:-translate-y-px hover:shadow-[0_10px_22px_-12px_color-mix(in_srgb,var(--color-warn)_80%,transparent)]" on:click={onFailAdd}>模拟失败（700ms 自动回滚）</button>
       </div>
 
       <style scoped>
-        .ppanel { background: var(--color-surface); border: 1px solid var(--color-surface-2); border-radius: var(--radius-lg); padding: var(--space-md) var(--space-lg); animation: panel-in .25s ease; }
+        /* 混合制逃生舱：keyframes 定义留在此处（动画名文档全局，选择器不涉及值） */
         @keyframes panel-in { from { opacity: 0; transform: translateY(8px); } }
-        .ppanel__title { font-size: 1rem; margin-bottom: .35rem; }
-        .ppanel__hint { color: var(--color-muted); font-size: .82rem; margin-bottom: var(--space-sm); }
-        .ppanel__actions { display: flex; gap: var(--space-sm); flex-wrap: wrap; margin-top: var(--space-sm); }
-        .pbtn { display: inline-block; border: 0; border-radius: var(--radius-sm); padding: .52rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 600; transition: transform .15s, box-shadow .15s; }
-        .pbtn--primary { background: var(--color-primary); color: var(--color-bg); }
-        .pbtn--primary:hover { transform: translateY(-1px); box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--color-primary) 80%, transparent); }
-        .pbtn--warn { background: var(--color-warn); color: var(--color-bg); }
-        .pbtn--warn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--color-warn) 80%, transparent); }
-        .feature-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-sm); margin: var(--space-sm) 0; }
-        .feature { display: flex; align-items: center; gap: var(--space-sm); animation: panel-in .3s ease both; }
-        .feature__dot { width: 21px; height: 21px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: .72rem; flex-shrink: 0; }
-        .feature__dot--ok { background: color-mix(in srgb, var(--color-ok) 17%, transparent); color: var(--color-ok); }
-        .feature__dot--pending { background: color-mix(in srgb, var(--color-warn) 18%, transparent); color: var(--color-warn); animation: pulse-dot 1s ease-in-out infinite; }
         @keyframes pulse-dot { 50% { opacity: .45; } }
-        .feature__pending { color: var(--color-warn); font-style: normal; font-size: .72rem; }
-        .feature__label { font-size: .88rem; }
       </style>
     </div>
-  `.locals({ props: {}, feats, revertCount, onAsyncAdd, onFailAdd });
+  `.locals({ props: {}, feats, revertCount, onAsyncAdd, onFailAdd, dotCls });
 }, { name: "PanelOptimistic" });

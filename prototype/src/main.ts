@@ -3,6 +3,7 @@
  * 流程：加载 atelier.config.json（token 单源）→ 导入组件（注册）→ 挂载根组件。
  */
 import config from "../atelier.config.json";
+import "./atelier-theme.css"; // 决策 16：token 派生的 Tailwind 主题（生成产物）
 import { initTokens, mountComponent, registry, validateFlat } from "./runtime";
 import { DeepSeekIntro } from "./components/DeepSeekIntro.atr.ts";
 
