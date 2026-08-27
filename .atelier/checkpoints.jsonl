@@ -9,3 +9,4 @@
 {"type":"save","id":"8831edf","sha":"8831edfd2a666b4a748e3eb055ab763b3d4fadd1","name":"backlog: P0 downlink-channel/compiler-mvp/M3-experiment/bench + honesty fix (checkpoint.* reverted to pending, live 8->5)","at":"2026-08-27T12:30:31.678Z"}
 {"type":"save","id":"d6a752b","sha":"d6a752b6a4e77032411629d2b41226c64e4d0e34","name":"docs: calibration pass - wire-live corrected to 9/21 across assessment/comparison/backlog/architecture","at":"2026-08-27T12:31:36.307Z"}
 {"type":"save","id":"d1a7ab0","sha":"d1a7ab08bae1392c752063825b9ea42cc4a591d6","name":"backlog wave-A: SSE downlink channel + one-time token gate (ATR-402 on missing) + audit.jsonl — checkpoint trio & audit.log now truly live","at":"2026-08-27T12:49:28.673Z"}
+{"type":"save","id":"dc36fa2","sha":"dc36fa2413a59f267508f019e888cec84014e060","name":"backlog wave-B: template parse cache + keyed each {#each ... by keyExpr} + error-boundary layers (bindExpr/mount/flush)","at":"2026-08-27T12:52:21.870Z"}
