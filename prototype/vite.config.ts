@@ -12,6 +12,7 @@ function atelierDevPlugin(): Plugin {
   const require = createRequire(import.meta.url);
   const fs = require("node:fs") as typeof import("node:fs");
   const ROOT = process.cwd();
+  let latestBridgeState: unknown; // 页面状态桥最近一次上报（决策 7 状态可检视性）
 
   return {
     name: "atelier-dev-plugin",
@@ -35,6 +36,30 @@ function atelierDevPlugin(): Plugin {
           }
           res.setHeader("Content-Type", "application/json; charset=utf-8");
           res.end(JSON.stringify({ ok: true, meta: { source: "atelier.config.json" }, groups }));
+          return;
+        }
+        if (url === "/__atelier/bridge/state") {
+          // 页面状态桥上报入口：缓存最近快照，供 /__atelier/state-snapshot（MCP state.snapshot）读取
+          let body = "";
+          req.on("data", (c: Buffer) => (body += c.toString("utf-8")));
+          req.on("end", () => {
+            try {
+              latestBridgeState = JSON.parse(body);
+            } catch {
+              latestBridgeState = { ok: false, parseError: true };
+            }
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.end(JSON.stringify({ ok: true }));
+          });
+          return;
+        }
+        if (url === "/__atelier/state-snapshot") {
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.end(
+            JSON.stringify(
+              latestBridgeState ?? { ok: false, note: "no browser has reported yet — open the app once in dev preview" },
+            ),
+          );
           return;
         }
         if (url === "/__atelier/docs") {

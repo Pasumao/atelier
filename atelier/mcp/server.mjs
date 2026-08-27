@@ -38,6 +38,7 @@ const ENDPOINT_MAP = {
   "registry.list_components": "/__atelier/registry",
   "registry.get_component": "/__atelier/registry", // list; filtered by args.name below
   "tokens.list": "/__atelier/tokens",
+  "state.snapshot": "/__atelier/state-snapshot",
 };
 
 /* ---------- schema translation: flat (decision 6) → standard JSON Schema ---------- */

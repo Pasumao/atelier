@@ -11,6 +11,10 @@ initTokens(config as { tokens: Record<string, Record<string, string>> });
 const app = document.getElementById("app")!;
 mountComponent(DeepSeekIntro, {}, app, registry, (schema, data) => validateFlat(schema as never, data));
 
+// dev 状态桥（决策 7）：$state 图 → dev 面 → MCP `state.snapshot`。须在挂载后安装以捕获既有信号集。
+import { installStateBridge } from "./bridge";
+installStateBridge();
+
 // 控制台自检：注册表查询面（决策 7 雏形）
 fetch("/__atelier/registry")
   .then((r) => r.json())

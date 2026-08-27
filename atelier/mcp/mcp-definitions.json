@@ -40,8 +40,8 @@
       "name": "state.snapshot",
       "face": "query",
       "priority": "P0",
-      "status": "pending",
-      "summary": "Serialize current UI signal state (signal dependency graph inspectable).",
+      "status": "implemented",
+      "summary": "Serialize current UI signal state. Served from the in-page dev bridge (pushed after each settled microtask batch); requires the app to be open in dev preview.",
       "params": { "type": "object", "reqProps": {}, "optProps": { "root": { "type": "string" } } },
       "errors": []
     },

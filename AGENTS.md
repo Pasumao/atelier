@@ -18,7 +18,7 @@ Atelier 工作区围绕"为 AI 编程代理设计的新前端框架"调研展开
 | `docs/SKILL_DRAFT.md` | SKILL.md 根草案：组件速查/原语/错误读法/DoD/禁用清单/分包规划（渐进披露）。 |
 | `docs/SKILLS-PLAN.md` | Agent Skills 包计划书：范围/设计原则（8 条带依据）/内容规格/验收口径/里程碑；拍板结果已标记。 |
 | `atelier/` | Atelier 工具链作者副本：`skills/` 多工具兼容技能包（8 个 kebab-case 目录包）、`mcp/server.mjs` 零依赖 stdio MCP Server（19 工具单源生成）、`scripts/checkpoint.mjs` 决策 15 源码双轨、`cli.mjs` 统一入口（skills/mcp/checkpoint 子命令）；README.md 有兼容矩阵/MCP 接入/checkpoint 说明。M1+M2+M2.5 已交付。 |
-| `prototype/` | Phase 0 最小可运行原型（Vite dev）：信号内核/模板解释器/事务层/契约校验/注册表查询面；`prototype/components/` 为演示组件（DeepSeek 介绍页）。 |
+| `prototype/` | Phase 0 最小可运行原型（Vite dev）：信号内核/模板解释器/事务层/契约校验/注册表查询面/dev 状态桥（`src/bridge.ts` → MCP `state.snapshot`）；`prototype/components/` 为演示组件（DeepSeek 介绍页）。 |
 | `research/` | 单路调研原始素材（含全部来源 URL 与未确认项标注）：`01`~`04` 为第一轮四路，`05`~`08` 为第二轮四路。 |
 
 ## 常用命令
