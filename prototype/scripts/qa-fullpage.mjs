@@ -43,7 +43,7 @@ class MiniCdp {
 
 const exe = findBrowser();
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-qa-"));
-const child = spawn(exe, ["--headless=new", "--remote-debugging-port=9366", `--user-data-dir=${userData}`, "--no-first-run", "--disable-gpu", `--window-size=${WIDTH},${HEIGHT}`, "about:blank"], { stdio: "ignore" });
+const child = spawn(exe, ["--headless=new", "--remote-debugging-port=9366", `--user-data-dir=${userData}`, "--no-first-run", "--disable-gpu", "--in-process-gpu", `--window-size=${WIDTH},${HEIGHT}`, "about:blank"], { stdio: "ignore" });
 let ws;
 try {
   await waitEndpoint("http://127.0.0.1:9366/json/version", 10000);

@@ -140,8 +140,21 @@ function atelierDevPlugin(): Plugin {
           // snapshot=1 → 页面进入确定性渲染（动画冻结、流式文本一次性落定），见 index.html
           const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?snapshot=1`;
           try {
-            screenshotInflight ??= capturePage({ url: appUrl }).finally(() => { screenshotInflight = null; });
-            const imageBase64 = await screenshotInflight;
+            // 有界重试 ×2：无头捕获偶发瞬态失败（GPU 进程/冷启动），快速失败后重试即可吸收
+            let imageBase64 = "";
+            let lastErr: unknown = null;
+            for (let attempt = 1; attempt <= 2; attempt++) {
+              try {
+                screenshotInflight ??= capturePage({ url: appUrl }).finally(() => { screenshotInflight = null; });
+                imageBase64 = await screenshotInflight;
+                lastErr = null;
+                break;
+              } catch (e) {
+                lastErr = e;
+                await new Promise((r) => setTimeout(r, 800));
+              }
+            }
+            if (lastErr) throw lastErr;
             audit("screenshot", { bytes: imageBase64.length });
             res.end(JSON.stringify({ ok: true, format: "png", imageBase64, capturedFrom: appUrl, at: Date.now() }));
           } catch (e) {

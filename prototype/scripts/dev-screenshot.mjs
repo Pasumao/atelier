@@ -49,7 +49,8 @@ class MiniCdp {
     ws.addEventListener("message", (ev) => {
       const msg = JSON.parse(typeof ev.data === "string" ? ev.data : String(ev.data));
       if (msg.id !== undefined && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id);
+        const { resolve, reject, timer } = this.pending.get(msg.id);
+        clearTimeout(timer);
         this.pending.delete(msg.id);
         msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
       } else if (msg.method) {
@@ -57,10 +58,16 @@ class MiniCdp {
       }
     });
   }
-  send(method, params = {}) {
+  send(method, params = {}, timeoutMs = 15000) {
     return new Promise((resolve, reject) => {
       const id = ++this.nextId;
       this.pending.set(id, { resolve, reject });
+      // 每条 CDP 命令都有时限：任何一步挂起都应变成可诊断错误而非黑挂
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`cdp send timeout (${timeoutMs}ms): ${method}`));
+      }, timeoutMs);
+      this.pending.get(id).timer = timer;
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -87,6 +94,10 @@ export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
       `--user-data-dir=${userData}`,
       "--no-first-run",
       "--disable-gpu",
+      // 决策 7/12 加固：独立 GPU 进程在频繁起杀无头实例后可能卡死合成器，
+      // 导致 Page.captureScreenshot 永久挂起（2026-08-27 实测事故）。
+      // 一次性截图实例用进程内 GPU，规避该故障域。
+      "--in-process-gpu",
       "--window-size=1280,860",
       "about:blank",
     ],
@@ -97,16 +108,24 @@ export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
     await waitEndpoint(`http://127.0.0.1:${debugPort}/json/version`, 10000);
 
     // attach BEFORE navigating so no lifecycle event is missed
-    const tabRes = await fetch(`http://127.0.0.1:${debugPort}/json/new?url=about:blank`, { method: "PUT" });
+    const tabRes = await fetch(`http://127.0.0.1:${debugPort}/json/new?url=about:blank`, {
+      method: "PUT",
+      signal: AbortSignal.timeout(5000),
+    });
     if (!tabRes.ok) throw new Error(`/json/new returned HTTP ${tabRes.status}`);
     const tab = await tabRes.json();
     if (!tab.webSocketDebuggerUrl) throw new Error("target has no webSocketDebuggerUrl");
 
     ws = new WebSocket(tab.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => {
-      ws.onopen = resolve;
-      ws.onerror = () => reject(new Error("cdp websocket failed"));
-    });
+    // 看门狗：ws 握手必须有时限——无界 onopen 等待曾让 screenshotInflight 永久挂起，
+    // 级联卡死后续所有截图请求（dev 面级联超时）
+    await Promise.race([
+      new Promise((resolve, reject) => {
+        ws.onopen = resolve;
+        ws.onerror = () => reject(new Error("cdp websocket failed"));
+      }),
+      sleep(5000).then(() => { throw new Error("cdp websocket open timeout (5s)"); }),
+    ]);
     const cdp = new MiniCdp(ws);
 
     await cdp.send("Page.enable");
@@ -114,16 +133,35 @@ export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
     await cdp.waitEvent("Page.loadEventFired", 15000);
 
     // framework-level readiness: #app actually has children (signals mounted & rendered)
-    const t0 = Date.now();
-    while (Date.now() - t0 < 10000) {
-      const r = await cdp.send("Runtime.evaluate", {
-        expression: "!!document.querySelector('#app > *')",
-        returnByValue: true,
-      });
-      if (r.result?.value === true) break;
-      await sleep(250);
+    // 冷服务器首载会触发依赖优化 → vite 自动整页 reload，首轮轮询可能全空；
+    // 未就绪则 Page.reload 一次再轮询（仍 15s 上限），绝不拍白屏当基线
+    const ready = async (ms) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < ms) {
+        const r = await cdp.send("Runtime.evaluate", {
+          expression: "!!document.querySelector('#app > *')",
+          returnByValue: true,
+        });
+        if (r.result?.value === true) return true;
+        await sleep(250);
+      }
+      return false;
+    };
+    if (!(await ready(10000))) {
+      await cdp.send("Page.reload", {}, 10000);
+      await cdp.waitEvent("Page.loadEventFired", 15000);
+      if (!(await ready(15000))) {
+        throw new Error("app did not mount before capture (#app stayed empty)");
+      }
     }
     await sleep(settleMs); // let microtask renders / fonts settle
+
+    // 诊断埋点：readiness 通过时页面到底长什么样（一次事故排查用，保留为捕获自检）
+    const diag = await cdp.send("Runtime.evaluate", {
+      expression: "JSON.stringify({href:location.href, appLen:(document.getElementById('app')?.innerHTML ?? '').length, sheets:document.querySelectorAll('style,link[rel=stylesheet]').length})",
+      returnByValue: true,
+    });
+    console.log(`[dev-screenshot] ${diag.result?.value}`);
 
     const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
     return shot.data; // base64 PNG
