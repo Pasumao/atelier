@@ -18,3 +18,4 @@
 {"type":"save","id":"11ffa50","sha":"11ffa50d28a642e757d7e9bc166966bc8de5052d","name":"capture 工具加固：CDP 全限时 + reload 兜底 + in-process-gpu + 有界重试","at":"2026-08-27T23:36:35.959Z"}
 {"type":"save","id":"95c2c62","sha":"95c2c62f434f15c7c3361021ff862dadf2725461","name":"Tailwind 决策16 全量面板/区块/壳层迁移 + atelier-ui recipe 层种子 + R3 scoped 白名单门禁","at":"2026-08-27T23:50:23.360Z"}
 {"type":"save","id":"464c700","sha":"464c7004b98375d4d32b11f71d8caa958a00965c","name":"Tailwind 决策16 完成：CLI AOT 化解 full-reload 死循环 + R3 scoped 白名单 + 全量面板/区块迁移","at":"2026-08-28T00:06:16.939Z"}
+{"type":"save","id":"4c1d450","sha":"4c1d45066887f9ec52943b6c5fbd09bbe9cc4fc6","name":"重构前锚点：workspace 原始布局（research/docs 在根目录）","at":"2026-08-28T03:57:38.772Z"}
