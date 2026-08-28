@@ -165,13 +165,13 @@
 - 时间：原型验证（prototype）暴露该缺口后确立；为 v0.2 强制项，v0.1 实现 `init/checkpoint.source_rollback` 最小路径。
 
 ## 决策 16：工具类样式层（Tailwind v4）
-- **定论**：引入 **Tailwind v4** 作为决策 8 中「编译期生成 utility」层的实现。`atelier.config.json` 保持唯一样式值真值：dev/build 前 `scripts/gen-tailwind-theme.mjs` 将 token 派生为 `@theme` 块（`color.*`→`--color-*`、`space.*`→`--spacing-*`、`radius.*`→`--radius-*`），生成 `src/atelier-theme.css`（产物勿手改）。
+- **定论**：引入 **Tailwind v4（CLI AOT 模式）** 作为决策 8 中「编译期生成 utility」层的实现。`atelier.config.json` 保持唯一样式值真值：dev/build 前 `scripts/gen-tailwind-theme.mjs` 将 token 派生为 `@theme` 指令文件 `src/tailwind.input.css`（`color.*`→`--color-*`、`space.*`→`--spacing-*`、`radius.*`→`--radius-*`），经 `@tailwindcss/cli` 一次性 AOT 编译出 `src/atelier-tailwind.css`（应用唯一引入，产物勿手改）。
+- **实现选型修正（事故记录）**：最初用 `@tailwindcss/vite` 插件 dev 模式，实测触发 **full-reload 死循环**（候选重扫 × HMR 竞态，页面每 1-4s 整页刷新）——遂改 CLI AOT：vite 管线零介入，dev 稳定优先。代价：新增类后需重跑生成脚本（或重启 dev）同步工具类。
 - **粒度引入**：只取 `theme + utilities` 两层、**不含 preflight**——基线 reset 仍归应用 `index.html`，避免接入即改变全站默认渲染（保快照像素稳定）。
-- **护栏（机检）**：`tests/styling-discipline.test.ts`（`atelier test` 门禁）——R1 禁原生调色板类；R2 禁裸颜色字面量（hex/rgb/hsl）；R2b scoped CSS 取色只准 `var(--color-*/space-*/radius-*)`。ATR-204 运行时校验继续生效。
-- **混合制**：工具类管值；`<style scoped>` 降级为逃生舱（`@keyframes`、异形渐变/遮罩等），不追求 100% Tailwind 化。
-- **取舍**：+1 构建依赖（`tailwindcss`/`@tailwindcss/vite`）；接受类名即样式（无语义 class 命名）——换取 AI 首遍正确率（分布内词汇，收窄"DSL 分布外"风险敞口）、样式错误可 grep、组件内样式代码量约减半。模板表达式限制（整值属性、无带参调用）不受影响，条件类名仍在 TS 侧拼装。
-- **已知边界**：`@theme` 内联字面量值——改 `atelier.config.json` 后需重启 dev（或重跑生成脚本）同步工具类；运行时注入的 CSS 变量仍供 scoped CSS 使用，两处同源同值。
-- **状态**：试点（PanelOptimistic）已落地，机检 40/40 通过、视觉复查通过；其余组件按混合制渐进迁移。
+- **护栏（机检）**：`tests/styling-discipline.test.ts`（`atelier test` 门禁）——R1 禁原生调色板类；R2 禁裸颜色字面量（hex/rgb/hsl）；R2b scoped CSS 取色只准 `var(--color-*/space-*/radius-*)`；**R3 scoped 仅白名单组件可用**（HeroSection/ModelCard/BenchBar/PillarCard 逃生舱层）。ATR-204 运行时校验继续生效。
+- **混合制**：工具类管值；`atelier-ui.css` recipe 层（`.btn/.ppanel/.tab` + 全局 keyframes）为基线组件库前身；`<style scoped>` 降级为白名单逃生舱，不追求 100% Tailwind 化。
+- **取舍**：+2 构建依赖（`tailwindcss`/`@tailwindcss/cli`）；接受类名即样式——换取 AI 首遍正确率（分布内词汇，收窄"DSL 分布外"风险敞口）、样式错误可 grep、组件内样式代码量约减半。模板表达式限制（整值属性、无带参调用）不受影响，条件类名仍在 TS 侧拼装。
+- **状态**：11 组件全量迁移（五面板/三区块/StatsStrip/壳层）+ 4 组件白名单保留；机检 41/41、快照 MATCH、视觉复查通过。
 - 时间：2026-08-27。
 
 ## 未决项

@@ -242,5 +242,5 @@ export default defineConfig({
   resolve: {
     extensions: [".atr.ts", ".ts", ".mts", ".js", ".mjs", ".json"],
   },
-  plugins: [atelierDevPlugin(), tailwindcss()],
+  plugins: [atelierDevPlugin()],
 });

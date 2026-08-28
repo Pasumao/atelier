@@ -57,14 +57,18 @@ vitest / dev 面 / MCP 至少其一），没有消费者的类型一律不立（
 ## Tailwind 工具类层（决策 16）
 
 样式值唯一来源仍是 `atelier.config.json`：`scripts/gen-tailwind-theme.mjs` 在 dev/build 前
-把 token 派生成 `src/atelier-theme.css` 的 `@theme` 块（产物勿手改），产出**语义工具类**
+生成 `src/tailwind.input.css`（@theme 指令）并经 **@tailwindcss/cli AOT 编译**出
+`src/atelier-tailwind.css`（应用唯一引入；两份均为生成产物，勿手改），产出**语义工具类**
 （`bg-primary` / `text-muted` / `p-md` / `rounded-lg` / `bg-ok/17`…）。
 
+- **CLI AOT 而非 vite 插件**：插件 dev 模式实测触发 full-reload 死循环；AOT 零 HMR 介入。
+  已知边界：改 `atelier.config.json` 或新增类后需重跑生成脚本（或重启 dev）
 - 粒度引入 `theme + utilities`，**无 preflight**——基线 reset 归 `index.html`，像素快照不受接入影响
-- 护栏机检：`tests/styling-discipline.test.ts`——禁原生调色板类、禁裸颜色字面量、scoped 取色只准 token 变量
-- 混合制：工具类管值；`<style scoped>` 留给 `@keyframes` / 异形渐变等逃生舱场景
-- 已知边界：改 `atelier.config.json` 后需重启 dev（或 `node scripts/gen-tailwind-theme.mjs`）同步工具类
-- 试点：`PanelOptimistic.atr.ts`；其余组件按混合制渐进迁移
+- 护栏机检：`tests/styling-discipline.test.ts`——R1 禁原生调色板类、R2 禁裸颜色字面量、
+  R2b scoped 取色只准 token 变量、R3 scoped 仅白名单组件可用
+- 混合制：工具类管值；`atelier-ui.css` recipe 层（`.btn/.ppanel/.tab` + 全局 keyframes）管组件语义；
+  `<style scoped>` 逃生舱仅 HeroSection/ModelCard/BenchBar/PillarCard 四个白名单组件
+- 已迁移：全部面板/区块/StatsStrip/壳层；白名单保留：四个视觉富组件
 
 ## 原型局限（完整版各自出处）
 
