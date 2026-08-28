@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { $state, $derived, $effect, store } from "../src/core";
+import { $state, $derived, $effect, store } from "../src/runtime/core";
 
 const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 

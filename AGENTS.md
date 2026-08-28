@@ -4,34 +4,25 @@
 
 ## 项目概述
 
-Atelier 工作区围绕"为 AI 编程代理设计的新前端框架"调研展开。规划分多轮深入，主报告位于工作区根目录，单路调研原始素材集中存放于 `research/`（编号 `01`~`08`）。
+本工作区即 **Atelier 框架仓库**：为 AI 编程代理设计的前端框架。2026-08 整理后，仓库只保留框架本体与 AI 工具链（MCP / Skills / CLI 全部集成在 `atelier/` 框架目录内部，与前端运行时零代码耦合）；历史调研素材（`research/`、两份调研报告、根目录杂图）已删除，可在 git 锚点 `4c1d450`（重构前 checkpoint）恢复。
 
 ## 目录结构
 
 | 目录 / 文件 | 说明 |
 |---|---|
-| `AI前端框架调研报告.md` | 第一轮主报告：宏观定位、生态扫描、技术选型矩阵、七支柱、路线图。 |
-| `AI前端框架调研报告02-AI友好特性结构与工具生态.md` | 第二轮主报告：对 AI 最友好的特性结构、MCP/Skills 工具生态、实证与失败模式、人在环外的验收回路、融合架构。 |
-| `design-decisions.md` | 框架设计决策记录：0-15 号决策逐条留档（含取舍与理由），顶部有已决全景速查表。当前框架规格以此为准。 |
-| `docs/SPEC-Agentic-DX-v0.1.md` | Agentic DX 规范 v0.1：框架与 AI 代理的行为契约（硬约定 H1-H6/软约束 lint 集/AtrError 规范/DoD 六条/代理工作循环）。 |
-| `docs/ARCHITECTURE.md` | 架构文档 v0.1：五层架构、monorepo 包结构、编译流水线、MCP 工具清单（三面+优先级）、atelier.config.json、CLI 命令表、安全基线、打包链路。 |
-| `docs/SKILL_DRAFT.md` | SKILL.md 根草案：组件速查/原语/错误读法/DoD/禁用清单/分包规划（渐进披露）。 |
-| `docs/SKILLS-PLAN.md` | Agent Skills 包计划书：范围/设计原则（8 条带依据）/内容规格/验收口径/里程碑；拍板结果已标记。 |
-| `docs/AI-OPTIMAL-STRUCTURE.md` | 设计公理：六层 AI 友好结构模型 × Atelier 机制映射 + STRUCTURE-RULES v0.2 机检规则集与分级哲学。 |
-| `docs/TECH-ASSESSMENT.md` | 技术评估与竞品对照（v0.2 快照）：七维自评、主流+AI 向玩家矩阵、五优势/四劣势/定位声明、可证伪指标表。 |
-| `docs/TECH-COMPARISON.md` | 实现技术逐项对照：13 个技术站位 × 主流框架机制差异（信号/调度/模板解析/DOM 策略/契约/MCP server 实现…），含根源路线三分歧与借力清单。 |
-| `docs/BACKLOG.md` | 技术缺口与改进队列：P0 承诺落空区（命令下行通道/编译器 MVP/M3 实验/性能基线台）、P1 结构提升、P2 增强；每项问题→技术→验收+估量。 |
-| `atelier/` | Atelier 工具链作者副本：`skills/` 多工具兼容技能包（8 个 kebab-case 目录包）、`mcp/server.mjs` 零依赖 stdio MCP Server（21 工具单源生成）、`scripts/checkpoint.mjs` 决策 15 源码双轨、`cli.mjs` 统一入口（init/skills/struct/checkpoint/snapshot/mcp，三级诚实标注）；README.md 有兼容矩阵/MCP 接入/checkpoint 说明。M1+M2+M2.5 已交付。 |
-| `prototype/` | Phase 0 最小可运行原型（Vite dev）：信号内核/模板解释器/事务层/契约校验/注册表查询面/dev 状态桥（`src/bridge.ts` → MCP `state.snapshot`）；`prototype/components/` 为演示组件（DeepSeek 介绍页）。 |
-| `research/` | 单路调研原始素材（含全部来源 URL 与未确认项标注）：`01`~`04` 为第一轮四路，`05`~`08` 为第二轮四路。 |
+| `atelier/` | **框架本体（framework home）**。`runtime/` 零依赖运行时内核（core.ts 信号引擎 / template.ts 模板解释器 / expr.ts 表达式求值 / contract.ts 契约校验 / component.ts 注册表 / primitives.ts 三态原语 / bridge.ts dev 状态桥 / index.ts 桶出口）；`mcp/` stdio MCP Server（21 工具单源生成，13 live）；`skills/` 多工具兼容技能包（8 个 kebab-case 目录包）；`scripts/` + `cli.mjs` 工具链（init/dev/struct/checkpoint/snapshot/mcp，三级诚实标注）；`templates/` AGENTS.md/llms.txt 模板；`docs/` 框架规格文档（ARCHITECTURE/SPEC/design-decisions 0-16/BACKLOG/SKILLS-PLAN/TECH-* 等，含原根目录 design-decisions.md）。 |
+| `prototype/` | 演示应用 & 脚手架 starter（Vite dev）。`src/runtime/` 是 `atelier/runtime` 的**供应商拷贝**（自包含；改框架先改 `atelier/runtime`，再整拷同步，`tests/runtime-sync.test.ts` 守卫字节一致）；`src/components/` 演示组件（.atr.ts，import `../runtime` 不感知拷贝）；`tests/` 34 用例；dev 面 `/__atelier/*`（token 门禁/审计/SSE 命令下行/截图）。 |
+| `.dsh/skills/` | 本会话已安装的技能副本（harness 发现目录，勿手改；源在 `atelier/skills/`）。 |
 
 ## 常用命令
 
-<!-- 技能包与原型工作流 -->
+<!-- 框架与原型工作流 -->
 
 | 场景 | 命令 |
 |---|---|
 | 启动原型 dev server | 在 `prototype/` 下 `pnpm dev`（http://127.0.0.1:5173，strictPort） |
+| 跑框架/原型测试 | 在 `prototype/` 下 `pnpm test`（vitest；含 runtime 供应商拷贝同步守卫） |
+| 同步框架 runtime 到 demo | `Copy-Item atelier/runtime/*.ts prototype/src/runtime/`（改完框架侧必做，测试会拦不一致） |
 | 技能包一致性校验 | `node atelier/scripts/check-skills.mjs`（exit code 可接 CI；改动 skills/mcp-definitions 后必跑） |
 | 一键安装技能到项目 | `node atelier/cli.mjs skills install --target <dir> --name <Name>`（双落点 + 模板渲染 + specs 骨架，幂等） |
 | 脚手架新应用 | `node atelier/cli.mjs init --target <dir> --name <Name>`（prototype starter 全拷 + agent 层；cd && pnpm install && pnpm dev 即跑） |
@@ -42,5 +33,7 @@ Atelier 工作区围绕"为 AI 编程代理设计的新前端框架"调研展开
 
 ## 维护纪律
 
-- 主报告面向决策，细节与证据（含来源 URL、未确认项）一律落 `research/` 原始素材；新增调研轮次按 `NN-主题-findings.md` 编号递增。
-- 所有"未确认"结论必须明确标注，不得写成事实。
+- 框架 runtime 只改 `atelier/runtime/`，随后整拷同步 `prototype/src/runtime/`（`pnpm test` 会拦不一致）；脚手架应用天然自包含，不回写框架。
+- MCP 工具/命令/错误码三处同步：CLI 表（cli.mjs HELP）/ `atelier/mcp/mcp-definitions.json` / 对应 skill；改后必跑 `node atelier/scripts/check-skills.mjs`。
+- 框架规格文档唯一源在 `atelier/docs/`（SPEC/ARCHITECTURE/design-decisions）；缺口与改进队列 = `atelier/docs/BACKLOG.md`。
+- 所有"未确认"结论必须明确标注，不得写成事实；删除文件前先 `checkpoint save`（git 可恢复）。

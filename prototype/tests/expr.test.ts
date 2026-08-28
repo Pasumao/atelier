@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evalExpr } from "../src/expr";
+import { evalExpr } from "../src/runtime/expr";
 
 describe("evalExpr — supported subset matrix", () => {
   const scope = { a: 10, b: -3, name: "deepseek", list: ["x", "y"], cfg: { enabled: true }, flag: false, empty: "" };

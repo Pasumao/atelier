@@ -30,12 +30,17 @@ if (!args.target || !args.name) {
 }
 const target = path.resolve(args.target);
 const starter = path.resolve(args.starter);
-if (!fs.existsSync(path.join(starter, "src", "core.ts"))) {
+// starter layout: vendored runtime (src/runtime/) since the framework-runtime extraction;
+// accept the legacy flat layout (src/core.ts) for older snapshots.
+const starterLooksRight =
+  fs.existsSync(path.join(starter, "src", "runtime", "core.ts")) ||
+  fs.existsSync(path.join(starter, "src", "core.ts"));
+if (!starterLooksRight) {
   console.error(`error: starter at ${starter} does not look like the Atelier prototype`);
   process.exit(1);
 }
 
-const EXCLUDE_FILES = new Set(["shot-overview.png", "shot-mcp.png"]);
+const EXCLUDE_FILES = new Set(["shot-overview.png", "shot-mcp.png", "runtime-sync.test.ts"]);
 const EXCLUDE_DIRS = new Set(["node_modules", "dist", ".debug", ".edge-debug"]);
 
 /** recursive copy honouring exclusions; does NOT descend into junk */

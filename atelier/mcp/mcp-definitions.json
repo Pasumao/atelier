@@ -3,7 +3,7 @@
     "name": "atelier-mcp-definitions",
     "version": "0.1.0",
     "purpose": "Single source for Atelier built-in MCP tool surface (names/faces/params). Skills and future MCP server must stay consistent with this file (enforced by scripts/check-skills.mjs).",
-    "syncWith": ["docs/ARCHITECTURE.md#6-mcp-tool-list", "docs/SPEC-Agentic-DX-v0.1.md", "design-decisions.md decision 7/12/15"],
+    "syncWith": ["atelier/docs/ARCHITECTURE.md#6-mcp-tool-list", "atelier/docs/SPEC-Agentic-DX-v0.1.md", "atelier/docs/design-decisions.md decision 7/12/15"],
     "schemaRules": "Flat schema only: type / reqProps / optProps / enum / items — no $ref, no oneOf, no generics (H1/decision 6)",
     "faces": ["query", "operation", "audit"],
     "statusVocabulary": "implemented = prototype already exposes it (HTTP/dev surface); pending = designed, wiring planned"

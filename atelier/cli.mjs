@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * cli.mjs — `atelier` unified entry. Spec surface: docs/ARCHITECTURE.md §8.
+ * cli.mjs — `atelier` unified entry. Spec surface: atelier/docs/ARCHITECTURE.md §8.
  *
  * Implementation tiers (be honest about each):
  *   FULL   real behaviour, wired end-to-end today
@@ -15,7 +15,7 @@ import { spawn, spawnSync } from "node:child_process";
 const PKG = path.resolve(path.dirname(url.fileURLToPath(import.meta.url))); // atelier/
 const script = (f) => path.join(PKG, "scripts", f);
 
-const HELP = `atelier v0.2 (script form — spec surface: docs/ARCHITECTURE.md §8)
+const HELP = `atelier v0.2 (script form — spec surface: atelier/docs/ARCHITECTURE.md §8)
 
 PROJECT
   atelier init --target <dir> --name <Name> [--no-ai]              FULL  scaffold an app from the

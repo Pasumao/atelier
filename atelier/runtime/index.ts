@@ -10,6 +10,7 @@ export type { StreamValue, OptimisticItem } from "./primitives";
 export { validateFlat, validateUnknown } from "./contract";
 export type { FlatSchema, AtrError } from "./contract";
 export { component, registry } from "./component";
+export { installStateBridge } from "./bridge";
 
 /**
  * devFetch — 页面侧访问 Atelier dev 面的安全封装。

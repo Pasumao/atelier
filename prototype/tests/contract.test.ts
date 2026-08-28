@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateFlat, validateUnknown, type FlatSchema } from "../src/contract";
+import { validateFlat, validateUnknown, type FlatSchema } from "../src/runtime/contract";
 
 const schema: FlatSchema = {
   type: "object",

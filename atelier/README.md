@@ -1,4 +1,10 @@
-# Atelier Agent Skills 包（多工具兼容版 v0.1）
+# Atelier — 框架本体（runtime + AI 工具链）
+
+> 本目录即 Atelier 框架：`runtime/` 零依赖运行时内核 + 集成式 AI 工具链（`mcp/` stdio MCP Server、`skills/` 多工具兼容技能包、`scripts/`+`cli.mjs` 工具链、`templates/`、`docs/` 规格文档）。工具链与前端运行时**零代码耦合**：runtime 不 import 任何工具链模块，工具链仅经 HTTP dev 面 / git / 文件系统与应用交互。
+>
+> 以下为 Skills 包说明（作者副本）；runtime 详见 `docs/ARCHITECTURE.md` §4，规格以 `docs/design-decisions.md` 为准。
+
+## Agent Skills 包（多工具兼容版 v0.1）
 
 > 为 **dsh（DeepSeek Harness）优先**、同时兼容 Anthropic Agent Skills 规范 / Claude Code / Codex / Cursor 等 SKILL.md 生态的框架技能包。
 > 设计依据：`docs/SKILLS-PLAN.md`；格式约束见下。
@@ -37,7 +43,7 @@ cp -r atelier/skills/* .dsh/skills/
 node atelier/scripts/init-ai.mjs --target <项目目录> --name <项目名>
 ```
 
-> 配套机器件：`mcp/mcp-definitions.json`（MCP 工具面单源，19 工具 flat schema）与 `scripts/check-skills.mjs`（一致性校验器：frontmatter/行数/命令/错误码/工具名/导入面/话术全查，exit code 可接 CI）。改动本包后必须 `node atelier/scripts/check-skills.mjs` 全绿。
+> 配套机器件：`mcp/mcp-definitions.json`（MCP 工具面单源，21 工具 flat schema）与 `scripts/check-skills.mjs`（一致性校验器：frontmatter/行数/命令/错误码/工具名/导入面/话术全查，exit code 可接 CI）。改动本包后必须 `node atelier/scripts/check-skills.mjs` 全绿。
 
 > 未来框架自带 init 后保持与 `docs/` 规范零漂移（`docs/SPEC`/`ARCHITECTURE` 为命令与错误码唯一源）。
 
@@ -61,7 +67,7 @@ node atelier/cli.mjs checkpoint save <name> | list [--json] | rollback <id>
 
 ## MCP 接入（决策 7：内嵌代理层落地）
 
-Atelier 内置 **零依赖 stdio MCP Server**（`mcp/server.mjs`）——任何支持 MCP 的编码代理即插即用获得全部 **19 个框架工具**（工具描述由 `mcp-definitions.json` 单源自动生成）：
+Atelier 内置 **零依赖 stdio MCP Server**（`mcp/server.mjs`）——任何支持 MCP 的编码代理即插即用获得全部 **21 个框架工具**（工具描述由 `mcp-definitions.json` 单源自动生成）：
 
 | 客户端 | 注册方式 |
 |---|---|
@@ -76,7 +82,7 @@ Atelier 内置 **零依赖 stdio MCP Server**（`mcp/server.mjs`）——任何�
 - **行为语义**：`implemented` 工具转发 dev 面；`pending` 工具不隐藏，返回 `ATR-4xx-dev` 结构化错误 + fix 引导（代理可见完整设计面）
 - **状态桥**（决策 7「状态可检视性」）：页面侧哨兵 `$effect` 读尽 `$state` 集 → flush 批次收敛后 POST `/__atelier/bridge/state` → MCP `state.snapshot` 直读缓存；`rollback()/timeTravel()` 经 notify 同通路自动跟推（回滚可观测）。v0.1 边界：仅覆盖安装时点已存在的信号集。
 - **截图通道**（决策 12 视觉真相）：`/__atelier/screenshot` 由 dev 面自管瞬态无头浏览器拍当前应用页（CDP mini-client，等框架挂载断言 `#app > *` 通过才快门；并发互斥；用完即焚）。附带收益：新实例也走 bridge 上报 → 截图后 `state.snapshot` 同步刷新，检视面一致。
-- **已实证**：initialize 握手 / tools:list(19, flat schema→JSON Schema 翻译) / 真实数据调用（ModelCard · tokens · **state.snapshot** 15 信号全图 · **ui.screenshot** 74KB PNG）/ ATR-401 未注册组件 / pending 错误路径
+- **已实证**：initialize 握手 / tools:list(21, flat schema→JSON Schema 翻译) / 真实数据调用（ModelCard · tokens · **state.snapshot** 15 信号全图 · **ui.screenshot** 74KB PNG）/ ATR-401 未注册组件 / pending 错误路径
 
 ## 与工具无关的约定
 

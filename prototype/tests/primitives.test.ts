@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { streamValue, optimisticList } from "../src/primitives";
+import { streamValue, optimisticList } from "../src/runtime/primitives";
 
 describe("streamValue (decision 9: no manual typewriter)", () => {
   it("appends values and exposes the last one", () => {
