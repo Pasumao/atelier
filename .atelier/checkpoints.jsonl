@@ -21,3 +21,4 @@
 {"type":"save","id":"4c1d450","sha":"4c1d45066887f9ec52943b6c5fbd09bbe9cc4fc6","name":"重构前锚点：workspace 原始布局（research/docs 在根目录）","at":"2026-08-28T03:57:38.772Z"}
 {"type":"save","id":"0ae5435","sha":"0ae5435940471ca9fc344dfa02efc518ad7e1876","name":"重构对账：runtime 桶出口补 bridge 导出 + main.ts 导入修复 + registry 走 devFetch","at":"2026-08-28T04:07:16.766Z"}
 {"type":"save","id":"62d0905","sha":"62d09059deb9dfea8b25becb90e2ae142592ac26","name":"整理完成：runtime 迁入 atelier/ 框架本体（mcp/skills/cli/docs 集成、零耦合），prototype 改供应商拷贝+同步守卫，调研素材清理（可回溯 4c1d450）","at":"2026-08-28T04:10:31.137Z"}
+{"type":"save","id":"8d4c25d","sha":"8d4c25d4da8aa1c09cb2d97a185889b1237f18ad","name":"吸收完成：prototype 进框架（dev 面插件/测试/starter 模板三步组装 init），修 MCP 裸 fetch 丢 token 存量 bug，prototype 删除","at":"2026-08-28T04:28:43.668Z"}
