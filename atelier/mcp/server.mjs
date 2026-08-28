@@ -71,7 +71,7 @@ function toolError(codeText, fixText) {
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 const DEV_TOKEN = (() => {
-  for (const p of [path.join(PROJECT_ROOT_ENV ?? process.cwd(), ".atelier", "dev-token"), path.join(PROJECT_ROOT_ENV ?? process.cwd(), "prototype", ".atelier", "dev-token")]) {
+  for (const p of [path.join(PROJECT_ROOT_ENV ?? process.cwd(), ".atelier", "dev-token")]) {
     try { return fs.readFileSync(p, "utf8").trim(); } catch { /* next */ }
   }
   return "";
@@ -81,7 +81,7 @@ async function devJson(pathWithQuery, init = {}) {
   const r = await fetch(`${BASE}${pathWithQuery}`, { signal: AbortSignal.timeout(45000), ...init, headers }).catch((e) => {
     throw toolError(
       `ATR-4xx-dev: dev surface unreachable at ${BASE} (${e.cause?.code ?? e.name})`,
-      "start the dev server ('pnpm dev' inside prototype/) or set ATELIER_DEV_URL",
+      `start the dev server ('atelier dev' inside your Atelier app dir) or set ATELIER_DEV_URL`,
     );
   });
   if (!r.ok && r.status === 401) {
@@ -132,8 +132,11 @@ async function callTool(name, args) {
     return { verdict: res.summary.errors > 0 ? "FAILED" : "PASSED", ...res };
   }
   if (name === "snapshot.diff" || name === "snapshot.review_diff") {
-    const shot = await fetch(`${BASE}/__atelier/screenshot`, { signal: AbortSignal.timeout(40000) }).catch((e) => {
-      throw toolError(`ATR-4xx-dev: dev surface unreachable at ${BASE} (${e.cause?.code ?? e.name})`, "start the dev server ('atelier dev') first");
+    const shot = await fetch(`${BASE}/__atelier/screenshot`, {
+      signal: AbortSignal.timeout(40000),
+      headers: { "x-atelier-token": DEV_TOKEN },
+    }).catch((e) => {
+      throw toolError(`ATR-4xx-dev: dev surface unreachable at ${BASE} (${e.cause?.code ?? e.name})`, "start the dev server ('atelier dev' inside your Atelier app dir) first");
     });
     const j = await shot.json();
     if (!j.ok) throw toolError("ATR-4xx-dev: capture failed", j.error ?? "inspect dev server logs");
@@ -173,12 +176,18 @@ async function callTool(name, args) {
     );
   }
   // fetch the route; never interpolate raw values into paths except whitelisted query params below
-  const res = await fetch(BASE + route, { signal: AbortSignal.timeout(4000) }).catch((e) => {
+  const res = await fetch(BASE + route, {
+    signal: AbortSignal.timeout(4000),
+    headers: { "x-atelier-token": DEV_TOKEN },
+  }).catch((e) => {
     throw toolError(
       `ATR-4xx-dev: dev surface unreachable at ${BASE} (${e.cause?.code ?? e.name})`,
-      "start the dev server ('pnpm dev' inside prototype/) or set ATELIER_DEV_URL"
+      "start the dev server ('atelier dev' inside your Atelier app dir) or set ATELIER_DEV_URL",
     );
   });
+  if (res.status === 401) {
+    throw toolError("ATR-402: dev token rejected", "read .atelier/dev-token next to the app root and send it as x-atelier-token");
+  }
   if (!res.ok) {
     throw toolError(`ATR-4xx-dev: dev surface returned HTTP ${res.status} for ${route}`, "check dev server logs");
   }

@@ -1,6 +1,6 @@
-# Atelier — 框架本体（runtime + AI 工具链）
+# Atelier — 框架本体（runtime + dev 面 + 模板 + AI 工具链）
 
-> 本目录即 Atelier 框架：`runtime/` 零依赖运行时内核 + 集成式 AI 工具链（`mcp/` stdio MCP Server、`skills/` 多工具兼容技能包、`scripts/`+`cli.mjs` 工具链、`templates/`、`docs/` 规格文档）。工具链与前端运行时**零代码耦合**：runtime 不 import 任何工具链模块，工具链仅经 HTTP dev 面 / git / 文件系统与应用交互。
+> 本目录即 Atelier 框架：`runtime/` 零依赖运行时内核、`dev/` dev 面框架件（Vite 插件/无头截图/tailwind 主题生成）、`tests/` runtime 单测、`templates/app/` 应用 starter 模板、`mcp/` stdio MCP Server、`skills/` 多工具兼容技能包、`scripts/`+`cli.mjs` 工具链、`docs/` 规格文档。工具链与前端运行时**零代码耦合**：runtime 不 import 任何工具链模块，工具链仅经 HTTP dev 面 / git / 文件系统与应用交互。新应用 = `atelier init` 三步组装（模板 + runtime vendor + dev vendor），自包含可跑。
 >
 > 以下为 Skills 包说明（作者副本）；runtime 详见 `docs/ARCHITECTURE.md` §4，规格以 `docs/design-decisions.md` 为准。
 

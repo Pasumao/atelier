@@ -125,7 +125,7 @@ function probeChecks(root) {
     });
   }
   // manifest probe (declared or heuristic)
-  const manifestCandidates = ["app.registry.json", "src/manifest.json", "prototype/src/manifest.json"];
+  const manifestCandidates = ["app.registry.json", "src/manifest.json"];
   let manifestOk = false;
   for (const c of manifestCandidates) {
     const p = path.join(root, c);

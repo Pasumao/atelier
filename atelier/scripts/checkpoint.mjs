@@ -3,7 +3,7 @@
  * checkpoint.mjs — Decision 15 minimal path: SOURCE-track checkpoints anchored on git.
  *
  * Two-layer rollback model (decision 15):
- *   · App state  → runtime `store.rollback()` inside the prototype (signal snapshots)
+ *   · App state  → runtime `store.rollback()` inside a running Atelier app (signal snapshots)
  *   · Source     → THIS tool: named git anchors per AI turn ("one round = one checkpoint")
  *
  * Commands:

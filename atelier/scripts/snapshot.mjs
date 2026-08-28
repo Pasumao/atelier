@@ -25,14 +25,8 @@ const sha256 = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).dig
 
 /** dev one-time token (P1-7): the app writes .atelier/dev-token at boot; tools read and send it */
 function devToken() {
-  const candidates = [
-    path.join(process.cwd(), ".atelier", "dev-token"),
-    path.join(process.cwd(), "prototype", ".atelier", "dev-token"),
-  ];
-  for (const p of candidates) {
-    try { return fs.readFileSync(p, "utf8").trim(); } catch { /* next */ }
-  }
-  return "";
+  // the app writes .atelier/dev-token at boot; run from the app dir (or set ATELIER_DEV_URL's host accordingly)
+  try { return fs.readFileSync(path.join(process.cwd(), ".atelier", "dev-token"), "utf8").trim(); } catch { return ""; }
 }
 
 async function captureTo(file) {

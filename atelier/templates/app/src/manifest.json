@@ -1,0 +1,14 @@
+{
+  "components": [
+    { "name": "HelloCard", "file": "components/HelloCard.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" } },
+        "optProps": { "start": { "type": "number" } }
+      }
+    }
+  ],
+  "primitives": [
+    "$state", "$derived", "$effect", "streamValue", "optimisticList", "devFetch",
+    "store.commit", "store.rollback", "store.timeTravel", "validateFlat"
+  ]
+}

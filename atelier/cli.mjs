@@ -18,8 +18,9 @@ const script = (f) => path.join(PKG, "scripts", f);
 const HELP = `atelier v0.2 (script form — spec surface: atelier/docs/ARCHITECTURE.md §8)
 
 PROJECT
-  atelier init --target <dir> --name <Name> [--no-ai]              FULL  scaffold an app from the
-                                                                         prototype starter (+ agent layer)
+  atelier init --target <dir> --name <Name> [--no-ai]              FULL  scaffold a self-contained
+                                                                         app from framework pieces
+                                                                         (+ agent layer)
   atelier dev                                                      MINI  run the app's dev server
                                                                          (forwards to package.json dev script)
   atelier build | package | review | e2e                           STUB  spec'd, lands with compiler /
@@ -84,7 +85,7 @@ switch (cmd) {
     const target = argvAll[tIdx + 1];
     const name = nIdx >= 0 ? argvAll[nIdx + 1] : path.basename(target ?? "");
     const noAi = argvAll.includes("--no-ai");
-    const r = spawnSync(process.execPath, [script("init-project.mjs"), "--target", target, "--name", name, "--starter", path.join(PKG, "..", "prototype"), ...(noAi ? ["--no-ai"] : [])], {
+    const r = spawnSync(process.execPath, [script("init-project.mjs"), "--target", target, "--name", name, ...(noAi ? ["--no-ai"] : [])], {
       stdio: "inherit",
     });
     process.exit(r.status ?? 1);
@@ -95,7 +96,7 @@ switch (cmd) {
     if (!hasDevScript(process.cwd())) {
       die(
         'error: no dev script here',
-        'fix: run inside an Atelier app dir (create one: atelier init --target . --name <Name>), or start the reference app: cd prototype && pnpm dev',
+        'fix: run inside an Atelier app dir (create one: atelier init --target . --name <Name>)',
       );
     }
     const c = spawn("pnpm", ["dev"], { stdio: "inherit", shell: true });

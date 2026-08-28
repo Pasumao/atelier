@@ -1,0 +1,15 @@
+{
+  "name": "atelier-framework",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Atelier 框架本体（script-form）：runtime 零依赖内核 + dev 面 + starter 模板 + AI 工具链（mcp/skills/cli）。应用通过 atelier init 脚手架获得自包含拷贝。",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "mcp": "node mcp/server.mjs"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}
