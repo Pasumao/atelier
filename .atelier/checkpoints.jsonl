@@ -19,3 +19,4 @@
 {"type":"save","id":"95c2c62","sha":"95c2c62f434f15c7c3361021ff862dadf2725461","name":"Tailwind 决策16 全量面板/区块/壳层迁移 + atelier-ui recipe 层种子 + R3 scoped 白名单门禁","at":"2026-08-27T23:50:23.360Z"}
 {"type":"save","id":"464c700","sha":"464c7004b98375d4d32b11f71d8caa958a00965c","name":"Tailwind 决策16 完成：CLI AOT 化解 full-reload 死循环 + R3 scoped 白名单 + 全量面板/区块迁移","at":"2026-08-28T00:06:16.939Z"}
 {"type":"save","id":"4c1d450","sha":"4c1d45066887f9ec52943b6c5fbd09bbe9cc4fc6","name":"重构前锚点：workspace 原始布局（research/docs 在根目录）","at":"2026-08-28T03:57:38.772Z"}
+{"type":"save","id":"0ae5435","sha":"0ae5435940471ca9fc344dfa02efc518ad7e1876","name":"重构对账：runtime 桶出口补 bridge 导出 + main.ts 导入修复 + registry 走 devFetch","at":"2026-08-28T04:07:16.766Z"}
