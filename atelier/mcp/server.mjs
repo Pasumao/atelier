@@ -160,8 +160,8 @@ async function callTool(name, args) {
     return checkpointCli(["rollback", String(args.id), "--json"], PROJECT_ROOT);
   }
   if (name === "snapshot.diff" || name === "snapshot.review_diff") {
-    const shot = await fetch(`${BASE}/__atelier/screenshot`, {
-      signal: AbortSignal.timeout(40000),
+    const shot = await fetch(`${BASE}/__atelier/screenshot?compare=1`, {
+      signal: AbortSignal.timeout(60000),
       headers: { "x-atelier-token": DEV_TOKEN },
     }).catch((e) => {
       throw toolError(`ATR-4xx-dev: dev surface unreachable at ${BASE} (${e.cause?.code ?? e.name})`, "start the dev server ('atelier dev' inside your Atelier app dir) first");
@@ -179,8 +179,19 @@ async function callTool(name, args) {
       out.note = "no baseline yet — review current; promote intentionally via 'atelier snapshot check --update' or save a first baseline";
     } else {
       const h = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
-      out.match = h(curPath) === h(basePath);
-      out.note = out.match ? "pixel-stable against baseline" : "differs from baseline — review both images side by side; promotion is a CLI/human act";
+      const byteSame = h(curPath) === h(basePath);
+      const threshold = Number(j.threshold ?? 0.12);
+      const ratio = j.pixelDiff ? j.pixelDiff.mismatchRatio : null;
+      // same verdict ladder as scripts/snapshot.mjs (P1-8): MATCH / PIXMATCH / MISMATCH
+      out.byteMatch = byteSame;
+      out.pixelDiff = j.pixelDiff ?? null;
+      out.threshold = threshold;
+      out.verdict = byteSame ? "MATCH" : ratio !== null && !j.pixelDiff.dimsDiffer && ratio <= threshold ? "PIXMATCH" : "MISMATCH";
+      out.note = out.verdict === "MATCH"
+        ? "pixel-stable against baseline"
+        : out.verdict === "PIXMATCH"
+          ? `bytes differ but mismatchRatio ${ratio.toExponential(2)} ≤ ${threshold} (fonts/AA jitter is not a regression)`
+          : `differs from baseline${ratio !== null ? ` (mismatchRatio ${ratio.toExponential(2)} > ${threshold})` : ""} — review both images side by side; promotion is a CLI/human act`;
     }
     if (name === "snapshot.review_diff") out.imageBase64 = j.imageBase64;
     return out;

@@ -40,13 +40,17 @@ QUALITY GATES
   atelier lint                                                     STUB  soft-constraint ruleset (v0.2)
   atelier test                                                     MINI* forwards to the project's test runner
   atelier snapshot save | check [--update]                         MINI* visual regression via the dev face
-                                                                         (sha256 compare; never auto-accepts)
+                                                                         (byte+pixel tiers; never auto-accepts)
   atelier checkpoint save <name> [--no-gate] | list | rollback <id>     FULL  decision-15 source checkpoints; save enforces 未检不锚 vs snapshot baseline (P2-2)
 
 COMPILER
   atelier compile [--root <dir>] [--out <dir>] [--stdout]          MINI* P0-2 stage ② AST dump: *.atr.ts →
                                                                           .atr/ast/*.json via the runtime parser
                                                                           (stage ③ codegen: pending)
+
+BENCHMARK
+  atelier bench --app <dir> [--port N] [--json] [--keep]           MINI* P0-4 SPEC §7 four-metric baseline
+                                                                          (gzip/mount/HMR/screenshot vs targets)
 
 Exit codes: 0 ok · 1 gate failed · 2 usage · 4 not-implemented (STUB)
 Examples:
@@ -130,6 +134,12 @@ switch (cmd) {
     // P0-2 stage ②: AST dump — spawns a bare node process so the TS runtime import type-strips natively
     const args = process.argv.slice(3);
     const child = spawnSync(process.execPath, [path.join(PKG, "compiler", "dump.mjs"), ...args], { stdio: "inherit" });
+    process.exit(child.status ?? 1);
+    break;
+  }
+  case "bench": {
+    // P0-4: SPEC §7 four-metric baseline bench (needs an init'd app with deps installed)
+    const child = spawnSync(process.execPath, [path.join(PKG, "scripts", "bench.mjs"), ...process.argv.slice(3)], { stdio: "inherit" });
     process.exit(child.status ?? 1);
     break;
   }

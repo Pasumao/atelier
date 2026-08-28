@@ -135,15 +135,32 @@ export function atelierDevPlugin() {
         }
         if (url === "/__atelier/screenshot") {
           // snapshot=1 → 页面进入确定性渲染（动画冻结、流式文本一次性落定），见 index.html
+          // compare=1 → P1-8 像素级对比：与 .atr/snapshots/baseline.png 同实例 canvas evaluate
+          const wantsCompare = rawUrl.includes("compare=1");
           const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?snapshot=1`;
           try {
+            let compareBase64 = null;
+            let threshold = 0.12;
+            if (wantsCompare) {
+              try {
+                const basePath = path.join(ROOT, ".atr", "snapshots", "baseline.png");
+                if (fs.existsSync(basePath)) {
+                  compareBase64 = fs.readFileSync(basePath).toString("base64");
+                  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, "atelier.config.json"), "utf-8"));
+                  threshold = Number(cfg?.snapshot?.mismatchThreshold ?? 0.12);
+                }
+              } catch { /* compare/阈值是尽力而为：读不到就退化为纯捕获 */ }
+            }
             // 有界重试 ×2：无头捕获偶发瞬态失败（GPU 进程/冷启动），快速失败后重试即可吸收
             let imageBase64 = "";
+            let pixelDiff = null;
             let lastErr = null;
             for (let attempt = 1; attempt <= 2; attempt++) {
               try {
-                screenshotInflight ??= capturePage({ url: appUrl }).finally(() => { screenshotInflight = null; });
-                imageBase64 = await screenshotInflight;
+                screenshotInflight ??= capturePage({ url: appUrl, compareBase64, threshold }).finally(() => { screenshotInflight = null; });
+                const r = await screenshotInflight;
+                imageBase64 = r.imageBase64;
+                pixelDiff = r.pixelDiff;
                 lastErr = null;
                 break;
               } catch (e) {
@@ -152,8 +169,8 @@ export function atelierDevPlugin() {
               }
             }
             if (lastErr) throw lastErr;
-            audit("screenshot", { bytes: imageBase64.length });
-            res.end(JSON.stringify({ ok: true, format: "png", imageBase64, capturedFrom: appUrl, at: Date.now() }));
+            audit("screenshot", { bytes: imageBase64.length, pixel: pixelDiff ? pixelDiff.mismatchRatio : null });
+            res.end(JSON.stringify({ ok: true, format: "png", imageBase64, pixelDiff, threshold, capturedFrom: appUrl, at: Date.now() }));
           } catch (e) {
             res.statusCode = 500;
             res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));

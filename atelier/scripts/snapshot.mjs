@@ -7,8 +7,12 @@
  *
  * Semantics honour the acceptance discipline (SPEC §5):
  *   save          capture → .atr/snapshots/baseline.png (git-managed truth)
- *   check         capture fresh → sha256 vs baseline
- *                 MATCH → ok ; MISMATCH → print BOTH paths for mandatory review + exit 1.
+ *   check         capture fresh → compare vs baseline on TWO tiers (P1-8):
+ *                 byte sha256 equal → MATCH
+ *                 bytes differ, pixel mismatchRatio (in-instance canvas evaluate) ≤
+ *                 config snapshot.mismatchThreshold (default 0.12) → PIXMATCH
+ *                 (fonts/AA jitter is not a regression)
+ *                 otherwise → MISMATCH → print BOTH paths for mandatory review + exit 1.
  *                 Never auto-promotes: only explicit `--update` promotes after human review.
  *   check --update compare-then-promote (intended for intentional changes reviewed by humans)
  *
@@ -65,8 +69,8 @@ function devToken() {
   try { return fs.readFileSync(path.join(process.cwd(), ".atelier", "dev-token"), "utf8").trim(); } catch { return ""; }
 }
 
-async function captureTo(file) {
-  const r = await fetch(`${DEV}/__atelier/screenshot`, {
+async function captureTo(file, query = "") {
+  const r = await fetch(`${DEV}/__atelier/screenshot${query}`, {
     signal: AbortSignal.timeout(40000),
     headers: { "x-atelier-token": devToken() },
   });
@@ -76,6 +80,7 @@ async function captureTo(file) {
   if (!j.ok || !j.imageBase64) throw new Error(j.error ?? "screenshot payload missing");
   fs.mkdirSync(SNAPDIR, { recursive: true });
   fs.writeFileSync(file, Buffer.from(j.imageBase64, "base64"));
+  return j;
 }
 
 const [, , cmd, ...flags] = process.argv;
@@ -86,7 +91,7 @@ try {
     console.log(`baseline saved → ${path.relative(process.cwd(), BASE)} (${Math.round(fs.statSync(BASE).size / 1024)} KB)`);
     console.log('remember: the baseline is git-managed truth — commit it with the change it validates.');
   } else if (cmd === "check" || cmd === undefined) {
-    await captureTo(CURR);
+    const j = await captureTo(CURR, "?compare=1"); // P1-8: 同实例像素级对比
     if (!fs.existsSync(BASE)) {
       console.error(`error: no baseline at ${path.relative(process.cwd(), BASE)}`);
       console.error("fix: run 'atelier snapshot save' once the page looks right, then treat it as the regression floor.");
@@ -95,16 +100,26 @@ try {
     const baseSha = sha256(BASE);
     const curSha = sha256(CURR);
     const same = baseSha === curSha;
-    writeReceipt({ result: same ? "MATCH" : "MISMATCH", baselineSha: baseSha, currentSha: curSha, sourceFp: sourceFingerprint() });
+    const threshold = Number(j.threshold ?? 0.12);
+    const ratio = j.pixelDiff ? j.pixelDiff.mismatchRatio : null;
+    // verdict ladder: byte-equal → MATCH；bytes differ but pixels within threshold → PIXMATCH
+    // （字体抗锯齿/亚像素抖动不是回归）；否则 MISMATCH
+    const verdict = same ? "MATCH" : ratio !== null && !j.pixelDiff.dimsDiffer && ratio <= threshold ? "PIXMATCH" : "MISMATCH";
+    writeReceipt({ result: verdict, baselineSha: baseSha, currentSha: curSha, sourceFp: sourceFingerprint(), pixelRatio: ratio, threshold });
     console.log(`current  → ${path.relative(process.cwd(), CURR)}`);
     console.log(`baseline → ${path.relative(process.cwd(), BASE)}`);
-    if (same) {
+    if (verdict === "MATCH") {
       console.log("MATCH — pixel-stable against baseline ✔");
+    } else if (verdict === "PIXMATCH") {
+      console.log(`PIXMATCH — bytes differ but pixel mismatchRatio ${ratio.toExponential(2)} ≤ threshold ${threshold} ✔ (fonts/AA jitter is not a regression)`);
+      console.log("review note: promotion still requires human eyes — never auto-promote to silence red.");
     } else {
-      console.error("MISMATCH — render differs from baseline (bytes).");
+      const ratioNote = ratio !== null ? ` (pixel mismatchRatio ${ratio.toExponential(2)} > threshold ${threshold})` : "";
+      console.error(`MISMATCH — render differs from baseline${ratioNote}.`);
       console.error("fix: REVIEW both images side by side; if the change is intended, run 'atelier snapshot check --update' to promote. Never auto-promote to silence red.");
       if (flags.includes("--update")) {
         fs.copyFileSync(CURR, BASE);
+        writeReceipt({ result: "SAVED", baselineSha: sha256(BASE), sourceFp: sourceFingerprint() });
         console.log("promoted (--update): current → baseline. Commit both together with the change rationale.");
       } else process.exit(1);
     }

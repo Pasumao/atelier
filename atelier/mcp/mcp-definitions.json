@@ -165,7 +165,7 @@
       "face": "operation",
       "priority": "P0",
       "status": "implemented",
-      "summary": "Capture a fresh render and sha256-compare against .atr/snapshots/baseline.png (returns both paths). Promoting is a human-reviewed CLI act — deliberately not exposed here.",
+      "summary": "Capture a fresh render and compare against .atr/snapshots/baseline.png: byte sha256 tier + pixel tier (in-instance canvas mismatchRatio, config snapshot.mismatchThreshold) → returns paths, match verdict and pixelDiff. Promoting is a human-reviewed CLI act — deliberately not exposed here.",
       "params": { "type": "object", "reqProps": {}, "optProps": {} },
       "confirmDefault": "auto",
       "errors": []

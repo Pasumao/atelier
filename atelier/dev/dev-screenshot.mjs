@@ -82,8 +82,9 @@ class MiniCdp {
   }
 }
 
-/** Capture a full-page PNG (base64) of the given URL using a transient headless browser. */
-export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
+/** Spawn a transient headless browser and attach a CDP session (no navigation).
+ *  Shared primitive for capturePage and bench.mjs — spawn/attach sequence lives here once. */
+export async function openTransientBrowser({ debugPort = 9345 } = {}) {
   const exe = findBrowser();
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-shot-"));
   const child = spawn(
@@ -103,11 +104,15 @@ export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
     ],
     { stdio: "ignore" },
   );
-  let ws;
+  const close = () => {
+    try { child.kill(); } catch { /* already gone */ }
+    setTimeout(() => {
+      try { fs.rmSync(userData, { recursive: true, force: true }); } catch { /* next time */ }
+    }, 1500);
+  };
   try {
     await waitEndpoint(`http://127.0.0.1:${debugPort}/json/version`, 10000);
-
-    // attach BEFORE navigating so no lifecycle event is missed
+    // attach on a fresh tab BEFORE navigating so no lifecycle event is missed
     const tabRes = await fetch(`http://127.0.0.1:${debugPort}/json/new?url=about:blank`, {
       method: "PUT",
       signal: AbortSignal.timeout(5000),
@@ -115,8 +120,7 @@ export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
     if (!tabRes.ok) throw new Error(`/json/new returned HTTP ${tabRes.status}`);
     const tab = await tabRes.json();
     if (!tab.webSocketDebuggerUrl) throw new Error("target has no webSocketDebuggerUrl");
-
-    ws = new WebSocket(tab.webSocketDebuggerUrl);
+    const ws = new WebSocket(tab.webSocketDebuggerUrl);
     // 看门狗：ws 握手必须有时限——无界 onopen 等待曾让 screenshotInflight 永久挂起，
     // 级联卡死后续所有截图请求（dev 面级联超时）
     await Promise.race([
@@ -126,8 +130,20 @@ export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
       }),
       sleep(5000).then(() => { throw new Error("cdp websocket open timeout (5s)"); }),
     ]);
-    const cdp = new MiniCdp(ws);
+    return { child, close, cdp: new MiniCdp(ws) };
+  } catch (e) {
+    close();
+    throw e;
+  }
+}
 
+/** Capture a full-page PNG (base64) of the given URL using a transient headless browser.
+ *  Optional compareBase64 (previous PNG): computes a per-pixel mismatchRatio in the same
+ *  transient session via canvas evaluate (P1-8) — zero npm dependencies. */
+export async function capturePage({ url, settleMs = 1200, compareBase64 = null, threshold = 0.12 }) {
+  const session = await openTransientBrowser();
+  const { cdp } = session;
+  try {
     await cdp.send("Page.enable");
     await cdp.send("Page.navigate", { url });
     await cdp.waitEvent("Page.loadEventFired", 15000);
@@ -173,13 +189,42 @@ export async function capturePage({ url, debugPort = 9345, settleMs = 1200 }) {
         return await cdp.send("Page.captureScreenshot", { format: "png" }, 15000);
       }
     })();
-    return shot.data; // base64 PNG
+    let pixelDiff = null;
+    if (compareBase64) {
+      // P1-8 像素级对比：同一瞬态实例内 canvas evaluate——sha256 字节对比对字体抗锯齿太脆，
+      // 逐像素归一化距离才是视觉真相。零 npm 依赖（Image+canvas 全在页面里跑）。
+      const expr = `(async () => {
+        const load = (b64) => new Promise((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i);
+          i.onerror = () => rej(new Error("image decode failed"));
+          i.src = "data:image/png;base64," + b64;
+        });
+        const [ia, ib] = await Promise.all([load(${JSON.stringify(shot.data)}), load(${JSON.stringify(compareBase64)})]);
+        const dimsDiffer = ia.width !== ib.width || ia.height !== ib.height;
+        const w = Math.min(ia.width, ib.width), h = Math.min(ia.height, ib.height);
+        const draw = (img) => {
+          const c = document.createElement("canvas");
+          c.width = img.width; c.height = img.height;
+          c.getContext("2d", { willReadFrequently: true }).drawImage(img, 0, 0);
+          return c.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, img.width, img.height).data;
+        };
+        const da = draw(ia), db = draw(ib);
+        let diff = 0;
+        const norm = Math.sqrt(3) * 255;
+        for (let p = 0; p < w * h; p++) {
+          const i4 = p * 4;
+          const d = Math.sqrt((da[i4]-db[i4])**2 + (da[i4+1]-db[i4+1])**2 + (da[i4+2]-db[i4+2])**2) / norm;
+          if (d > ${Number(threshold || 0.12)}) diff++;
+        }
+        return { mismatchRatio: dimsDiffer ? 1 : diff / (w * h), diffPixels: dimsDiffer ? w * h : diff, width: w, height: h, dimsDiffer };
+      })()`;
+      const r = await cdp.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }, 20000);
+      if (r.exceptionDetails) throw new Error(`pixel compare failed: ${r.exceptionDetails.text}`);
+      pixelDiff = r.result?.value ?? null;
+    }
+    return { imageBase64: shot.data, pixelDiff }; // base64 PNG (+ P1-8 pixel verdict when requested)
   } finally {
-    try { ws?.close(); } catch { /* already closed */ }
-    child.kill();
-    // profile dir may still be held briefly by the exiting browser — best-effort delayed cleanup
-    setTimeout(() => {
-      try { fs.rmSync(userData, { recursive: true, force: true }); } catch { /* next time */ }
-    }, 1500);
+    session.close(); // ws close + browser kill + delayed profile cleanup
   }
 }

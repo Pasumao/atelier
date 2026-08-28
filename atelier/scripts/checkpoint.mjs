@@ -101,7 +101,7 @@ async function snapshotGate(repo, skip) {
   try {
     const rc = JSON.parse(fs.readFileSync(path.join(repo, ".atelier", "snapshot-lastcheck.json"), "utf8"));
     const ageMin = (Date.now() - Date.parse(rc.at)) / 60000;
-    if (rc.result === "MATCH" && rc.baselineSha === baseSha && rc.sourceFp === curFp && ageMin >= 0 && ageMin < 5) {
+    if ((rc.result === "MATCH" || rc.result === "PIXMATCH") && rc.baselineSha === baseSha && rc.sourceFp === curFp && ageMin >= 0 && ageMin < 5) {
       console.log(`[gate] fresh MATCH receipt (${ageMin.toFixed(1)} min old, same baseline & sources) — 未检不锚 satisfied ✔`);
       return;
     }

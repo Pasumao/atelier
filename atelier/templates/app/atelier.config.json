@@ -17,5 +17,6 @@
   },
   "locked": [],
   "agent": { "confirm": "auto", "requireToken": true },
+  "snapshot": { "mismatchThreshold": 0.01 },
   "build": { "ssr": "none" }
 }

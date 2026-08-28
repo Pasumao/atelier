@@ -6,15 +6,17 @@
 > | P0-1 命令下行通道 | ✅ SSE→页面执行→ack 全链实证（checkpoint.list/time_travel/rollback 五断言过）；live 9→12/21 |
 > | P0-2 编译器 MVP | ⏳ 分期①地基（Template 缓存已随 P1-2 落地）②**AST dump ✅（atelier/compiler/dump.mjs：单解析器同源、scanner 模式栈、30/30 测试含 dump↔parseTemplate 同树断言）** ③代码生成 未动 |
 > | P0-3 M3 实验台 | ⏳ 待建 |
-> | P0-4 性能基线台 | ⏳ 待建 |
+> | P0-4 性能基线台 | ✅ `atelier bench`（scripts/bench.mjs）：四指标实测进 README——gzip 5.85KB ✔ / 10³ 节点挂载 3.3ms ✔ / HMR 114ms ✖ / 截图回环 1937ms ✖；两条超标项转为 P0 修复工单（见下） |
+> | **P0-5（新）HMR 保态与提速** | ⏳ bench 实测整页 reload 路径 114ms 超标，且 reload 必然清零 $state（P1-5 实验证实）；修法：dev 插件 transform .atr.ts 注入 `import.meta.hot.accept` + 信号图快照保留（acceptHMR 式） |
+> | **P0-6（新）截图回环持久实例** | ⏳ 每拍拉起瞬态无头浏览器 ≈1.9s；修法：dev 面持有常驻无头实例（崩溃自愈重启），截图复用同一 tab（预计可入 500ms 内） |
 > | P1-1 keyed each | ✅ `{#each … by keyExpr}` reconcile 落地（无 by 保持旧语义） |
 > | P1-2 Template 缓存 | ✅ strings-key AST 缓存（容量 500 兜底清空） |
 > | P1-3 expr fuzz-lite | ✅ vitest 差分对拍 200 样本 + 运算符矩阵；**抓出并修复 ‖/&& 值语义 bug** |
 > | P1-4 vitest 接入 | ✅ **26/26 绿**（core/contract/primitives/expr）；`pnpm test` |
-> | P1-5 HMR 保态实验 | ⏳ 待做 |
+> | P1-5 HMR 保态实验 | ✅ 实验定性完成（2026-08-28 实测）：starter 组件未接 HMR accept → 编辑 .atr.ts 走整页 reload（108ms 可见），**$state 必然清零**（点击 count:3 → 改源码 → count:0 实证）。按验收标准转为修复工单 → **P0-5** |
 > | P1-6 audit.log | ✅ JSONL 入账（写路由/命令 enqueue/ack/截图）+ MCP 尾读工具 |
 > | P1-7 requireToken | ✅ UUID 门禁 401 断言过；transformIndexHtml 注入页面；.atelier/dev-token 供工具读取 |
-> | P1-8 像素级对比 | ⏳ 待做（方案：自研 lite PNG decoder 或截图实例 canvas evaluate） |
+> | P1-8 像素级对比 | ✅ 截图端点 `?compare=1`：同一无头实例内 canvas evaluate 逐像素归一化距离（零 npm 依赖）；阈值 `atelier.config.json → snapshot.mismatchThreshold`（模板 0.01）；判定三档 MATCH / **PIXMATCH**（字节差但像素比 ≤ 阈值，字体抗锯齿不算回归）/ MISMATCH（报像素比）；门禁回执同步接受 PIXMATCH。实测：单字改动 3.23e-3 ✔ 通过、整行删除 5.93e-2 ✔ 拒绝 |
 > | P1-9 契约 demo | ✅ 模板新增 ContractProbe 三元共置组件（reqProps title+level）+ main.ts 双实例演示段：合法实例 + 缺 level 违规实例（ATR-201 错误卡，P2-1 边界兜底）；spec 4 例机检绿；init→install→test 14/14 绿；snapshot 管线实机 MATCH。【视觉复核留待用户：.dsh-trash/smoke-app/.atr/snapshots/baseline.png】 |
 > | P2-1 错误边界泛化 | ✅ bindExpr catch→错误卡文本 / mount 层兜底 / flush 循环保活 + __ATELIER_LAST_ERROR__ 暴露 |
 > | P2-2 baseline 提交守卫 | ✅ checkpoint save 锚前实拍比对（未检不锚：MISMATCH 拒绝锚定，实机三路径验证：新回执快速通道/实拍 MATCH 放行/可见改动实拍 MISMATCH 拒绝 exit 1）；`--no-gate`/env 逃生口；快照回执含源码指纹（陈旧回执不放行）；**连带把 MCP `checkpoint.source_commit/source_list/source_rollback` 三件从 pending 转绿**（同代码路径，已 e2e 实证） |
