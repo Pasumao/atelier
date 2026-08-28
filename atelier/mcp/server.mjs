@@ -27,6 +27,7 @@ import path from "node:path";
 import url from "node:url";
 import readline from "node:readline";
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { inspectStructure } from "../scripts/struct.mjs";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
@@ -113,6 +114,22 @@ async function bridgeCall(op, args = {}) {
   );
 }
 
+/** run scripts/checkpoint.mjs in the app root; its --json payload is stdout (pretty for list, single-line for save/rollback) */
+function checkpointCli(args, cwd) {
+  const script = path.join(HERE, "..", "scripts", "checkpoint.mjs");
+  const r = spawnSync(process.execPath, [script, ...args], { cwd, encoding: "utf8" });
+  const errLines = (r.stderr ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (r.status !== 0) {
+    const msg = (errLines.find((l) => l.startsWith("error: ")) ?? errLines.at(-1) ?? `checkpoint exited ${r.status}`).replace(/^error: /, "");
+    const fix = errLines.find((l) => l.startsWith("fix: "))?.slice(5);
+    throw toolError(`ATR-4xx-checkpoint: ${msg}`, fix ?? "run checkpoint.source_list for the timeline");
+  }
+  const out = (r.stdout ?? "").trim();
+  try { return JSON.parse(out); } catch { /* fall through: last line may still be the payload */ }
+  const last = out.split("\n").at(-1) ?? "";
+  try { return JSON.parse(last); } catch { return { ok: true, raw: last }; }
+}
+
 async function callTool(name, args) {
   const PROJECT_ROOT = process.env.ATELIER_PROJECT_ROOT ?? process.cwd();
 
@@ -130,6 +147,17 @@ async function callTool(name, args) {
   if (name === "structure.check") {
     const res = inspectStructure(args?.root ?? PROJECT_ROOT);
     return { verdict: res.summary.errors > 0 ? "FAILED" : "PASSED", ...res };
+  }
+  /* decision-15 source checkpoints: thin spawn over scripts/checkpoint.mjs — same code path as the
+   * CLI, so the P2-2 未检不锚 snapshot gate applies identically to MCP-originated anchors. No
+   * --no-gate over the wire: the escape hatch stays a human CLI act. */
+  if (name === "checkpoint.source_list") return checkpointCli(["list", "--json"], PROJECT_ROOT);
+  if (name === "checkpoint.source_commit") {
+    return checkpointCli(["save", String(args?.message ?? `AI turn ${new Date().toISOString()}`), "--json"], PROJECT_ROOT);
+  }
+  if (name === "checkpoint.source_rollback") {
+    if (!args?.id) throw toolError("ATR-401: checkpoint.source_rollback requires args.id", "pick one from checkpoint.source_list output");
+    return checkpointCli(["rollback", String(args.id), "--json"], PROJECT_ROOT);
   }
   if (name === "snapshot.diff" || name === "snapshot.review_diff") {
     const shot = await fetch(`${BASE}/__atelier/screenshot`, {

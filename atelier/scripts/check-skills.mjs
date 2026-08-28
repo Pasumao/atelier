@@ -36,8 +36,8 @@ const LINE_LIMITS = {
 const TEMPLATE_LIMITS = { "templates/AGENTS.md.template": 60, "templates/llms.txt.template": 120 };
 
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const CLI_VERBS = new Set(["init", "dev", "review", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct"]);
-const FLAGS = new Set(["--ai", "--static", "--electron", "--update"]);
+const CLI_VERBS = new Set(["init", "dev", "review", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct", "checkpoint", "mcp", "skills", "compile"]);
+const FLAGS = new Set(["--ai", "--static", "--electron", "--update", "--no-gate", "--json"]);
 const TOOL_PREFIXES = /^(?:registry|tokens|state|ui|docs|checkpoint|test|snapshot|diff|audit|feedback|structure)\./;
 const RUNTIME_API = new Set([
   "component", "$state", "$derived", "$effect", "html", "streamValue", "optimisticList",

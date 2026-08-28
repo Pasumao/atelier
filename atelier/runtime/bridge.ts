@@ -12,7 +12,7 @@
  * 信号 debugName 与依赖图导出、编译期静态图直连。
  * 已知边界：仅覆盖安装时点已存在的信号（动态挂载的新组件信号需重装 bridge）。
  */
-import { $effect, store } from "./core";
+import { $effect, store } from "./core.ts";
 
 let pushing = false;
 let queued = false;

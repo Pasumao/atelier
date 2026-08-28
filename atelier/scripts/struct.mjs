@@ -225,6 +225,45 @@ function* findSuffixDeep(dir, suffix, maxDepth, depth = 0) {
 }
 
 /** Structured result — consumed by MCP `structure.map` / `structure.check`. */
+
+/* ---- P2-3 skill trigger automation ------------------------------------
+ * structure.map carries a `suggestSkills` field so agent-side routing can load
+ * packs by structured signal instead of prose trigger words. Signals are cheap
+ * and bounded: suffix globs + a capped keyword scan (≤30 files × 120KB).
+ */
+function scanKeyword(root, files, re) {
+  for (const f of files.slice(0, 30)) {
+    try {
+      if (fs.statSync(f).size > 120_000) continue;
+      if (re.test(fs.readFileSync(f, "utf8"))) return true;
+    } catch { /* unreadable file just carries no signal */ }
+  }
+  return false;
+}
+
+function suggestSkills(root) {
+  const has = (rel) => fs.existsSync(path.join(root, rel));
+  const atrComponents = [...findSuffixDeep(root, ".atr.ts", 6)];
+  const atrSpecTests = [...findSuffixDeep(root, ".atr.spec.ts", 6)];
+  const srcTs = [...findSuffixDeep(path.join(root, "src"), ".ts", 4)];
+  const scanPool = [...atrComponents, ...srcTs];
+  const packs = [{ pack: "atelier", because: "entry — read first for any Atelier task" }];
+  if (atrComponents.length)
+    packs.push({ pack: "atelier-component-model", because: `${atrComponents.length} *.atr.ts component(s) on disk` });
+  if (atrComponents.length || has("atelier.config.json"))
+    packs.push({ pack: "atelier-styling", because: atrComponents.length ? "components carry style blocks bound to tokens" : "token SSOT (atelier.config.json) present" });
+  if (scanKeyword(root, scanPool, /\$state\b|\bstore\b|store\.commit/))
+    packs.push({ pack: "atelier-state-transactions", because: "$state/store usage detected in sources" });
+  if (scanKeyword(root, scanPool, /\bstreamValue\b|\boptimisticList\b/))
+    packs.push({ pack: "atelier-streaming", because: "streamValue/optimisticList usage detected" });
+  if (atrSpecTests.length || has(".atr/snapshots") || has("tests"))
+    packs.push({ pack: "atelier-testing", because: atrSpecTests.length ? `${atrSpecTests.length} co-located *.atr.spec.ts` : "snapshot/test surfaces present" });
+  if (has(".atelier/dev-token") || has("scripts/atelier-dev-plugin.mjs") || has("atelier/dev"))
+    packs.push({ pack: "atelier-mcp-tools", because: "dev face present — query state via MCP instead of reading files" });
+  packs.push({ pack: "atelier-error-codes", because: "load reactively on any ATR-xxx error", reactive: true });
+  return packs;
+}
+
 export function inspectStructure(root = process.cwd()) {
   const findings = probeChecks(root);
   const LAYERS = [
@@ -246,6 +285,7 @@ export function inspectStructure(root = process.cwd()) {
     modelVersion: "six-layer/v0.2",
     summary: { errors: count("ERROR"), warnings: count("WARN"), infos: count("INFO"), ok: findings.filter((f) => f.severity === null).length },
     layers,
+    suggestSkills: suggestSkills(root), // P2-3: structured trigger field for agent-side routing
   };
 }
 
@@ -262,6 +302,8 @@ function printMap(res) {
     }
   }
   console.log(`\nsummary: ${res.summary.errors} error · ${res.summary.warnings} warn · ${res.summary.infos} info · ${res.summary.ok} ok`);
+  console.log("\nsuggested skill packs (load on demand):");
+  for (const s of res.suggestSkills) console.log(`  · ${s.pack} — ${s.because}`);
 }
 
 /* ---------- CLI (runs only when invoked directly; library consumers import inspectStructure) ---------- */

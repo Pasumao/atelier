@@ -4,7 +4,7 @@
 > | 项 | 状态 |
 > |---|---|
 > | P0-1 命令下行通道 | ✅ SSE→页面执行→ack 全链实证（checkpoint.list/time_travel/rollback 五断言过）；live 9→12/21 |
-> | P0-2 编译器 MVP | ⏳ 分期①地基（Template 缓存已随 P1-2 落地）②AST dump ③代码生成 未动 |
+> | P0-2 编译器 MVP | ⏳ 分期①地基（Template 缓存已随 P1-2 落地）②**AST dump ✅（atelier/compiler/dump.mjs：单解析器同源、scanner 模式栈、30/30 测试含 dump↔parseTemplate 同树断言）** ③代码生成 未动 |
 > | P0-3 M3 实验台 | ⏳ 待建 |
 > | P0-4 性能基线台 | ⏳ 待建 |
 > | P1-1 keyed each | ✅ `{#each … by keyExpr}` reconcile 落地（无 by 保持旧语义） |
@@ -15,13 +15,13 @@
 > | P1-6 audit.log | ✅ JSONL 入账（写路由/命令 enqueue/ack/截图）+ MCP 尾读工具 |
 > | P1-7 requireToken | ✅ UUID 门禁 401 断言过；transformIndexHtml 注入页面；.atelier/dev-token 供工具读取 |
 > | P1-8 像素级对比 | ⏳ 待做（方案：自研 lite PNG decoder 或截图实例 canvas evaluate） |
-> | P1-9 契约 demo | ⏳ 待做 |
+> | P1-9 契约 demo | ✅ 模板新增 ContractProbe 三元共置组件（reqProps title+level）+ main.ts 双实例演示段：合法实例 + 缺 level 违规实例（ATR-201 错误卡，P2-1 边界兜底）；spec 4 例机检绿；init→install→test 14/14 绿；snapshot 管线实机 MATCH。【视觉复核留待用户：.dsh-trash/smoke-app/.atr/snapshots/baseline.png】 |
 > | P2-1 错误边界泛化 | ✅ bindExpr catch→错误卡文本 / mount 层兜底 / flush 循环保活 + __ATELIER_LAST_ERROR__ 暴露 |
-> | P2-2 baseline 提交守卫 | ⏳ 待做 |
-> | P2-3 skill 触发器自动化 | ⏳ 待做 |
-> | P2-4 CI 矩阵 | ⏳ workflow 文件待写 |
+> | P2-2 baseline 提交守卫 | ✅ checkpoint save 锚前实拍比对（未检不锚：MISMATCH 拒绝锚定，实机三路径验证：新回执快速通道/实拍 MATCH 放行/可见改动实拍 MISMATCH 拒绝 exit 1）；`--no-gate`/env 逃生口；快照回执含源码指纹（陈旧回执不放行）；**连带把 MCP `checkpoint.source_commit/source_list/source_rollback` 三件从 pending 转绿**（同代码路径，已 e2e 实证） |
+> | P2-3 skill 触发器自动化 | ✅ structure.map 输出携带 `suggestSkills` 字段（信号驱动：组件/流式/状态/测试/dev 面各自触发，有界扫描 ≤30 文件）；CLI 人读/JSON 与 MCP structure.map 同源 |
+> | P2-4 CI 矩阵 | ✅ workflow 已写（.github/workflows/ci.yml）：ubuntu/windows × node 22/24 跑 vitest/check-skills/struct check/init smoke；另加 snapshot-smoke job（dev 面→截图→P2-2 门禁锚定全链，continue-on-error 诚实标注，待首次 CI 运行验证） |
 > | P2-5 review UI | ⏳ 待做 |
-> | P2-6 决策14 卫生化 | ⏳ 待做 |
+> | P2-6 决策14 卫生化 | ✅ 全仓清点（含隐藏目录）活体 fnh 引用 = 0；决策 14 映射表降级为历史归档，别名兼容期确认关闭 |
 >
 > **额外收获**：内核同步失效缺陷修复（derived 写后同 tick stale → 订阅模型重构为 deliver() 双策略分发）；‖/&& 从布尔改回 JS 值语义；ATR-205 与实现对齐；TRUST_GITIGNORE/幽灵注册表在实战各抓一例。
 > 诚实性修正：checkpoint 三件曾虚标 implemented，本轮真正转绿（见 P0-1）。

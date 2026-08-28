@@ -3,7 +3,7 @@
  * streamValue：流式值（取代手写 setInterval 打字机，决策 9 语义）。
  * optimisticList：乐观更新 + 自动回滚（pending → committed / revert）。
  */
-import { $state } from "./core";
+import { $state } from "./core.ts";
 
 export type StreamValue<T> = {
   values: T[];

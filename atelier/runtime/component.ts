@@ -2,7 +2,7 @@
  * Atelier prototype — 组件注册与全局注册表（决策 1/6/7 雏形）。
  * 组件名取函数名；schema 写入组件元数据（完整版由编译器提取）。
  */
-import type { ComponentDef, ComponentRegistry } from "./template";
+import type { ComponentDef, ComponentRegistry } from "./template.ts";
 
 export const registry: ComponentRegistry = new Map();
 

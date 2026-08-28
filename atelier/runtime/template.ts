@@ -5,8 +5,8 @@
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
-import { $effect, type Signal } from "./core";
-import { evalExpr } from "./expr";
+import { $effect, type Signal } from "./core.ts";
+import { evalExpr } from "./expr.ts";
 
 /** —— token 单源（决策 8）：由 main.ts 启动时加载 atelier.config.json 注入 —— */
 export const tokenState = {
@@ -58,14 +58,19 @@ export type AtrError = {
   fix: string;
 };
 
-/** —— 模板解析 —— */
-type Attr = { name: string; value: string; dynamic: boolean };
-type Node =
+/** —— 模板解析 ——
+ * 类型与 parseTemplate 对编译器（P0-2②）开放：dump 直接消费同一解析器，保证
+ * 「编译器看到的树 = 解释器跑的树」单一来源。 */
+export type TemplateAttr = { name: string; value: string; dynamic: boolean };
+export type TemplateNode =
   | { kind: "text"; text: string }
   | { kind: "expr"; expr: string }
-  | { kind: "element"; tag: string; component: boolean; attrs: Attr[]; children: Node[] }
-  | { kind: "if"; blocks: { test: string | null; children: Node[] }[] }
-  | { kind: "each"; expr: string; item: string; index: string; keyExpr?: string; children: Node[] };
+  | { kind: "element"; tag: string; component: boolean; attrs: TemplateAttr[]; children: TemplateNode[] }
+  | { kind: "if"; blocks: { test: string | null; children: TemplateNode[] }[] }
+  | { kind: "each"; expr: string; item: string; index: string; keyExpr?: string; children: TemplateNode[] };
+// internal short aliases (public names above are the compiler-facing surface)
+type Attr = TemplateAttr;
+type Node = TemplateNode;
 
 class Parser {
   src: string;
@@ -214,7 +219,9 @@ class Parser {
  * 动态拼接的 raw 若频繁变化由容量上限兜底清空（AST 只读共享，渲染期不改树）。
  */
 const parseCache = new Map<string, Node[]>();
-function parseTemplate(src: string): Node[] {
+/** exported for the compiler (P0-2② AST dump): one parser, one truth — the dump and the
+ * runtime interpreter MUST see the same tree for the same template string. */
+export function parseTemplate(src: string): Node[] {
   let ast = parseCache.get(src);
   if (!ast) {
     ast = new Parser(src).parseContent();

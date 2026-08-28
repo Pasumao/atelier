@@ -1,0 +1,13 @@
+{
+  "$schema": "atelier-ast-dump/0.1",
+  "generatedAt": "2026-08-28T04:50:01.350Z",
+  "root": "D:/Agentic/atelier",
+  "components": [
+    {
+      "name": "HelloCard",
+      "file": "templates/app/src/components/HelloCard.atr.ts",
+      "templateCount": 1,
+      "out": "HelloCard.json"
+    }
+  ]
+}

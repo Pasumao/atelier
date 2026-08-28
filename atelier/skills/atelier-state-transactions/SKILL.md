@@ -26,7 +26,7 @@ store.list();                 // [{ id, name, at }] — the human-visible timeli
 | **App state** | signals / UI state | `store.rollback()` (immediate) |
 | **Source** | filesystem (.atr.ts / config) | git — `checkpoint.source_rollback` via MCP, or `git reset --soft` + working tree restore |
 
-> Mistake to avoid: wanting to revert an edit but only rolling back UI state. Source rollback is the git track — both tracks are anchored together when `checkpoint.source_commit` runs after `atelier check + test` pass.
+> Mistake to avoid: wanting to revert an edit but only rolling back UI state. Source rollback is the git track — both tracks are anchored together when `checkpoint.source_commit` runs; the anchor refuses while the live render mismatches the snapshot baseline (未检不锚 gate, P2-2).
 
 ## Rules
 

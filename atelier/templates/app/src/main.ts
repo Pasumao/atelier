@@ -15,6 +15,7 @@ import {
   validateFlat,
 } from "./runtime";
 import { HelloCard } from "./components/HelloCard.atr.ts";
+import { ContractProbe } from "./components/ContractProbe.atr.ts"; // P1-9 契约路径演示
 
 initTokens(config as { tokens: Record<string, Record<string, string>> });
 
@@ -22,6 +23,14 @@ const app = document.getElementById("app")!;
 mountComponent(HelloCard, { title: "Hello, Atelier" }, app, registry, (schema, data) =>
   validateFlat(schema as never, data),
 );
+
+// P1-9 契约路径演示：合法实例 vs 违规实例（缺 reqProps level → ATR-201 错误卡，P2-1 边界兜住不白屏）
+const probeSection = document.createElement("section");
+probeSection.id = "contract-demo";
+app.appendChild(probeSection);
+const validate = (schema: unknown, data: Record<string, unknown>) => validateFlat(schema as never, data);
+mountComponent(ContractProbe, { title: "契约 OK 实例", level: 2, note: "reqProps 齐全" }, probeSection, registry, validate);
+mountComponent(ContractProbe, { title: "契约违规实例（缺 reqProps: level）" } as never, probeSection, registry, validate);
 
 // dev 状态桥（决策 7）：$state 图 → dev 面 → MCP `state.snapshot`。须在挂载后安装以捕获既有信号集。
 installStateBridge();

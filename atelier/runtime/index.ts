@@ -1,16 +1,18 @@
 /**
  * Atelier prototype — 运行时入口（对应未来 packages/core）。
  */
-export { $state, $derived, $effect, store } from "./core";
-export type { Signal } from "./core";
-export { html, initTokens, tokenState, mountComponent } from "./template";
-export type { HtmlTemplate, ComponentDef, ComponentRegistry } from "./template";
-export { streamValue, optimisticList } from "./primitives";
-export type { StreamValue, OptimisticItem } from "./primitives";
-export { validateFlat, validateUnknown } from "./contract";
-export type { FlatSchema, AtrError } from "./contract";
-export { component, registry } from "./component";
-export { installStateBridge } from "./bridge";
+export { $state, $derived, $effect, store } from "./core.ts";
+export type { Signal } from "./core.ts";
+export { html, initTokens, tokenState, mountComponent } from "./template.ts";
+export type { HtmlTemplate, ComponentDef, ComponentRegistry } from "./template.ts";
+export { parseTemplate } from "./template.ts"; // compiler face (P0-2②): same parser, same truth
+export type { TemplateNode, TemplateAttr } from "./template.ts";
+export { streamValue, optimisticList } from "./primitives.ts";
+export type { StreamValue, OptimisticItem } from "./primitives.ts";
+export { validateFlat, validateUnknown } from "./contract.ts";
+export type { FlatSchema, AtrError } from "./contract.ts";
+export { component, registry } from "./component.ts";
+export { installStateBridge } from "./bridge.ts";
 
 /**
  * devFetch — 页面侧访问 Atelier dev 面的安全封装。

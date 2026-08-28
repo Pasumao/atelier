@@ -1,0 +1,115 @@
+{
+  "$schema": "atelier-ast-dump/0.1",
+  "generatedAt": "2026-08-28T04:50:01.350Z",
+  "component": "HelloCard",
+  "file": "templates/app/src/components/HelloCard.atr.ts",
+  "templates": [
+    {
+      "index": 0,
+      "raw": "\n    <div class=\"ppanel\">\n      <h2 class=\"text-lg font-semibold\">{props.title}</h2>\n      <p class=\"text-muted\">最小 Atelier 组件：显式 $state + 扁平契约 + 语义 token 工具类。</p>\n      <button class=\"btn btn-primary\" on:click={inc}>count: {count.value}</button>\n    </div>\n  ",
+      "ast": [
+        {
+          "kind": "text",
+          "text": "\n    "
+        },
+        {
+          "kind": "element",
+          "tag": "div",
+          "component": false,
+          "attrs": [
+            {
+              "name": "class",
+              "value": "ppanel",
+              "dynamic": false
+            }
+          ],
+          "children": [
+            {
+              "kind": "text",
+              "text": "\n      "
+            },
+            {
+              "kind": "element",
+              "tag": "h2",
+              "component": false,
+              "attrs": [
+                {
+                  "name": "class",
+                  "value": "text-lg font-semibold",
+                  "dynamic": false
+                }
+              ],
+              "children": [
+                {
+                  "kind": "expr",
+                  "expr": "props.title"
+                }
+              ]
+            },
+            {
+              "kind": "text",
+              "text": "\n      "
+            },
+            {
+              "kind": "element",
+              "tag": "p",
+              "component": false,
+              "attrs": [
+                {
+                  "name": "class",
+                  "value": "text-muted",
+                  "dynamic": false
+                }
+              ],
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "最小 Atelier 组件：显式 $state + 扁平契约 + 语义 token 工具类。"
+                }
+              ]
+            },
+            {
+              "kind": "text",
+              "text": "\n      "
+            },
+            {
+              "kind": "element",
+              "tag": "button",
+              "component": false,
+              "attrs": [
+                {
+                  "name": "class",
+                  "value": "btn btn-primary",
+                  "dynamic": false
+                },
+                {
+                  "name": "on:click",
+                  "value": "inc",
+                  "dynamic": true
+                }
+              ],
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "count: "
+                },
+                {
+                  "kind": "expr",
+                  "expr": "count.value"
+                }
+              ]
+            },
+            {
+              "kind": "text",
+              "text": "\n    "
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "\n  "
+        }
+      ]
+    }
+  ]
+}

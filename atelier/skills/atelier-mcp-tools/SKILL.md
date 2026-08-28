@@ -10,7 +10,7 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 | Face | Tools | Power |
 |---|---|---|
 | **Query (read-only)** | `structure.map` · `structure.check` · `registry.list_components` · `registry.get_component` · `tokens.list` · `state.snapshot` · `state.get` · `ui.screenshot` · `docs.search` | inspect only — `structure.*` computed server-locally, no dev server needed |
-| **Operation** | `checkpoint.list` · `checkpoint.rollback` · `checkpoint.source_list` · `checkpoint.source_rollback` · `state.time_travel` · `test.run` · `snapshot.diff` · `snapshot.review_diff` · `diff.report` | changes state; **audit-logged**, confirm tier applies |
+| **Operation** | `checkpoint.list` · `checkpoint.rollback` · `checkpoint.source_list` · `checkpoint.source_commit` · `checkpoint.source_rollback` · `state.time_travel` · `test.run` · `snapshot.diff` · `snapshot.review_diff` · `diff.report` | changes state; **audit-logged**, confirm tier applies |
 | **Audit** | `audit.log` · `feedback.read` | read side effects + human feedback |
 
 ## Command ↔ tool mapping (use the tool when the CLI is not enough)
@@ -22,6 +22,7 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 | `atelier snapshot` | `snapshot.diff` / `snapshot.review_diff` |
 | `atelier review` | `diff.report` + `feedback.read` |
 | rollback (any) | `checkpoint.rollback` / `checkpoint.source_rollback` |
+| `atelier checkpoint save` | `checkpoint.source_commit` (same code path — 未检不锚 snapshot gate applies; `--no-gate` escape hatch is CLI-only) |
 
 ## Confirm tiers & audit (decision 12)
 
