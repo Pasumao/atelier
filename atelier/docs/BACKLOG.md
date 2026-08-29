@@ -4,7 +4,7 @@
 > | 项 | 状态 |
 > |---|---|
 > | P0-1 命令下行通道 | ✅ SSE→页面执行→ack 全链实证（checkpoint.list/time_travel/rollback 五断言过）；live 9→12/21 |
-> | P0-2 编译器 MVP | ⏳ 分期①地基（Template 缓存已随 P1-2 落地）②**AST dump ✅（atelier/compiler/dump.mjs：单解析器同源、scanner 模式栈、30/30 测试含 dump↔parseTemplate 同树断言）** ③代码生成 未动 |
+> | P0-2 编译器 MVP | ✅ 三分期全落地：①Template 缓存（随 P1-2）②**AST dump ✅（atelier/compiler/dump.mjs：单解析器同源、scanner 模式栈、dump↔parseTemplate 同树断言）** ③**代码生成 ✅（2026-08-29，atelier/compiler/codegen.mjs）：AST → 零 import 静态 effect 图模块（直线 createElement + 定点 $effect 接线，运行时能力经 ctx.rt=__compiledRT 注入，与解释器同函数）；runtime 按 raw 精确命中 compiledByRaw → 该组件零 tokenize。验收双实证：vitest golden DOM diff（micro-DOM shim，6 模板用例含 keyed 重排/事件/契约错误卡，39/39 绿）+ 应用级 P2-2 门禁 MATCH（smoke-app 真接线 HelloCard+ContractProbe，ratio 0 ≤ 0.01）。CLI：dump --root → codegen --ast；诚实边界：codegen 覆盖 text/expr/element/if/each 全解释器子集，未知节点 ATR-1xx-codegen 显式拒绝（无静默降级）** |
 > | P0-3 M3 实验台 | ⏳ 待建 |
 > | P0-4 性能基线台 | ✅ `atelier bench`（scripts/bench.mjs）：四指标实测进 README——gzip 6.25KB ✔ / 10³ 节点挂载 2–2.9ms ✔ / HMR 46–61ms ✔（P0-5 修复）/ 截图回环 298–304ms ✔（P0-6 修复）；四项全 PASS（2026-08-29 复测） |
 > | **P0-5（新）HMR 保态与提速** | ✅ dev 插件 transform 给 *.atr.ts 注入 `import.meta.hot.accept` → runtime 保值热交换（活实例登记 + 栈式信号收集 + 重挂载按序还原值）。实测：编辑可见 108ms→**51ms**，**$state 不再清零**（点击 count:3 → 改源码 → count:3 实证）。已知边界（诚实标注）：旧树 effects 不逐个 dispose（dev-only 有界泄漏）；模板结构大改时按序还原可能错位（多出新信号保持初值）；跨交换的旧 checkpoint 不回落新信号 |

@@ -14,6 +14,8 @@ export type { FlatSchema, AtrError } from "./contract.ts";
 export { component, registry } from "./component.ts";
 export { installStateBridge } from "./bridge.ts";
 export { hmrRemountAll } from "./template.ts"; // P0-5: 保值热交换（dev 插件注入的 accept 回调经 window 钩子调用）
+export { registerCompiled, compiledTemplateCount } from "./template.ts"; // P0-2③: 编译产物注册（codegen 模块接入零 tokenize 快路径）
+export type { CompiledTemplate } from "./template.ts";
 
 /**
  * devFetch — 页面侧访问 Atelier dev 面的安全封装。

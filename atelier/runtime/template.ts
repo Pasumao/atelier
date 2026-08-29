@@ -344,9 +344,19 @@ function mountComponentInner(
     const tpl = def.render(props as never) ?? { raw: "", scope: {} };
     const scope = { ...(tpl.scope ?? {}), props };
     const file = `components/${def.name}.atr.ts`;
-    const styleMatch = /<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>/i.exec(tpl.raw);
-    if (styleMatch) injectScopedStyle(def.name, styleMatch[1], file);
-    const frag = renderNodes(parseTemplate(tpl.raw), scope, registry, validate, file, def.name);
+    // P0-2③：已编译模板按 raw 精确命中 → 完全跳过 parseTemplate（该组件运行时零 tokenize）。
+    // 结构构建与 effect 接线由生成代码静态完成；运行时能力经 ctx.rt 注入（__compiledRT），
+    // 与解释器同源同函数 ⇒ 「编译路径 ≡ 解释器路径」（golden DOM diff 见 tests/codegen.test.ts）。
+    const compiled = compiledByRaw.get(tpl.raw);
+    let frag: DocumentFragment;
+    if (compiled) {
+      for (const css of compiled.styles ?? []) injectScopedStyle(def.name, css, file);
+      frag = compiled.program({ scope, registry, validate, file, componentName: def.name, rt: __compiledRT });
+    } else {
+      const styleMatch = /<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>/i.exec(tpl.raw);
+      if (styleMatch) injectScopedStyle(def.name, styleMatch[1], file);
+      frag = renderNodes(parseTemplate(tpl.raw), scope, registry, validate, file, def.name);
+    }
     root = document.createElement("div");
     root.className = `atr-root atr-scope-${def.name}`;
     if (scopeClasses.has(def.name)) root.classList.add(scopeClasses.get(def.name)!);
@@ -591,3 +601,58 @@ function renderNode(
 function booly(v: unknown): boolean {
   return Boolean(v);
 }
+
+/* ---- P0-2③ 编译产物（compiler/codegen.mjs stage ③ 输出）注册与运行时依赖面 ---- */
+
+export type CompiledTemplate = {
+  name: string;
+  raw: string;
+  styles?: string[];
+  program: (ctx: {
+    scope: Record<string, unknown>;
+    registry: ComponentRegistry;
+    validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError };
+    file: string;
+    componentName: string;
+    rt: typeof __compiledRT;
+  }) => DocumentFragment;
+};
+
+const compiledByRaw = new Map<string, CompiledTemplate>();
+
+/** 注册编译产物。接受 codegen 模块形态：`{compiled}` / `{compiledList}` / 数组 / 单条。
+ * 按 raw 精确匹配——P0-2② 单一来源（dump 的树 = 解释器的树）⇒ raw 相同即模板相同，无歧义。 */
+export function registerCompiled(
+  mod:
+    | { compiled?: CompiledTemplate; compiledList?: CompiledTemplate[] }
+    | CompiledTemplate
+    | CompiledTemplate[]
+): void {
+  const list: CompiledTemplate[] = Array.isArray(mod)
+    ? mod
+    : ((mod as { compiledList?: CompiledTemplate[] }).compiledList ??
+      [(mod as { compiled?: CompiledTemplate }).compiled ?? (mod as CompiledTemplate)]);
+  for (const c of list) {
+    if (c && typeof c.raw === "string" && typeof c.program === "function") {
+      compiledByRaw.set(c.raw, c);
+    }
+  }
+}
+
+/** 测试/审计用：当前注册的编译模板条数 */
+export function compiledTemplateCount(): number {
+  return compiledByRaw.size;
+}
+
+/** P0-2③：编译产物的运行时依赖面——生成的 program 不 import 任何运行时模块（产物与
+ * runtime 路径/打包布局零耦合），全部能力经 ctx.rt 注入；实现即本文件解释器同源函数，
+ * 保证「编译路径 ≡ 解释器路径」。 */
+export const __compiledRT = {
+  $effect,
+  evalExpr,
+  stringify,
+  booly,
+  bindExpr,
+  recordRuntimeError,
+  mountComponent,
+};
