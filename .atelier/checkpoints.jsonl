@@ -30,3 +30,4 @@
 {"type":"save","id":"8d1d0b8","sha":"8d1d0b8c6c0baa100e7e4719497d629897a0e6e5","name":"P0-2③ 编译器代码生成器（AST→零import静态effect图；golden DOM diff + 应用级 MATCH 双实证；39/39 绿）","at":"2026-08-29T10:31:20.145Z"}
 {"type":"save","id":"51f11a7","sha":"51f11a7391c411734fd11d0e9fb89b539587607e","name":"P2-5 review UI 原型（timeline+双图并排+判定写回 specs/feedback.jsonl，与 feedback.read 同约定，e2e 全绿）","at":"2026-08-29T10:34:17.336Z"}
 {"type":"save","id":"0959a11","sha":"0959a11f1bbc15059edd7461dddc28d6cdde8317","name":"P0-3 M3 实验台（三臂协议+3任务书+评分器+§7出数；正控3/3 PASS+负控拒绝）——BACKLOG 全项收口","at":"2026-08-29T10:42:24.248Z"}
+{"type":"save","id":"19bfb99","sha":"19bfb992118bb6382ad833a7a054e0c7a52dedba","name":"M3 实验 wave-1~3 收官（27/27 首遍 PASS，§7 绝对口径出数+天花板效应如实申报；wave-4/5 按指令暂停）","at":"2026-08-29T12:20:05.195Z"}
