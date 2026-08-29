@@ -51,6 +51,8 @@ react    runs=9  firstPass=100%
 
 ## 6. 恢复方法（wave-4/5）
 
+> **恢复尝试日志（2026-08-29，暂停后按指令恢复串行）**：槽位 noskill.task1-counter.r4 连续 3 个全新会话 + 续跑均**秒挂零产出**（目录无组件）——崩溃已从"批跑相关"恶化为"单发也必挂"，判定基础设施当前不可用，停止烧重试。wave-4/5 共 18 run 待基础设施恢复后按本节方法续跑；r4 该槽位无需特殊处理（目录仍是干净初始态）。
+
 ```
 # 目录与 prompt 已全部预制：.dsh-trash/m3/<arm>.<task>.r4|r5（atelier 臂含 runtime junction + 技能包）
 # prompt：.dsh-trash/m3/prompts/<arm>.<task>.r<run>.prompt.txt
