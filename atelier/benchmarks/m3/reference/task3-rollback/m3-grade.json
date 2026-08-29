@@ -1,0 +1,20 @@
+{
+  "task": "task3-rollback",
+  "attempt": "D:/Agentic/atelier/benchmarks/m3/reference/task3-rollback",
+  "at": "2026-08-29T10:41:09.232Z",
+  "ok": true,
+  "exitCode": 0,
+  "summary": {
+    "tests": "Tests  4 passed (4)"
+  },
+  "tail": [
+    "Already up to date",
+    "Done in 331ms using pnpm v11.21.0",
+    "RUN  v4.1.11 D:/Agentic/atelier",
+    "✓ benchmarks/m3/harness/acceptance.spec.ts (4 tests) 44ms",
+    "Test Files  1 passed (1)",
+    "Tests  4 passed (4)",
+    "Start at  18:41:08",
+    "Duration  315ms (transform 70ms, setup 0ms, import 144ms, tests 44ms, environment 0ms)"
+  ]
+}
