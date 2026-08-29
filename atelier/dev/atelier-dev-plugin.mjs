@@ -191,6 +191,126 @@ export function atelierDevPlugin() {
           return;
         }
 
+        /* ---------- review UI（P2-5 spec L5 最小版）---------- */
+        if (url === "/__atelier/feedback") {
+          // 与 MCP feedback.read 同一约定：specs/feedback.jsonl 每行 {at,verdict,target,note}
+          const body = await readBody(req);
+          let parsed = {};
+          try { parsed = JSON.parse(body || "{}"); } catch { /* falls through */ }
+          const verdict = parsed.verdict === "approve" || parsed.verdict === "disapprove" ? parsed.verdict : null;
+          if (!verdict) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ ok: false, error: "verdict must be \"approve\" | \"disapprove\"", fix: "POST {verdict, target?, note?}" }));
+            return;
+          }
+          const row = { at: new Date().toISOString(), verdict, target: String(parsed.target ?? "snapshot"), note: String(parsed.note ?? "") };
+          try {
+            fs.mkdirSync(path.join(ROOT, "specs"), { recursive: true });
+            fs.appendFileSync(path.join(ROOT, "specs", "feedback.jsonl"), JSON.stringify(row) + "\n", "utf-8");
+            audit("feedback", row);
+            res.end(JSON.stringify({ ok: true, row, path: "specs/feedback.jsonl" }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+          }
+          return;
+        }
+        if (url === "/__atelier/snapshot-image") {
+          // baseline/current 基线图直接从磁盘出（review 页 <img> 用；白名单外一律 404）
+          const name = new URL(rawUrl, "http://x").searchParams.get("name") ?? "";
+          if (name !== "baseline" && name !== "current") {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ ok: false, error: "name must be baseline | current" }));
+            return;
+          }
+          const p = path.join(ROOT, ".atr", "snapshots", `${name}.png`);
+          if (!fs.existsSync(p)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ ok: false, error: `no ${name}.png yet (run 'atelier snapshot save' / snapshot.diff)` }));
+            return;
+          }
+          res.setHeader("Content-Type", "image/png");
+          res.end(fs.readFileSync(p));
+          return;
+        }
+        if (url === "/__atelier/review") {
+          // spec L5 最小版：timeline + 双图并排 + approve/disapprove 写回 specs/
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.end(`<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Atelier Review</title><style>
+body{font:14px/1.5 system-ui,sans-serif;margin:24px;color:#1a1a2e;background:#fafafa}
+h1{font-size:18px} h2{font-size:15px;margin:18px 0 8px}
+.row{display:flex;gap:16px;flex-wrap:wrap}.col{flex:1;min-width:320px}
+.card{background:#fff;border:1px solid #e2e2e8;border-radius:8px;padding:14px}
+img{max-width:100%;border:1px solid #ddd;background:#fff}
+button{padding:6px 14px;border-radius:6px;border:1px solid #c9c9d4;background:#fff;cursor:pointer}
+button.approve{border-color:#2e7d32;color:#2e7d32}button.disapprove{border-color:#c62828;color:#c62828}
+button:hover{filter:brightness(.96)}
+input{padding:6px 8px;border:1px solid #c9c9d4;border-radius:6px;width:60%}
+li{margin:2px 0}.muted{color:#777}.ok{color:#2e7d32}.bad{color:#c62828}
+#msg{margin-top:8px;min-height:20px}
+</style></head><body>
+<h1>Atelier Review <span class="muted">— spec L5（timeline · 双图并排 · 判定写回 specs/）</span></h1>
+<div class="row"><div class="col card"><h2>Checkpoint timeline</h2><ul id="timeline" class="muted">loading…</ul>
+<div class="muted" id="meta"></div></div>
+<div class="col card"><h2>判定（写回 specs/feedback.jsonl）</h2>
+<input id="note" placeholder="note（可空）"/><br/><br/>
+<button class="approve" id="approve">👍 Approve</button>
+<button class="disapprove" id="disapprove">👎 Disapprove</button>
+<div id="msg"></div><h2>历史判定</h2><ul id="history" class="muted">loading…</ul></div></div>
+<h2>双图并排（baseline ｜ current） <button id="fresh">Fresh capture</button> <button id="reload">Reload images</button></h2>
+<div class="row"><div class="col card"><div class="muted">baseline</div><img id="baseline" alt="baseline"/></div>
+<div class="col card"><div class="muted">current</div><img id="current" alt="current"/></div></div>
+<script>
+const TOKEN = ${JSON.stringify(TOKEN)};
+const H = { "x-atelier-token": TOKEN };
+const $ = (id) => document.getElementById(id);
+function esc(s){const d=document.createElement("div");d.textContent=String(s??"");return d.innerHTML;}
+async function loadState(){
+  try{ const j = await (await fetch("/__atelier/state-snapshot",{headers:H})).json();
+    const tl = Array.isArray(j.timeline) ? j.timeline : [];
+    $("timeline").innerHTML = tl.length ? tl.map(c=>'<li><code>'+esc(c.id)+'</code> '+esc(c.name)+' <span class="muted">'+esc(new Date(c.at).toLocaleString())+'</span></li>').join("") : "<li>(empty — store.commit 会出现在这里)</li>";
+    $("meta").textContent = "signals="+(j.signalCount??0)+" · checkpoints="+(j.checkpointCount??0)+" · "+(j.href??"");
+  }catch(e){ $("timeline").innerHTML = "<li>state-snapshot 不可达（页面未打开过？）</li>"; }
+}
+function bust(){ return "?t="+Date.now(); }
+function loadImages(){ $("baseline").src = "/__atelier/snapshot-image?name=baseline"+bust(); $("current").src = "/__atelier/snapshot-image?name=current"+bust(); }
+async function loadHistory(){
+  try{ const j = await (await fetch("/__atelier/feedback-history",{headers:H})).json();
+    $("history").innerHTML = (j.rows??[]).length ? j.rows.map(r=>'<li>'+esc(r.at)+' <b class="'+(r.verdict==="approve"?"ok":"bad")+'">'+esc(r.verdict)+'</b> '+esc(r.target)+(r.note?' — '+esc(r.note):'')+'</li>').join("") : "<li>(none)</li>";
+  }catch(e){ $("history").innerHTML = "<li>(unreadable)</li>"; }
+}
+async function send(verdict){
+  $("msg").textContent = "…writing";
+  const r = await fetch("/__atelier/feedback",{method:"POST",headers:{...H,"content-type":"application/json"},
+    body: JSON.stringify({ verdict, target: "snapshot:"+location.search, note: $("note").value })});
+  const j = await r.json();
+  $("msg").innerHTML = j.ok ? '<span class="ok">written → '+esc(j.path)+'</span>' : '<span class="bad">'+esc(j.error)+'</span>';
+  loadHistory();
+}
+$("approve").onclick = () => send("approve");
+$("disapprove").onclick = () => send("disapprove");
+$("reload").onclick = loadImages;
+$("fresh").onclick = async () => {
+  $("msg").textContent = "capturing…";
+  try{ const j = await (await fetch("/__atelier/screenshot",{headers:H})).json();
+    if(j.ok){ $("current").src = "data:image/png;base64,"+j.imageBase64; $("msg").textContent = "fresh capture ok（落盘请用 snapshot.diff / atelier snapshot）"; }
+    else $("msg").textContent = j.error ?? "capture failed";
+  }catch(e){ $("msg").textContent = String(e); }
+};
+loadState(); loadImages(); loadHistory();
+</script></body></html>`);
+          return;
+        }
+        if (url === "/__atelier/feedback-history") {
+          let rows = [];
+          try {
+            rows = fs.readFileSync(path.join(ROOT, "specs", "feedback.jsonl"), "utf-8")
+              .split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return { raw: l }; } });
+          } catch { /* none yet */ }
+          res.end(JSON.stringify({ ok: true, rows }));
+          return;
+        }
+
         /* ---------- bridge: up-push / downlink ---------- */
         if (url === "/__atelier/bridge/state") {
           const body = await readBody(req);
