@@ -6,9 +6,9 @@
 > | P0-1 命令下行通道 | ✅ SSE→页面执行→ack 全链实证（checkpoint.list/time_travel/rollback 五断言过）；live 9→12/21 |
 > | P0-2 编译器 MVP | ⏳ 分期①地基（Template 缓存已随 P1-2 落地）②**AST dump ✅（atelier/compiler/dump.mjs：单解析器同源、scanner 模式栈、30/30 测试含 dump↔parseTemplate 同树断言）** ③代码生成 未动 |
 > | P0-3 M3 实验台 | ⏳ 待建 |
-> | P0-4 性能基线台 | ✅ `atelier bench`（scripts/bench.mjs）：四指标实测进 README——gzip 5.85KB ✔ / 10³ 节点挂载 3.3ms ✔ / HMR 114ms ✖ / 截图回环 1937ms ✖；两条超标项转为 P0 修复工单（见下） |
+> | P0-4 性能基线台 | ✅ `atelier bench`（scripts/bench.mjs）：四指标实测进 README——gzip 6.25KB ✔ / 10³ 节点挂载 2–2.9ms ✔ / HMR 46–61ms ✔（P0-5 修复）/ 截图回环 298–304ms ✔（P0-6 修复）；四项全 PASS（2026-08-29 复测） |
 > | **P0-5（新）HMR 保态与提速** | ✅ dev 插件 transform 给 *.atr.ts 注入 `import.meta.hot.accept` → runtime 保值热交换（活实例登记 + 栈式信号收集 + 重挂载按序还原值）。实测：编辑可见 108ms→**51ms**，**$state 不再清零**（点击 count:3 → 改源码 → count:3 实证）。已知边界（诚实标注）：旧树 effects 不逐个 dispose（dev-only 有界泄漏）；模板结构大改时按序还原可能错位（多出新信号保持初值）；跨交换的旧 checkpoint 不回落新信号 |
-> | **P0-6（新）截图回环持久实例** | ⏳ 每拍拉起瞬态无头浏览器 ≈1.9s；修法：dev 面持有常驻无头实例（崩溃自愈重启），截图复用同一 tab（预计可入 500ms 内） |
+> | **P0-6（新）截图回环持久实例** | ✅ dev-screenshot.mjs 常驻会话：同一 tab 重新导航捕获（共享序列 captureOnSession 单一来源），崩溃/挂起自愈——复用前 2s 活性探针 + child exit/ws close 双死亡信号 → 销毁重建仅重试一次；进程 exit 同步 kill 防孤儿浏览器；跨拍陈旧 loadEventFired 事件清理（复用场景独有坑）。实测：温拍 1937→**298–304ms** ✔ 达标、P1-8 像素对比走常驻路径 MATCH（ratio 0）、杀 16 个无头进程后下一拍自愈重建并拍出正确图；瞬态 `capturePage` 保留为兼容 API，`ATELIER_SHOT_PORT` 可换端口（默认 9345） |
 > | P1-1 keyed each | ✅ `{#each … by keyExpr}` reconcile 落地（无 by 保持旧语义） |
 > | P1-2 Template 缓存 | ✅ strings-key AST 缓存（容量 500 兜底清空） |
 > | P1-3 expr fuzz-lite | ✅ vitest 差分对拍 200 样本 + 运算符矩阵；**抓出并修复 ‖/&& 值语义 bug** |

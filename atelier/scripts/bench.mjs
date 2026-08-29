@@ -12,8 +12,8 @@
  *           bench-main.ts（生成物，结束后删除，--keep 保留）
  *   --json  仅输出机器可读结果（stdout 单行 JSON）
  *
- * 诚实标注：④ 的目标是"持久实例"语境下的数字；当前实现每次截图拉起瞬态无头浏览器，
- * 实测值会显著超标——超标项按 SPEC 落成 P0 修复工单（见 BACKLOG），不粉饰。
+ * 诚实标注：④ 自 P0-6 起走常驻无头实例（同 tab 复用 + 崩溃自愈），实测 ~300ms 达标；
+ * 瞬态路径（openTransientBrowser）保留用于 bench 自己的驱动实例与独立捕获。
  */
 import fs from "node:fs";
 import path from "node:path";

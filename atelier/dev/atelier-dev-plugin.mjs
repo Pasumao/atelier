@@ -6,7 +6,7 @@
  *
  * 查询（GET，需 token）
  *  - /__atelier/registry · tokens · docs · state-snapshot
- *  - /__atelier/screenshot                 瞬态无头实例截图（视觉真相）
+ *  - /__atelier/screenshot                 常驻无头实例截图（P0-6：同 tab 复用，崩溃自愈；视觉真相）
  *  - /__atelier/audit?lines=N              审计日志尾读
  *  - /__atelier/bridge/commands?token=     SSE 命令下行流（页面 EventSource 订阅）
  * 桥接
@@ -18,7 +18,7 @@
  * 审计：非 GET 的 /__atelier/* 与命令回执均追加 .atelier/audit.jsonl。
  */
 import { createRequire } from "node:module";
-import { capturePage } from "./dev-screenshot.mjs";
+import { capturePagePersistent as capturePage } from "./dev-screenshot.mjs";
 
 export function atelierDevPlugin() {
   const require = createRequire(import.meta.url);
