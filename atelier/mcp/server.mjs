@@ -159,6 +159,200 @@ async function callTool(name, args) {
     if (!args?.id) throw toolError("ATR-401: checkpoint.source_rollback requires args.id", "pick one from checkpoint.source_list output");
     return checkpointCli(["rollback", String(args.id), "--json"], PROJECT_ROOT);
   }
+
+  /* ---- P0 backlog 批次转绿（2026-08-29）：state.get / test.run / diff.report / feedback.read / docs.search ---- */
+  if (name === "state.get") {
+    const p = String(args?.path ?? "").trim();
+    if (!p) {
+      throw toolError(
+        "ATR-401: state.get requires args.path",
+        'syntax "sig-<n>" or "sig-<n>.<sub.path>" (e.g. "sig-0" / "sig-0.items.2.label") — wire shape via state.snapshot',
+      );
+    }
+    const snap = await devJson("/__atelier/state-snapshot");
+    if (!snap || snap.ok === false) {
+      throw toolError("ATR-4xx-dev: no bridge state available yet", snap?.note ?? "open the app once in dev preview so the page pushes its signal graph");
+    }
+    const parts = p.split(".").filter(Boolean);
+    const head = parts[0] ?? "";
+    const idx = head.startsWith("sig-") ? Number(head.slice(4)) : /^\d+$/.test(head) ? Number(head) : NaN;
+    if (Number.isNaN(idx)) {
+      throw toolError(
+        `ATR-401: state.get path must start at a signal key ("sig-<n>"), got "${head}"`,
+        `the live graph exposes sig-0 … sig-${Math.max(0, (snap.signalCount ?? 1) - 1)} — full shape via state.snapshot`,
+      );
+    }
+    const sig = (snap.signals ?? [])[idx];
+    if (!sig) {
+      throw toolError(
+        `ATR-401: no signal "${head}" in the live graph`,
+        `snapshot has ${snap.signalCount ?? 0} signals; known boundary: signals mounted after bridge install are invisible until reload`,
+      );
+    }
+    let value = sig.value;
+    for (const seg of parts.slice(1)) {
+      if (value === null || typeof value !== "object" || !(seg in value)) {
+        throw toolError(`ATR-401: path "${p}" breaks at segment "${seg}"`, `value at this depth: ${JSON.stringify(value)?.slice(0, 240) ?? String(value)}`);
+      }
+      value = value[seg];
+    }
+    return { path: p, signalKey: sig.key, value, snapshotAt: snap.at, href: snap.href };
+  }
+
+  if (name === "docs.search") {
+    const q = String(args?.q ?? "").trim().toLowerCase();
+    if (!q) throw toolError("ATR-401: docs.search requires args.q", 'e.g. "HMR state preserve" or "ATR-204"');
+    const terms = q.split(/\s+/).filter(Boolean);
+    const files = [];
+    const walk = (dir, depth = 0) => {
+      if (depth > 4) return;
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const p2 = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p2, depth + 1);
+        else if (/\.(md|txt)$/i.test(e.name)) files.push(p2);
+      }
+    };
+    // 语料（ARCHITECTURE §工具表）：框架规格文档单源 + skill 包 + 工作区 AGENTS.md + 应用 llms.txt
+    walk(path.join(HERE, "..", "docs"));
+    walk(path.join(HERE, "..", "skills"));
+    try { if (fs.statSync(path.join(HERE, "..", "..", "AGENTS.md")).isFile()) files.push(path.join(HERE, "..", "..", "AGENTS.md")); } catch { /* absent */ }
+    try { if (fs.statSync(path.join(PROJECT_ROOT, "llms.txt")).isFile()) files.push(path.join(PROJECT_ROOT, "llms.txt")); } catch { /* absent */ }
+    const scored = [];
+    for (const f of files) {
+      let text;
+      try { text = fs.readFileSync(f, "utf8"); } catch { continue; }
+      const lower = text.toLowerCase();
+      let score = 0;
+      const hits = [];
+      for (const t of terms) {
+        const n = t ? lower.split(t).length - 1 : 0;
+        if (n > 0) { score += n; hits.push({ term: t, count: n }); }
+      }
+      if (!score) continue;
+      const title = (text.match(/^#\s+(.+)$/m)?.[1] ?? path.basename(f)).trim();
+      if (title.toLowerCase().includes(terms[0]) || lower.split("\n")[0]?.includes(terms[0])) score += 10;
+      const lines = text.split("\n");
+      const li = lines.findIndex((l) => l.toLowerCase().includes(terms[0]));
+      const excerpt = li >= 0 ? lines.slice(Math.max(0, li - 1), li + 3).join(" ⏎ ").slice(0, 300) : title;
+      scored.push({ file: f, title, score, hits, excerpt });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    const top = scored.slice(0, 5);
+    return {
+      query: q,
+      scanned: files.length,
+      results: top,
+      note: top.length ? undefined : `no hit for ${JSON.stringify(q)} in framework docs / skill packages / AGENTS.md / llms.txt`,
+    };
+  }
+
+  if (name === "test.run") {
+    const filter = args?.filter ? String(args.filter).trim() : "";
+    if (/["'`|;&<>]/.test(filter)) {
+      throw toolError("ATR-401: test.run filter must be a plain file-name pattern", `got ${JSON.stringify(filter)} — no shell metacharacters; e.g. "contract" or "src/greeting"`);
+    }
+    // 与应用 package.json "test" 同一表面（vitest run）；filter 作 vitest 位置参数（文件名过滤）
+    const r = spawnSync("pnpm", filter ? ["test", filter] : ["test"], {
+      cwd: PROJECT_ROOT, encoding: "utf8", timeout: 180000,
+      shell: process.platform === "win32", // pnpm 在 Windows 是 .cmd
+    });
+    if (r.error) {
+      if (r.error.code === "ENOENT") throw toolError("ATR-4xx-test: pnpm not found on PATH", "install pnpm, or run the suite via CLI ('atelier test')");
+      throw toolError(`ATR-4xx-test: test run terminated (${r.error.code ?? "killed"})`, "run the suite locally ('pnpm test') to inspect the hanging test");
+    }
+    const lines = (r.stdout ?? "").split("\n").map((l) => l.trimEnd());
+    return {
+      ok: r.status === 0,
+      exitCode: r.status,
+      filter: filter || null,
+      summary: {
+        testFiles: lines.find((l) => /Test Files\s+\S/.test(l))?.trim() ?? null,
+        tests: lines.find((l) => /Tests\s+\S/.test(l))?.trim() ?? null,
+      },
+      outputTail: lines.filter(Boolean).slice(-60),
+    };
+  }
+
+  if (name === "diff.report") {
+    // 基线 = 最近一条 source checkpoint 锚点；本工具提供机器可核的文件级事实
+    //（per-change 语义摘要由发起评审的 agent 附在报告后），落盘 .atelier/diff-report.md 供人审。
+    const cps = checkpointCli(["list", "--json"], PROJECT_ROOT);
+    // checkpoints.jsonl 的锚字段是 sha（旧条目兼容 commit）；回滚条目无 sha，自然被过滤
+    const base = [...(Array.isArray(cps) ? cps : [])].reverse().find((c) => c?.sha || c?.commit) ?? null;
+    if (!base?.sha && !base?.commit) {
+      throw toolError("ATR-4xx-checkpoint: no source checkpoint to diff against", "create one first: checkpoint.source_commit (or CLI 'atelier checkpoint save')");
+    }
+    const baseCommit = base.sha ?? base.commit;
+    const baseId = base.id ?? "?";
+    const baseName = base.name ?? "";
+    const git = (gitArgs) => {
+      const g = spawnSync("git", gitArgs, { cwd: PROJECT_ROOT, encoding: "utf8" });
+      if (g.status !== 0) {
+        throw toolError(`ATR-4xx-git: git ${gitArgs[0]} failed`, (g.stderr ?? "").trim() || "run inside a git-managed app workspace");
+      }
+      return g.stdout ?? "";
+    };
+    const stat = git(["diff", "--stat", baseCommit]).trim();
+    const numstat = git(["diff", "--numstat", baseCommit]).trim();
+    const status = git(["status", "--short"]).trim();
+    const short = String(baseCommit).slice(0, 7);
+    const report = [
+      "# Atelier diff report",
+      "",
+      `- Generated: ${new Date().toISOString()}`,
+      `- Baseline: checkpoint ${baseId} "${baseName}" (${short})`,
+      "- Scope: working tree vs baseline（文件级事实；语义摘要由发起评审的 agent 补充）",
+      "",
+      "## Diff stat",
+      "",
+      "```",
+      stat || "(no tracked changes)",
+      "```",
+      "",
+      "## Working tree status",
+      "",
+      "```",
+      status || "(clean)",
+      "```",
+      "",
+      "## Per-file adds/deletes",
+      "",
+      numstat || "(none)",
+      "",
+    ].join("\n");
+    const reportPath = path.join(PROJECT_ROOT, ".atelier", "diff-report.md");
+    fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+    fs.writeFileSync(reportPath, report, "utf8");
+    return { reportPath, baseline: { id: baseId, commit: baseCommit, name: baseName }, report };
+  }
+
+  if (name === "feedback.read") {
+    const specsDir = path.join(PROJECT_ROOT, "specs");
+    const rows = [];
+    try {
+      const jl = fs.readFileSync(path.join(specsDir, "feedback.jsonl"), "utf8");
+      for (const line of jl.split("\n")) {
+        const t = line.trim();
+        if (!t) continue;
+        try { rows.push({ kind: "jsonl", ...JSON.parse(t) }); } catch { rows.push({ kind: "jsonl", raw: t, note: "unparsable line" }); }
+      }
+    } catch { /* no feedback.jsonl yet */ }
+    try {
+      for (const f of fs.readdirSync(specsDir)) {
+        if (f.endsWith(".feedback.md")) {
+          rows.push({ kind: "markdown", file: path.join(specsDir, f), content: fs.readFileSync(path.join(specsDir, f), "utf8") });
+        }
+      }
+    } catch { /* no specs/ dir yet */ }
+    return {
+      rows,
+      note: rows.length
+        ? undefined
+        : 'no human feedback recorded yet. Convention: append one JSON line per verdict to specs/feedback.jsonl ({at, verdict: "approve"|"disapprove", target, note}) or drop a free-form specs/<name>.feedback.md — the review UI (P2-5) writes the same format',
+    };
+  }
   if (name === "snapshot.diff" || name === "snapshot.review_diff") {
     const shot = await fetch(`${BASE}/__atelier/screenshot?compare=1`, {
       signal: AbortSignal.timeout(60000),

@@ -1,7 +1,7 @@
 {
   "$meta": {
     "name": "atelier-mcp-definitions",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "purpose": "Single source for Atelier built-in MCP tool surface (names/faces/params). Skills and future MCP server must stay consistent with this file (enforced by scripts/check-skills.mjs).",
     "syncWith": ["atelier/docs/ARCHITECTURE.md#6-mcp-tool-list", "atelier/docs/SPEC-Agentic-DX-v0.1.md", "atelier/docs/design-decisions.md decision 7/12/15"],
     "schemaRules": "Flat schema only: type / reqProps / optProps / enum / items — no $ref, no oneOf, no generics (H1/decision 6)",
@@ -49,8 +49,8 @@
       "name": "state.get",
       "face": "query",
       "priority": "P0",
-      "status": "pending",
-      "summary": "Read a single state path from the live signal graph.",
+      "status": "implemented",
+      "summary": "Read a single state path from the live signal graph (served from the dev bridge cache). Path syntax: \"sig-<n>\" or \"sig-<n>.<sub.path>\" — signals are keyed sig-N by install order; see state.snapshot for the wire shape.",
       "params": { "type": "object", "reqProps": { "path": { "type": "string" } }, "optProps": {} },
       "errors": []
     },
@@ -67,8 +67,8 @@
       "name": "docs.search",
       "face": "query",
       "priority": "P1",
-      "status": "pending",
-      "summary": "Search framework docs / SKILL packages / llms.txt; prefer over guessing APIs.",
+      "status": "implemented",
+      "summary": "Term search over the framework corpus (atelier/docs specs + skill packages + AGENTS.md + app llms.txt); ranked top-5 with excerpts. Prefer over guessing APIs.",
       "params": { "type": "object", "reqProps": { "q": { "type": "string" } }, "optProps": {} },
       "errors": []
     },
@@ -154,8 +154,8 @@
       "name": "test.run",
       "face": "operation",
       "priority": "P0",
-      "status": "pending",
-      "summary": "Run unit/component tests (Vitest surface); returns structured results.",
+      "status": "implemented",
+      "summary": "Run the app's test suite via 'pnpm test' (vitest run — same surface as package.json), 180s cap; filter = vitest positional file-filter. Returns ok/exitCode, summary counts and the output tail.",
       "params": { "type": "object", "reqProps": {}, "optProps": { "filter": { "type": "string" } } },
       "confirmDefault": "auto",
       "errors": []
@@ -184,8 +184,8 @@
       "name": "diff.report",
       "face": "operation",
       "priority": "P0",
-      "status": "pending",
-      "summary": "Generate human-readable change report (per-change semantic summary, before/after, affected files) for atelier review approval.",
+      "status": "implemented",
+      "summary": "Generate a reviewable change report of the working tree vs the newest source checkpoint (diff --stat, status, per-file adds/deletes), write it to .atelier/diff-report.md and return it; attach per-change semantic notes when submitting for human approve/disapprove (verdicts land in specs/ — see feedback.read).",
       "params": { "type": "object", "reqProps": {}, "optProps": {} },
       "confirmDefault": "auto",
       "errors": []
@@ -203,8 +203,8 @@
       "name": "feedback.read",
       "face": "audit",
       "priority": "P1",
-      "status": "pending",
-      "summary": "Read human approve/disapprove feedback recorded under specs/ (agent must read next round).",
+      "status": "implemented",
+      "summary": "Read human approve/disapprove feedback under specs/: JSON lines in specs/feedback.jsonl ({at, verdict: approve|disapprove, target, note}) plus any specs/*.feedback.md verbatim. The agent must read this before its next round.",
       "params": { "type": "object", "reqProps": {}, "optProps": {} },
       "errors": []
     }

@@ -9,6 +9,7 @@
 > | P0-4 性能基线台 | ✅ `atelier bench`（scripts/bench.mjs）：四指标实测进 README——gzip 6.25KB ✔ / 10³ 节点挂载 2–2.9ms ✔ / HMR 46–61ms ✔（P0-5 修复）/ 截图回环 298–304ms ✔（P0-6 修复）；四项全 PASS（2026-08-29 复测） |
 > | **P0-5（新）HMR 保态与提速** | ✅ dev 插件 transform 给 *.atr.ts 注入 `import.meta.hot.accept` → runtime 保值热交换（活实例登记 + 栈式信号收集 + 重挂载按序还原值）。实测：编辑可见 108ms→**51ms**，**$state 不再清零**（点击 count:3 → 改源码 → count:3 实证）。已知边界（诚实标注）：旧树 effects 不逐个 dispose（dev-only 有界泄漏）；模板结构大改时按序还原可能错位（多出新信号保持初值）；跨交换的旧 checkpoint 不回落新信号 |
 > | **P0-6（新）截图回环持久实例** | ✅ dev-screenshot.mjs 常驻会话：同一 tab 重新导航捕获（共享序列 captureOnSession 单一来源），崩溃/挂起自愈——复用前 2s 活性探针 + child exit/ws close 双死亡信号 → 销毁重建仅重试一次；进程 exit 同步 kill 防孤儿浏览器；跨拍陈旧 loadEventFired 事件清理（复用场景独有坑）。实测：温拍 1937→**298–304ms** ✔ 达标、P1-8 像素对比走常驻路径 MATCH（ratio 0）、杀 16 个无头进程后下一拍自愈重建并拍出正确图；瞬态 `capturePage` 保留为兼容 API，`ATELIER_SHOT_PORT` 可换端口（默认 9345） |
+| **P0-7（新）MCP pending×5 转绿** | ✅ 21/21 全接线（mcp-definitions v0.2.0）：`state.get`（sig-N 路径解析 + ATR-401 诚实报错）/ `docs.search`（框架 docs+skills+AGENTS.md+llms.txt 语料 top-5）/ `test.run`（pnpm test=vitest run 同表面，180s 上限，smoke 实测 14/14）/ `diff.report`（vs 最近 source checkpoint，落盘 .atelier/diff-report.md）/ `feedback.read`（specs/feedback.jsonl + *.feedback.md 约定，与 P2-5 review UI 同格式）；五工具 stdio JSON-RPC E2E 实证；ARCHITECTURE/SKILLS-PLAN 口径同步，check-skills 31/31 |
 > | P1-1 keyed each | ✅ `{#each … by keyExpr}` reconcile 落地（无 by 保持旧语义） |
 > | P1-2 Template 缓存 | ✅ strings-key AST 缓存（容量 500 兜底清空） |
 > | P1-3 expr fuzz-lite | ✅ vitest 差分对拍 200 样本 + 运算符矩阵；**抓出并修复 ‖/&& 值语义 bug** |

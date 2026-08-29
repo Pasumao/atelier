@@ -34,6 +34,19 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 
 Tools accept **flat** schemas (no `$ref`/`oneOf`) — identical to component contracts. If a tool's `fix`/schema is unfamiliar, query `docs.search` instead of guessing.
 
+## Wire notes (v0.2 — 全部 21 工具已接线)
+
+- `state.get`：path = `sig-<n>[.子路径]`（信号按安装序编号，无 debugName——bridge 已知边界）；拿不准先 `state.snapshot` 看全貌。
+- `docs.search`：语料 = 框架 `atelier/docs/` + skill 包 + 工作区 `AGENTS.md` + 应用 `llms.txt`；返回 top-5 带摘录。
+- `test.run`：跑应用 `pnpm test`（vitest run 同一表面），180s 上限；`filter` 是 vitest 文件名过滤（禁 shell 元字符）。
+- `diff.report`：基线 = 最近一条 source checkpoint；产出 `.atelier` 下的 diff-report.md（文件级事实）——提交评审时由 agent 附上每处改动的语义摘要，结论等 `feedback.read`。
+- `feedback.read`：读 specs/ 下的人类反馈；**下一轮开工前必读**。落盘约定：
+
+```text
+specs/feedback.jsonl      # 每条判定一行 JSON：{at, verdict: "approve"|"disapprove", target, note}
+specs/<name>.feedback.md  # 自由格式 markdown，原文返回
+```
+
 ## Common failures
 
 | Symptom | Fix |

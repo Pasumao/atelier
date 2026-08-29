@@ -90,10 +90,10 @@ atelier/
 | `registry.list_components` | 查询 | （无） | ✅ 原型已实现（HTTP 面） |
 | `registry.get_component` | 查询 | name: string | ✅ |
 | `tokens.list` | 查询 | group?: string | ✅（atelier.config.json） |
-| `state.snapshot` | 查询 | root?: string | ⏳ 待接入（状态序列化+截图） |
-| `ui.screenshot` | 查询 | format?: "png" | ⏳ 待接入 |
+| `state.snapshot` | 查询 | root?: string | ✅（dev 桥状态序列化推送，P0-1 后含下行） |
+| `ui.screenshot` | 查询 | format?: "png" | ✅（常驻无头实例，P0-6） |
 | `checkpoint.list` / `checkpoint.rollback` | 操作 | id / name | ✅ 原型已实现（store） |
-| `test.run` | 操作 | filter?: string | ⏳ 待接入（Vitest/截图回环） |
+| `test.run` | 操作 | filter?: string | ✅（`pnpm test`=vitest run 同一表面，180s 上限；2026-08-29 接线） |
 
 > 一致性纪律：skill 中提及的工具名必须在此清单或 ARCHITECTURE §6 中存在；check-skills.mjs 校验双向一致。
 
