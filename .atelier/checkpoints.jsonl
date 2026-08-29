@@ -26,3 +26,4 @@
 {"type":"save","id":"64185de","sha":"64185de34f3c4aac5eba8edf9e3b4c28ac5e0d12","name":"backlog blitz R3: P1-8 像素级对比(compare=1 canvas evaluate, MATCH/PIXMATCH/MISMATCH 三档实测+MCP/CLI/门禁联动); P0-4 性能基线台(atelier bench 四指标: gzip 5.85KB/mount 3.3ms PASS, HMR 114ms/截图 1937ms FAIL 转 P0 工单, README 落数); P1-5 实验定性(整页 reload 清零  转 P0-5)","at":"2026-08-28T05:31:22.344Z"}
 {"type":"save","id":"b002195","sha":"b0021959a1b9ce987854fe9e5e036c204278961b","name":"P0-5 HMR保态 + P0-4 bench + P1-8 像素对比（开工前工作树锚点）","at":"2026-08-29T09:50:52.440Z"}
 {"type":"save","id":"34ac74a","sha":"34ac74abfbbded397317cfb32617d8ec2c35535a","name":"P0-6 截图回环持久实例（同tab复用+崩溃自愈，bench 1937→~300ms 全 PASS）","at":"2026-08-29T09:59:32.605Z"}
+{"type":"save","id":"436fcdd","sha":"436fcddf09717ea31c5220ba2b2570466586ec04","name":"P0-7 MCP pending×5 转绿（21/21 全接线，stdio E2E 实证）+ P0-6 文档口径同步","at":"2026-08-29T10:08:10.536Z"}
