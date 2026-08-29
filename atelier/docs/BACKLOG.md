@@ -7,7 +7,7 @@
 > | P0-2 编译器 MVP | ⏳ 分期①地基（Template 缓存已随 P1-2 落地）②**AST dump ✅（atelier/compiler/dump.mjs：单解析器同源、scanner 模式栈、30/30 测试含 dump↔parseTemplate 同树断言）** ③代码生成 未动 |
 > | P0-3 M3 实验台 | ⏳ 待建 |
 > | P0-4 性能基线台 | ✅ `atelier bench`（scripts/bench.mjs）：四指标实测进 README——gzip 5.85KB ✔ / 10³ 节点挂载 3.3ms ✔ / HMR 114ms ✖ / 截图回环 1937ms ✖；两条超标项转为 P0 修复工单（见下） |
-> | **P0-5（新）HMR 保态与提速** | ⏳ bench 实测整页 reload 路径 114ms 超标，且 reload 必然清零 $state（P1-5 实验证实）；修法：dev 插件 transform .atr.ts 注入 `import.meta.hot.accept` + 信号图快照保留（acceptHMR 式） |
+> | **P0-5（新）HMR 保态与提速** | ✅ dev 插件 transform 给 *.atr.ts 注入 `import.meta.hot.accept` → runtime 保值热交换（活实例登记 + 栈式信号收集 + 重挂载按序还原值）。实测：编辑可见 108ms→**51ms**，**$state 不再清零**（点击 count:3 → 改源码 → count:3 实证）。已知边界（诚实标注）：旧树 effects 不逐个 dispose（dev-only 有界泄漏）；模板结构大改时按序还原可能错位（多出新信号保持初值）；跨交换的旧 checkpoint 不回落新信号 |
 > | **P0-6（新）截图回环持久实例** | ⏳ 每拍拉起瞬态无头浏览器 ≈1.9s；修法：dev 面持有常驻无头实例（崩溃自愈重启），截图复用同一 tab（预计可入 500ms 内） |
 > | P1-1 keyed each | ✅ `{#each … by keyExpr}` reconcile 落地（无 by 保持旧语义） |
 > | P1-2 Template 缓存 | ✅ strings-key AST 缓存（容量 500 兜底清空） |

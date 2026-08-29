@@ -58,6 +58,19 @@ export function atelierDevPlugin() {
       // 页面注入一次性 dev token（EventSource 无法带自定义 header，走 query）
       return html.replace(/<head[^>]*>/i, (m) => `${m}\n<script>window.__ATELIER_TOKEN__=${JSON.stringify(TOKEN)};</script>`);
     },
+    transform(code, id) {
+      // P0-5 HMR：给组件模块注入 HMR 边界。accept 回调在新模块求值（组件已重注册）后
+      // 触发 runtime 的保值重挂载——替代整页 reload，$state 不再清零。
+      const p = id.replace(/\\/g, "/");
+      if (!p.endsWith(".atr.ts") || p.includes("/node_modules/")) return null;
+      if (code.includes("import.meta.hot")) return null;
+      return {
+        code:
+          code +
+          "\n;if (import.meta.hot) import.meta.hot.accept(() => { try { window.__ATELIER_HMR_REMOUNT__?.(); } catch (e) { console.error('[atelier] HMR remount failed', e); } });\n",
+        map: null,
+      };
+    },
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const rawUrl = req.url ?? "";

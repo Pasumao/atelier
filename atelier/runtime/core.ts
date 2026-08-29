@@ -57,6 +57,10 @@ function track(sig: Signal): void {
   tracking?.add(sig);
 }
 
+/** P0-5 HMR：创建沉降。mount 期间 runtime 置入收集器，把新建 $state 归属到挂载实例；
+ *  栈式恢复（嵌套 mount 各自接管），平时为 null 零开销。 */
+export const __creationSink: { fn: ((s: Signal<unknown>) => void) | null } = { fn: null };
+
 function notify(sig: Signal): void {
   const subs = [...sig._subs];
   for (const sub of subs) deliver(sub);
@@ -93,6 +97,7 @@ export function $state<T>(init: T): Signal<T> {
     },
   };
   store._signals.add(sig);
+  if (__creationSink.fn) __creationSink.fn(sig as Signal<unknown>);
   return sig;
 }
 

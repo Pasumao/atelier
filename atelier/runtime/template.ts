@@ -5,7 +5,7 @@
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
-import { $effect, type Signal } from "./core.ts";
+import { $effect, store, __creationSink, type Signal } from "./core.ts";
 import { evalExpr } from "./expr.ts";
 
 /** —— token 单源（决策 8）：由 main.ts 启动时加载 atelier.config.json 注入 —— */
@@ -334,18 +334,97 @@ function mountComponentInner(
   registry: ComponentRegistry,
   validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError }
 ): HTMLElement {
-  const tpl = def.render(props as never) ?? { raw: "", scope: {} };
-  const scope = { ...(tpl.scope ?? {}), props };
-  const file = `components/${def.name}.atr.ts`;
-  const styleMatch = /<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>/i.exec(tpl.raw);
-  if (styleMatch) injectScopedStyle(def.name, styleMatch[1], file);
-  const frag = renderNodes(parseTemplate(tpl.raw), scope, registry, validate, file, def.name);
-  const root = document.createElement("div");
-  root.className = `atr-root atr-scope-${def.name}`;
-  if (scopeClasses.has(def.name)) root.classList.add(scopeClasses.get(def.name)!);
-  root.appendChild(frag);
-  container.appendChild(root);
+  // P0-5 HMR：栈式创建收集——本次 render 新建的 $state 归属本实例（嵌套 mount 各自接管）
+  const collected: Signal[] = [];
+  const prevSink = __creationSink.fn;
+  __creationSink.fn = (s) => collected.push(s);
+  mountDepth++;
+  let root!: HTMLElement;
+  try {
+    const tpl = def.render(props as never) ?? { raw: "", scope: {} };
+    const scope = { ...(tpl.scope ?? {}), props };
+    const file = `components/${def.name}.atr.ts`;
+    const styleMatch = /<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>/i.exec(tpl.raw);
+    if (styleMatch) injectScopedStyle(def.name, styleMatch[1], file);
+    const frag = renderNodes(parseTemplate(tpl.raw), scope, registry, validate, file, def.name);
+    root = document.createElement("div");
+    root.className = `atr-root atr-scope-${def.name}`;
+    if (scopeClasses.has(def.name)) root.classList.add(scopeClasses.get(def.name)!);
+    root.appendChild(frag);
+    container.appendChild(root);
+  } finally {
+    __creationSink.fn = prevSink;
+    mountDepth--;
+  }
+  liveInstances.add({
+    defName: def.name,
+    container,
+    root,
+    props,
+    validate,
+    registry,
+    signals: collected,
+    nested: mountDepth >= 1, // 记录时外层尚未自减：≥2 即嵌套挂载
+  });
   return root;
+}
+
+/* ---- P0-5 HMR 热交换：保值重挂载 --------------------------------------
+ * dev 插件给 *.atr.ts 注入 import.meta.hot.accept → 新模块重注册组件后调
+ * window.__ATELIER_HMR_REMOUNT__()：对所有顶层活实例「快照信号值 → 卸旧树 →
+ * 用新 def 重挂载 → 按创建序还原信号值」。按序还原是启发式（模板结构大改可能
+ * 错位——多出的新信号保持初值，文档已标注）。已知边界（诚实标注）：
+ *   · 旧树 effects 未逐个 dispose， Detached 后仍在订阅（dev-only 有界泄漏）
+ *   · store 旧 checkpoint 引用被换信号，跨交换的 timeTravel 不回落到新信号
+ */
+type LiveInstance = {
+  defName: string;
+  container: Element;
+  root: HTMLElement;
+  props: Record<string, unknown>;
+  validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError };
+  registry: ComponentRegistry;
+  signals: Signal[];
+  nested: boolean;
+};
+const liveInstances = new Set<LiveInstance>();
+let mountDepth = 0;
+
+function hmrSwap(): number {
+  // 先清陈旧嵌套记录（父级重挂后其 root 已不在文档）
+  for (const inst of [...liveInstances]) {
+    if (!inst.root.isConnected) {
+      liveInstances.delete(inst);
+      for (const s of inst.signals) store._signals.delete(s);
+    }
+  }
+  let swapped = 0;
+  for (const inst of [...liveInstances]) {
+    if (inst.nested) continue;
+    const values = inst.signals.map((s) => s.get());
+    inst.root.remove();
+    liveInstances.delete(inst);
+    for (const s of inst.signals) store._signals.delete(s);
+    const def = inst.registry.get(inst.defName); // 新模块已重注册；未注册则放弃该实例
+    if (!def) continue;
+    const root = mountComponentInner(def, inst.props, inst.container, inst.registry, inst.validate);
+    const fresh = [...liveInstances].find((i) => i.root === root);
+    if (fresh) {
+      fresh.signals.forEach((s, i) => {
+        if (i < values.length) {
+          try { s.set(values[i]); } catch { /* 只读信号跳过 */ }
+        }
+      });
+      swapped++;
+    }
+  }
+  return swapped;
+}
+export function hmrRemountAll(): number {
+  return hmrSwap();
+}
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__ATELIER_HMR_REMOUNT__ = () => hmrSwap();
 }
 
 function renderNodes(

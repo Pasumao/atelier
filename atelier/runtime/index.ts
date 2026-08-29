@@ -13,6 +13,7 @@ export { validateFlat, validateUnknown } from "./contract.ts";
 export type { FlatSchema, AtrError } from "./contract.ts";
 export { component, registry } from "./component.ts";
 export { installStateBridge } from "./bridge.ts";
+export { hmrRemountAll } from "./template.ts"; // P0-5: 保值热交换（dev 插件注入的 accept 回调经 window 钩子调用）
 
 /**
  * devFetch — 页面侧访问 Atelier dev 面的安全封装。

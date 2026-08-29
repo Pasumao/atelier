@@ -45,24 +45,42 @@ if (!fs.existsSync(path.join(APP, "src", "runtime"))) die("no vendored runtime a
 const results = {};
 const BENCH_HTML = path.join(APP, "bench.html");
 const BENCH_TS = path.join(APP, "bench-main.ts");
+const BENCH_PROBE = path.join(APP, "bench-probe.atr.ts"); // .atr.ts 后缀 → dev 插件注入 HMR accept（P0-5 路径）
 const BENCH_DIST = path.join(APP, ".atelier", "bench-dist");
 const generated = [];
 
 function writeBenchFiles() {
-  generated.push(BENCH_HTML, BENCH_TS);
+  generated.push(BENCH_HTML, BENCH_TS, BENCH_PROBE);
   fs.writeFileSync(
     BENCH_HTML,
     `<!doctype html><html><head><meta charset="utf-8"><title>atelier-bench</title></head>
 <body><div id="app"></div><script type="module" src="./bench-main.ts"></script></body></html>`,
   );
-  // 10³ 节点：250 行 × 4 元素。HMR 探针：文本 HMRV0 → bench 重写为 HMRV2 后轮询可见性。
+  fs.writeFileSync(
+    BENCH_PROBE,
+    `import { component, $state, html } from "./src/runtime";
+
+export const BenchProbe = component(function BenchProbe() {
+  const n = $state(0);
+  return html\`
+    <div class="ppanel"><p class="text-muted">bench probe HMRV0 · clicks {n.value}</p></div>
+  \`.locals({ n });
+}, { name: "BenchProbe", schema: { type: "object", reqProps: {}, optProps: {} } });
+`,
+  );
+  // 10³ 节点：250 行 × 4 元素。HMR 探针：bench-probe.atr.ts 的 HMRV0 → 重写为 HMRV2 后轮询可见性。
   fs.writeFileSync(
     BENCH_TS,
     `import { component, $state, html, initTokens, mountComponent, registry, validateFlat } from "./src/runtime";
+import { BenchProbe } from "./bench-probe.atr.ts";
 import config from "./atelier.config.json";
 
 initTokens(config as { tokens: Record<string, Record<string, string>> });
 (window as unknown as Record<string, unknown>).__BENCH_READY__ = false;
+
+const probeHost = document.createElement("div");
+document.body.appendChild(probeHost);
+mountComponent(BenchProbe, {}, probeHost, registry, (schema, d) => validateFlat(schema as never, d));
 
 const data = Array.from({ length: 250 }, (_, i) => ({ id: i, label: "row-" + i }));
 const Bench = component(function Bench() {
@@ -142,23 +160,23 @@ async function benchMount(cdp) {
 }
 
 async function benchHmr(cdp) {
-  const markerPath = path.join(APP, "bench-main.ts");
-  const before = fs.readFileSync(markerPath, "utf8");
+  // P0-4/P0-5：探针走 .atr.ts（代理真实编辑路径，dev 插件注入 accept → 保值热交换）
+  const before = fs.readFileSync(BENCH_PROBE, "utf8");
   if (!before.includes("HMRV0")) return { latencyMs: null, note: "probe marker missing — skipped" };
   const t0 = Date.now();
-  fs.writeFileSync(markerPath, before.replace("HMRV0", "HMRV2"));
+  fs.writeFileSync(BENCH_PROBE, before.replace("HMRV0", "HMRV2"));
   const t0w = Date.now();
   while (Date.now() - t0w < 10000) {
     try {
       if (await evalIn(cdp, "document.body.innerText.includes('HMRV2')")) {
         const latencyMs = Date.now() - t0;
-        fs.writeFileSync(markerPath, before); // restore for byte-clean teardown
-        return { latencyMs, note: "save→visible (full reload path: bench module has no HMR accept)" };
+        fs.writeFileSync(BENCH_PROBE, before); // restore for byte-clean teardown
+        return { latencyMs, note: "save→visible (.atr.ts accept path: value-preserving remount)" };
       }
-    } catch { /* evaluate races reload — retry */ }
+    } catch { /* evaluate races update — retry */ }
     await sleep(40);
   }
-  fs.writeFileSync(markerPath, before);
+  fs.writeFileSync(BENCH_PROBE, before);
   return { latencyMs: null, note: "HMR change never became visible within 10s" };
 }
 
