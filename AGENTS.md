@@ -14,12 +14,12 @@
 | `atelier/compiler/` | 编译器（P0-2）：`dump.mjs`（②：.atr.ts → 模板 AST JSON，与解释器同一解析器）+ `codegen.mjs`（③：AST → 零 import 静态 effect 图模块）。产物经 `registerCompiled` 注册后该组件走零 tokenize 快路径（语义与解释器同源，golden DOM diff 在 tests/codegen.test.ts）。 |
 | `atelier/benchmarks/m3/` | M3 三臂对照实验台（P0-3）：protocol.md（noskill/skill/react × 首遍正确率）+ 3 任务书 + grade.mjs 评分器（acceptance harness，正控参考解在 reference/）+ report.mjs §7 出数。改评分器后必跑三正控回归。 |
 | `atelier/dev/` | dev 面框架件：`atelier-dev-plugin.mjs`（Vite 插件，/__atelier/* 查询/桥接/审计/token 门禁/SSE 下行）、`dev-screenshot.mjs`（CDP 无头截图）、`gen-tailwind-theme.mjs`（决策 16 token→@theme AOT）、`probe-mount.mjs`（挂载诊断探针，PROBE_URL 可换目标）。init 时 vendor 进应用 `scripts/`。 |
-| `atelier/tests/` | runtime 单测（vitest，39 用例，含 codegen golden DOM 对拍）。 |
-| `atelier/templates/app/` | 应用 starter 模板：vite.config / index.html / atelier.config.json（token SSOT）/ src/main.ts + HelloCard 三元共置示例（.atr.ts + .atr.md + .atr.spec.ts）/ manifest.json / llms.txt / atelier-ui.css recipe / styling-discipline 守卫测试。`atelier init` 以此组装自包含应用。 |
+| `atelier/tests/` | runtime 单测（vitest，72 用例：内核/契约/表达式 fuzz/codegen golden DOM 对拍/F-2 静态依赖差分对拍/F-4 覆盖扩张 parity/mcp-confirm 闸）。 |
+| `atelier/templates/app/` | 应用 starter 模板：vite.config / index.html / atelier.config.json（token SSOT）/ src/main.ts + HelloCard 与 ContractProbe 三元共置示例（.atr.ts + .atr.md + .atr.spec.ts）/ manifest.json / llms.txt / atelier-ui.css recipe / styling-discipline + state-discipline 守卫测试。`atelier init` 以此组装自包含应用（specs/ 骨架含 guardrails.md 常驻负例）。 |
 | `atelier/mcp/` | stdio MCP Server（21 工具单源生成，live 工具需一个运行中的应用 dev 面）。 |
 | `atelier/skills/` | 多工具兼容技能包（8 个 kebab-case 目录包）。 |
 | `atelier/scripts/` + `cli.mjs` | init（三步组装：模板 + runtime vendor + dev vendor）/ dev / struct / checkpoint / snapshot / skills / mcp，三级诚实标注。 |
-| `atelier/docs/` | 框架规格文档：ARCHITECTURE / SPEC / design-decisions 0-16 / BACKLOG / SKILLS-PLAN / TECH-*。 |
+| `atelier/docs/` | 框架规格文档：ARCHITECTURE / design-decisions 0-16 / BACKLOG（执行队列唯一源）/ ROADMAP（2026H2→2027H1 路线计划书）/ SKILLS-PLAN / TECH-*。 |
 | `.dsh/skills/` | 本会话已安装的技能副本（harness 发现目录；源在 `atelier/skills/`）。 |
 
 ## 常用命令
@@ -28,7 +28,7 @@
 |---|---|
 | 脚手架新应用 | `node atelier/cli.mjs init --target <dir> --name <Name>`（cd && pnpm install && pnpm dev 即跑） |
 | 启动应用 dev server | 应用目录下 `pnpm dev`（或 `atelier dev`；http://127.0.0.1:5173，strictPort） |
-| 框架 runtime 测试 | `atelier/` 目录下 `pnpm test`（vitest，39 用例） |
+| 框架 runtime 测试 | `atelier/` 目录下 `pnpm test`（vitest，72 用例） |
 | 编译应用组件（②→③） | `node atelier/compiler/dump.mjs --root <appDir>` 然后 `node atelier/compiler/codegen.mjs --ast <appDir>/.atr/ast`（产物 .atr/compiled/<Component>.mjs，应用侧 registerCompiled 接入） |
 | 应用测试（契约/样式守卫） | 应用目录下 `pnpm test` |
 | 技能包一致性校验 | `node atelier/scripts/check-skills.mjs`（exit code 可接 CI；改动 skills/mcp-definitions 后必跑） |
@@ -37,7 +37,7 @@
 | 视觉回归快照 | 应用目录下 `node <repo>/atelier/cli.mjs snapshot save` / `check [--update]`（绝不自动晋升） |
 | MCP server | `node atelier/mcp/server.mjs`（env：`ATELIER_PROJECT_ROOT`=应用目录，`ATELIER_DEV_URL`=应用 dev 面） |
 | 读中文 UTF-8 文件 | PowerShell 一律 `Get-Content -Encoding UTF8`（默认 ANSI 会把 em dash 显示成乱码，文件未必真坏） |
-| 源码 checkpoint（决策 15） | `node atelier/cli.mjs checkpoint save "<名称>"` / `list` / `rollback <id>`（改代码前先看时间线） |
+| 源码 checkpoint（决策 15） | **仓库根目录下** `node atelier/cli.mjs checkpoint save "<名称>"` / `list` / `rollback <id>`（改代码前先看时间线；save 内建门禁=测试套件绿+快照 MATCH 才许锚定，`--no-gate` 为 wip 锚逃生口。**务必在仓库根运行**——在子目录跑会因找不到 `.git` 误引导嵌套 git 仓，2026-08-30 实证） |
 
 ## 维护纪律
 

@@ -22,6 +22,25 @@
 - **路线决策（2026-08-30，用户定论）**：技能包是核心竞争力、保留；先壮大框架功能（F 线），与 React 的
   对照对决后置。
 
+### 已完成（2026-08-30 · ROADMAP 阶段一推进，会话归档）
+
+- **P1-2 / F-4 覆盖扩张第一批**：`{:else if}` 链（解析期多分支，发射器泛型零改自动双路径覆盖）·
+  HTML void 元素 13 种（修复 `<img>` 吞后续兄弟节点缺陷）· 未闭合结构解析期显式拒绝（**ATR-101** 四段式：
+  编译路径构建期抛 / 解释器路径错误卡 / dump CLI 可行动报错）· `{:else}` 消费长度缺陷修复（`}` 漏进分支文本，
+  parity 同源抓不到、快照回归补位）。dump/codegen CLI 端到端 smoke 通过。
+- **P1-3 / F-3 样式纪律第二期（决策 16）**：token 新增 `font` 组（runtime `--font-*`，Tailwind `--text-*`
+  定义即覆盖原生刻度=字号单源）+ `space.xs`；守卫 R4（间距只准 `var(--space-*)`/calc·无单位系数/0/auto）+
+  R5（font-size 只准 `var(--font-*)`；text-* 刻度类只准 font 键）；扫描面扩到 recipe 层并全量迁移；
+  starter 脚手架端到端 18/18 + R4 负例红检实证。
+- **P1-5 设计备忘三项**：schema 扩 min/max/pattern（扁平红线不动，+6 用例）· confirm `deny` 闸
+  （`mcp/confirm.mjs` 单点执行，破坏性回滚族 deny=ATR-402 结构化拒绝，stdio e2e 实证；ask 档暂同 auto 诚实标注；
+  负例规格 `specs/guardrails.md` init 常驻生成）· `checkpoint save` 测试门禁（未检不锚测试半边闭环，
+  首次保存即自验证生效）。
+- **度量**：框架 vitest 53 → 72 · check-skills 31/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4)
+  → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5)。
+- **附带发现**：checkpoint.mjs 仓库发现只认 cwd 下 `.git`，子目录运行会误建嵌套仓（已记入尾巴区；
+  AGENTS.md 命令行已加"仓库根运行"提示）。
+
 ## 活跃队列
 
 ### F 线 — 功能债（决策书承诺未兑现，壮大框架的主菜）
