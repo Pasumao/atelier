@@ -34,6 +34,8 @@
 | 技能包一致性校验 | `node atelier/scripts/check-skills.mjs`（exit code 可接 CI；改动 skills/mcp-definitions 后必跑） |
 | 一键安装技能到项目 | `node atelier/cli.mjs skills install --target <dir> --name <Name>`（双落点 + 模板渲染 + specs 骨架，幂等） |
 | 结构地图/结构检查 | `node atelier/cli.mjs struct map` / `check`（六层 OK-WARN-ERROR 分级；在应用目录跑） |
+| 已有应用拉齐 vendor | `node atelier/cli.mjs sync [--target <dir>]`（runtime + dev 面全量覆盖到框架当前时点；specs 模板补种；应用源码/config 不碰） |
+| 打开 review UI | 应用目录下 `node atelier/cli.mjs review [--open]`（dev 面 /__atelier/review：timeline + 双图判定写回；需 pnpm dev 在跑） |
 | 视觉回归快照 | 应用目录下 `node <repo>/atelier/cli.mjs snapshot save` / `check [--update]`（绝不自动晋升） |
 | MCP server | `node atelier/mcp/server.mjs`（env：`ATELIER_PROJECT_ROOT`=应用目录，`ATELIER_DEV_URL`=应用 dev 面） |
 | 读中文 UTF-8 文件 | PowerShell 一律 `Get-Content -Encoding UTF8`（默认 ANSI 会把 em dash 显示成乱码，文件未必真坏） |

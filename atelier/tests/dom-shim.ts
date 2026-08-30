@@ -50,6 +50,13 @@ class MElement {
     return this.childNodes[0] ?? null;
   }
 
+  /** 真实 DOM 语义：祖先链到达文档根（documentElement/head）才算连接——HMR 回收判据依赖它 */
+  get isConnected(): boolean {
+    let n: AnyNode = this;
+    while (n.parentNode) n = n.parentNode;
+    return n === doc.documentElement || n === doc.head;
+  }
+
   appendChild(node: AnyNode): AnyNode {
     if (node.type === "fragment") {
       for (const c of [...node.childNodes]) this.appendChild(c);
@@ -155,4 +162,10 @@ export function findByTag(node: AnyNode, tag: string): AnyNode[] {
 
 export function makeContainer(): AnyNode {
   return new MElement("div");
+}
+
+/** 把容器挂进文档根——isConnected 语义需要祖先链可达 documentElement（HMR 回收判据） */
+export function attachToDocument(node: AnyNode): AnyNode {
+  doc.documentElement.appendChild(node);
+  return node;
 }

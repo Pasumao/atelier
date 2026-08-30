@@ -23,8 +23,10 @@ PROJECT
                                                                          (+ agent layer)
   atelier dev                                                      MINI  run the app's dev server
                                                                          (forwards to package.json dev script)
-  atelier build | package | review | e2e                           STUB  spec'd, lands with compiler /
+  atelier build | package | e2e                                    STUB  spec'd, lands with compiler /
                                                                          @atelier/review packages (v0.2+)
+  atelier sync [--target <dir>]                                    FULL  re-vendor runtime + dev face into
+                                                                         an existing app (拉齐到框架当前时点)
 
 AGENT SURFACE
   atelier mcp                                                      FULL  built-in MCP server (stdio)
@@ -33,6 +35,8 @@ AGENT SURFACE
   atelier skills check                                             FULL  consistency gate (CI exit code)
   atelier struct [map|check] [--json]                              FULL  six-layer structural ground truth
                                                                          (map=human/json, check=gates)
+  atelier review [--open]                                          MINI  open the dev-face review UI
+                                                                         (timeline + 双图判定; needs pnpm dev)
 
 QUALITY GATES
   atelier check                                                    MINI  hard gate: structural contradictions
@@ -61,7 +65,6 @@ Examples:
 const STUB_NOTES = {
   build: ["compiles .atr.ts contracts/templates", "see ARCHITECTURE §4 compile pipeline"],
   package: ["Tauri 2 desktop packaging", "see ARCHITECTURE §10"],
-  review: ["local acceptance UI (timeline/diff/approve)", "meanwhile: MCP diff.report path is specced; use checkpoint timeline"],
   e2e: ["browser loop: structure assertions + visual diff", "meanwhile: snapshot check covers the regression half"],
   lint: ["soft-constraint ruleset (@atelier/eslint)", "meanwhile: skills docs carry the rules; check carries the hard gate"],
 };
@@ -130,6 +133,44 @@ switch (cmd) {
   case "checkpoint":
     runScript("checkpoint.mjs", [sub, ...rest]);
     break;
+  case "sync":
+    runScript("sync-project.mjs", [sub, ...rest]);
+    break;
+  case "review": {
+    // MINI（P1-4 落地）：review UI 最小版实跑在 dev 面（/__atelier/review，P2-5 L5）。
+    // 本命令负责指路 + 可选开页；不做反向代理（页面已在应用自己的 dev server 上）。
+    const argv = process.argv.slice(3);
+    const base = (process.env.ATELIER_DEV_URL ?? "http://127.0.0.1:5173").replace(/\/$/, "");
+    const cwd = argv.includes("--target") ? path.resolve(argv[argv.indexOf("--target") + 1]) : process.cwd();
+    let token = "";
+    try { token = fs.readFileSync(path.join(cwd, ".atelier", "dev-token"), "utf8").trim(); } catch { /* empty */ }
+    if (!token) {
+      console.error("error: no dev token here (.atelier/dev-token missing)");
+      console.error("fix: run inside an Atelier app dir — start 'pnpm dev' once to mint the token, then retry");
+      process.exit(1);
+    }
+    const url = `${base}/__atelier/review?token=${token}`;
+    const probe = spawnSync(
+      process.execPath,
+      ["-e", `fetch(${JSON.stringify(`${base}/__atelier/review`)},{headers:{"x-atelier-token":${JSON.stringify(token)}}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(2))`],
+      { timeout: 8000 },
+    );
+    if (probe.status !== 0) {
+      console.error(`[atelier] review UI unreachable at ${base}/__atelier/review (dev face down or token mismatch)`);
+      console.error("fix: start the app dev server ('pnpm dev' in the app dir), then retry");
+      process.exit(4);
+    }
+    console.log(`[atelier] review UI: ${url}`);
+    console.log("  timeline + 双图并排 + 判定写回（token 已附在 URL，仅本机回环有效）");
+    if (argv.includes("--open")) {
+      const opener =
+        process.platform === "win32"
+          ? spawnSync("cmd", ["/c", "start", "", url], { shell: true, stdio: "ignore" })
+          : spawnSync("xdg-open", [url], { stdio: "ignore" });
+      if (opener.status === 0) console.log("  → 已在默认浏览器打开");
+    }
+    break;
+  }
   case "compile": {
     // P0-2 stage ②: AST dump — spawns a bare node process so the TS runtime import type-strips natively
     const args = process.argv.slice(3);

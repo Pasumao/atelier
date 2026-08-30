@@ -67,42 +67,8 @@ putFile(path.join(target, "AGENTS.md"),
 putFile(path.join(target, "llms.txt"),
   fs.readFileSync(path.join(TPL, "llms.txt.template"), "utf8").replaceAll("<ProjectName>", projectName));
 
-// 3) specs skeleton (human-owned; decision 11 three-part template)
-putFile(path.join(target, "specs", "_spec-template.md"), `# <Change Title> — Intent & Acceptance
-
-> Human-owned file. The agent reads this before editing anything and may propose edits, but you decide.
-
-## Goal
-(one paragraph — what this change is for, in product terms)
-
-## Constraints
-(hard rules: H1-H6 invariants, locked components, perf budgets, do-not-touch files)
-
-## Acceptance checklist
-- [ ] observable behaviour 1
-- [ ] observable behaviour 2
-`);
-
-// 3b) standing guardrail spec (decision 15 confirm tiers — negative scenarios; human-owned like all specs)
-putFile(path.join(target, "specs", "guardrails.md"), `# Guardrails — 破坏性操作与 confirm 三档（决策 15）
-
-> 常驻负例规格（human-owned）。执行锚点：框架测试 tests/mcp-confirm.test.ts + MCP stdio E2E。
-
-## 场景：agent.confirm = deny 时破坏性操作被拒（负例）
-- **Given** atelier.config.json 设置 \`"agent": { "confirm": "deny" }\`
-- **When** agent 经 MCP 调用 checkpoint.rollback / state.time_travel / checkpoint.source_rollback
-- **Then** 服务器返回结构化错误 **ATR-402**（isError=true），消息含工具名与档位说明；
-  fix 指向"人工 CLI 执行或用户确认后调档"；
-- **And** 非破坏性工具（state.snapshot / test.run / structure.check …）不受 deny 影响。
-
-## 场景：confirm 缺省 = auto
-- **Given** 配置缺 agent 段或文件缺失
-- **When** 调用破坏性工具
-- **Then** 正常执行（auto 档），并写审计日志。
-
-## 诚实边界
-- \`ask\` 档当前与 auto 同效（stdio 无人工审批通道，审批面接线属后续）——变更前请人工盯守。
-`);
+// 3) specs 骨架（_spec-template.md + guardrails.md 常驻负例）已实体化进 templates/app/specs/，
+//    随 init-project 的 cpSync 落盘——此处不再重复生成（P1-4 整理：单一来源，sync-project 同源补种）。
 
 // 4) MCP client registrations (stdio server; --no-mcp to skip). skip-if-exists keeps user edits safe.
 if (args.mcp) {

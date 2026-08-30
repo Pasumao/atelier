@@ -73,6 +73,11 @@ function track(sig: Signal): void {
  *  栈式恢复（嵌套 mount 各自接管），平时为 null 零开销。 */
 export const __creationSink: { fn: ((s: Signal<unknown>) => void) | null } = { fn: null };
 
+/** P1-4 HMR：effect 创建沉降。mount 期间 runtime 置入收集器，把新建 effect 的 dispose 归属到
+ *  挂载实例，供热交换时逐个注销（关闭"旧 effects 不 dispose"的 dev-only 有界泄漏）。
+ *  栈式恢复同 __creationSink；平时为 null 零开销。 */
+export const __effectSink: { fn: ((dispose: () => void) => void) | null } = { fn: null };
+
 function notify(sig: Signal): void {
   const subs = [...sig._subs];
   for (const sub of subs) deliver(sub);
@@ -193,11 +198,13 @@ export function $effect(fn: () => void): () => void {
   };
 
   sub.run();
-  return () => {
+  const dispose = () => {
     alive = false;
     for (const d of record.deps) d._subs.delete(sub);
     __effects.delete(record); // v0.3：注销依赖图登记，不驻留死节点
   };
+  if (__effectSink.fn) __effectSink.fn(dispose); // P1-4：mount 期间创建的 effect 归属实例，HMR 交换时逐个注销
+  return dispose;
 }
 
 /**

@@ -9,7 +9,7 @@
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
-import { $effect, store, __creationSink, type Signal } from "./core.ts";
+import { $effect, store, __creationSink, __effectSink, type Signal } from "./core.ts";
 import { evalExpr } from "./expr.ts";
 
 /** —— token 单源（决策 8）：由 main.ts 启动时加载 atelier.config.json 注入 —— */
@@ -367,10 +367,13 @@ function mountComponentInner(
   registry: ComponentRegistry,
   validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError }
 ): HTMLElement {
-  // P0-5 HMR：栈式创建收集——本次 render 新建的 $state 归属本实例（嵌套 mount 各自接管）
+  // P0-5 HMR：栈式创建收集——本次 render 新建的 $state 与 $effect 归属本实例（嵌套 mount 各自接管）
   const collected: Signal[] = [];
+  const collectedEffects: Array<() => void> = [];
   const prevSink = __creationSink.fn;
   __creationSink.fn = (s) => collected.push(s);
+  const prevEffectSink = __effectSink.fn;
+  __effectSink.fn = (d) => collectedEffects.push(d);
   mountDepth++;
   let root!: HTMLElement;
   try {
@@ -397,6 +400,7 @@ function mountComponentInner(
     container.appendChild(root);
   } finally {
     __creationSink.fn = prevSink;
+    __effectSink.fn = prevEffectSink;
     mountDepth--;
   }
   liveInstances.add({
@@ -407,6 +411,7 @@ function mountComponentInner(
     validate,
     registry,
     signals: collected,
+    effects: collectedEffects,
     nested: mountDepth >= 1, // 记录时外层尚未自减：≥2 即嵌套挂载
   });
   return root;
@@ -417,8 +422,9 @@ function mountComponentInner(
  * window.__ATELIER_HMR_REMOUNT__()：对所有顶层活实例「快照信号值 → 卸旧树 →
  * 用新 def 重挂载 → 按创建序还原信号值」。按序还原是启发式（模板结构大改可能
  * 错位——多出的新信号保持初值，文档已标注）。已知边界（诚实标注）：
- *   · 旧树 effects 未逐个 dispose， Detached 后仍在订阅（dev-only 有界泄漏）
- *   · store 旧 checkpoint 引用被换信号，跨交换的 timeTravel 不回落到新信号
+ *   · 模板结构大改时按序还原可能错位（多出的新信号保持初值）——P1-4 处置：保留为已文档化启发式
+ *   · store 旧 checkpoint 引用被换信号，跨交换的 timeTravel 不回落到新信号——保留为已文档化边界
+ *   （第三边界"旧 effects 不 dispose"已由 __effectSink + disposeInstance 关闭，P1-4）
  */
 type LiveInstance = {
   defName: string;
@@ -428,26 +434,43 @@ type LiveInstance = {
   validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError };
   registry: ComponentRegistry;
   signals: Signal[];
+  effects: Array<() => void>;
   nested: boolean;
 };
 const liveInstances = new Set<LiveInstance>();
 let mountDepth = 0;
 
-function hmrSwap(): number {
-  // 先清陈旧嵌套记录（父级重挂后其 root 已不在文档）
-  for (const inst of [...liveInstances]) {
-    if (!inst.root.isConnected) {
-      liveInstances.delete(inst);
-      for (const s of inst.signals) store._signals.delete(s);
+/** 实例级回收：dispose 本实例全部 effects（关闭订阅泄漏）→ 摘树 → 注销信号登记 */
+function disposeInstance(inst: LiveInstance): void {
+  for (const d of inst.effects) {
+    try {
+      d();
+    } catch {
+      /* dispose 自身抛错不阻断回收 */
     }
   }
+  inst.root.remove();
+  for (const s of inst.signals) store._signals.delete(s);
+}
+
+/** 回收断连实例（父树已移除的嵌套实例 / 上轮遗留）：immediate 而非等下一轮交换 */
+function reapDisconnected(): void {
+  for (const inst of [...liveInstances]) {
+    if (inst.root.isConnected) continue;
+    disposeInstance(inst);
+    liveInstances.delete(inst);
+  }
+}
+
+function hmrSwap(): number {
+  reapDisconnected(); // 先清陈旧（含上轮遗留），并处置其 effects
   let swapped = 0;
   for (const inst of [...liveInstances]) {
     if (inst.nested) continue;
     const values = inst.signals.map((s) => s.get());
-    inst.root.remove();
+    disposeInstance(inst); // 旧 effects 逐个 dispose + 摘除旧树 + 注销信号
     liveInstances.delete(inst);
-    for (const s of inst.signals) store._signals.delete(s);
+    reapDisconnected(); // 顶层树移除后其嵌套实例随即断连——立即回收
     const def = inst.registry.get(inst.defName); // 新模块已重注册；未注册则放弃该实例
     if (!def) continue;
     const root = mountComponentInner(def, inst.props, inst.container, inst.registry, inst.validate);

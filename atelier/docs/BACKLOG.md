@@ -36,8 +36,12 @@
   （`mcp/confirm.mjs` 单点执行，破坏性回滚族 deny=ATR-402 结构化拒绝，stdio e2e 实证；ask 档暂同 auto 诚实标注；
   负例规格 `specs/guardrails.md` init 常驻生成）· `checkpoint save` 测试门禁（未检不锚测试半边闭环，
   首次保存即自验证生效）。
-- **度量**：框架 vitest 53 → 72 · check-skills 31/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4)
-  → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5)。
+- **P1-4 尾巴清理（同日第二批）**：`atelier review` STUB→MINI（dev 面 review UI 指路 + token 探活 + `--open`，
+  三路径实测）· `atelier sync` 新命令（vendor 同步，覆盖/补种/依赖漂移提示三效应实证）· HMR 第三边界关闭
+  （`__effectSink` + `disposeInstance`，依赖图不翻倍实证；shim 补 isConnected）· CI snapshot-smoke 本地等价
+  全流程通过（真实浏览器 baseline → MATCH → test+snapshot 双门禁锚定 `0ba332e`；真实 CI 首跑待 push 远端）。
+- **度量**：框架 vitest 53 → 74 · check-skills 31/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4)
+  → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5) → `6538ee1`(文档整理)。
 - **附带发现**：checkpoint.mjs 仓库发现只认 cwd 下 `.git`，子目录运行会误建嵌套仓（已记入尾巴区；
   AGENTS.md 命令行已加"仓库根运行"提示）。
 
@@ -64,12 +68,20 @@
 
 ### 尾巴（诚实标注的已知项）
 
-- 已存在应用需重新 vendor 同步，才能拿到 `state-discipline` 守卫测试与更新后的技能包；
-- HMR 三边界：旧 effects 不逐个 dispose（dev-only 有界泄漏）/ 模板结构大改时按序还原可能错位 /
-  跨交换 checkpoint 不回落新信号；
-- CI snapshot-smoke job 已写、待首次运行验证；`atelier review` CLI 为占位；
-- checkpoint.mjs 仓库发现只认 cwd 下的 `.git`（不做向上查找）：在 `atelier/` 子目录跑会误引导嵌套 git 仓（2026-08-30 实证，已手动清理；从仓库根运行即无此问题），候选修法=cwd 无 `.git` 时向上 `rev-parse` 找根；
-- P1-9 baseline.png 视觉复核留待用户（`.dsh-trash/smoke-app/.atr/snapshots/`）。
+- ~~已存在应用需重新 vendor 同步~~ ✅ **已处置（2026-08-30，P1-4）**：新增 `atelier sync [--target <dir>]`
+  （scripts/sync-project.mjs）——runtime 全量覆盖 + dev 面三件覆盖 + specs 模板补种（skip-if-exists）+ 依赖漂移提示；
+  实证：覆盖污染的 vendored core.ts 恢复框架真相、补种 guardrails.md。
+- HMR 三边界（P1-4 处置）：①~~旧 effects 不逐个 dispose~~ ✅ **已关闭**（`__effectSink` 收集 + `disposeInstance`
+  逐个注销，依赖图不翻倍 2 用例实证；dom-shim 补 isConnected 语义）；②模板结构大改时按序还原可能错位——
+  **保留为已文档化启发式**（无信号身份可比对，正确修复需编译器闭包捕获，归 F-2 二期后再评估）；
+  ③跨交换 checkpoint 不回落新信号——**保留为已文档化边界**（信号引用随换实例失效）。
+- CI snapshot-smoke：**本地等价验证通过（2026-08-30）**——scaffold→install→dev→snapshot save→check(MATCH)→
+  dirty 文件→gated checkpoint save 锚定成功（test gate + snapshot gate 双门禁首跑）；真实 CI 首跑仍待 push
+  远端（本仓尚无 git remote）。`atelier review` CLI ✅ **已从 STUB 转 MINI**（指路 dev 面 review UI + token
+  探活 + `--open` 开页，三路径实测）。
+- P1-9 baseline.png 视觉复核留待用户（`.dsh-trash/smoke-app/.atr/snapshots/`）；
+- checkpoint.mjs 仓库发现只认 cwd 下的 `.git`（不做向上查找）：在 `atelier/` 子目录跑会误引导嵌套 git 仓
+  （2026-08-30 实证，已手动清理；AGENTS.md 已加"仓库根运行"提示），候选修法=cwd 无 `.git` 时向上 `rev-parse` 找根；
 
 ### 挂起区（等 F 线里程碑后启动）
 
