@@ -18,6 +18,7 @@ store.list();                 // [{ id, name, at }] — the human-visible timeli
 
 - Checkpoint granularity = atomic change; **name it per AI turn** ("one round = one checkpoint")
 - Tracked signals are only `$state` — `$derived` recomputes from upstream automatically (never snapshot it)
+- **Snapshot is by-reference**: replace the whole value, never mutate in place — `items.value = [...items.value, x]`, NOT `items.value.push(x)` (in-place changes cannot be rolled back; guarded by `tests/state-discipline.test.ts`)
 
 ## Two layers of rollback (decision 15 — critical)
 
@@ -39,5 +40,6 @@ store.list();                 // [{ id, name, at }] — the human-visible timeli
 | Symptom | Fix |
 |---|---|
 | `store.rollback()` throws ATR-305 | You registered a `$derived` in the snapshot — derived signals are auto-recomputed, only `$state` is tracked |
+| `rollback()` returns ok but content is not restored | You mutated a signal value in place (`push` / prop assign) — snapshots are by-reference; replace the whole value: `items.value = [...items.value, x]` |
 | UI shows old state after time-travel | Wait for microtask batch flush; if stale, read via a `$derived` that also touches `refresh.value` |
 | Checkpoint lost after rollback | Rollback pops; keep history via `timeTravel` for replay instead |

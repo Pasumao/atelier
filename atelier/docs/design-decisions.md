@@ -65,6 +65,11 @@
   - **checkpoint 粒度 = 原子变更，但支持命名合并**（AI 一轮对话的 N 个变更折叠为 1 个可命名 checkpoint，回滚粒度对人类是"一次操作"）。
 - 本步不做自动持久化（留待上层）；CRDT/离线协同作为未来可选插件，不进内核。
 - 取舍弃 B（瘦内核 → AI 无运行时后悔药，与"可逆是自治前提"相悖）、C（CRDT 与逐 token 流式语义内在冲突）。
+- **快照语义注记（2026-08-30，M3 实验教训）**：commit 按**引用**记录信号值，rollback 经 Object.is
+  判等跳过未变信号——原地修改数组/对象（`items.value.push(x)`）的内容 rollback 恢复不了，必须整体
+  替换引用（`items.value = [...items.value, x]`）。该约束写进 runtime JSDoc、state-transactions 技能包，
+  并由应用模板守卫测试 `tests/state-discipline.test.ts` 静态拦截；结构性深拷贝快照因任意值类型
+  （函数/类实例/DOM 引用）拷贝语义不可靠而暂不采用。
 
 ## 决策 6：契约层
 - **定论**：**TS 类型为单源（A）**。

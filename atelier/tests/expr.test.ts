@@ -31,8 +31,18 @@ describe("evalExpr — supported subset matrix", () => {
     expect(evalExpr("list[1] === 'y'", scope)).toBe(true);
   });
 
-  it("ATR-3xx on malformed input", () => {
-    expect(() => evalExpr("((", scope)).toThrowError(/ATR-3xx/);
+  it("ATR-301 on malformed input", () => {
+    expect(() => evalExpr("((", scope)).toThrowError(/ATR-301/);
+  });
+
+  it("ATR-301 精确报错：箭头函数 / 赋值 / 函数调用均前置拦截并给出修法", () => {
+    // 内联箭头函数 → 指向 locals 具名函数
+    expect(() => evalExpr("list.map(x => x)", scope)).toThrowError(/ATR-301.*箭头函数/);
+    // 赋值 → 指向事件处理器
+    expect(() => evalExpr("a = 3", scope)).toThrowError(/ATR-301.*赋值/);
+    // 函数调用曾被静默丢尾（求出函数本身）——现在遗留 token 显式报错
+    expect(() => evalExpr("list.map(f)", scope)).toThrowError(/ATR-301.*遗留/);
+    expect(() => evalExpr("a + b) (", scope)).toThrowError(/ATR-301.*遗留/);
   });
 });
 

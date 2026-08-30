@@ -187,13 +187,13 @@ describe("P0-2③ codegen golden DOM parity", () => {
   });
 
   it("表达式求值失败 → ATR 错误卡（bindExpr catch 语义）", async () => {
-    const raw = `<p>{n.value +}</p>`; // 解析期必抛（ATR-3xx 表达式意外结束）
+    const raw = `<p>{n.value +}</p>`; // 解析期必抛（ATR-301 表达式意外结束）
     const r = await parity("ParityErr", raw, () => {
       const n = $state(1);
       return { scope: { n }, steps: [async () => { n.value = 2; }] };
     });
     expect(r.frames.at(-1)).toContain("⚠");
-    expect(r.frames.at(-1)).toContain("ATR-3xx");
+    expect(r.frames.at(-1)).toContain("ATR-301");
   });
 });
 

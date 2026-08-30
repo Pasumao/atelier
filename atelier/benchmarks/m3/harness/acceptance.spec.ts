@@ -12,6 +12,7 @@ import { pathToFileURL } from "node:url";
 import { mountComponent, type ComponentDef } from "../../../runtime/template.ts";
 import { validateFlat } from "../../../runtime/contract.ts";
 import { findByTag, makeContainer, serialize } from "../../../tests/dom-shim.ts";
+import { stripComments } from "./strip-comments.ts";
 
 const TASK = process.env.ATELIER_M3_TASK ?? "";
 const ATTEMPT = process.env.ATELIER_M3_ATTEMPT ?? "";
@@ -67,7 +68,10 @@ async function mount(file: string, name: string, props: Record<string, unknown>)
   it("task2-stream：streamValue 语义 + 禁手写打字机", async () => {
     if (TASK !== "task2-stream") return;
     const src = fs.readFileSync(path.join(ATTEMPT, "src", "components", "StreamCard.atr.ts"), "utf8");
-    expect(src).not.toMatch(/setInterval|setTimeout/);
+    // 禁令约束行为而非措辞：剥注释后只查代码文本（wave-4 注释复述禁令被误伤的修正）
+    expect(stripComments(src), "代码文本中不得使用 setInterval/setTimeout 手写打字机").not.toMatch(
+      /setInterval|setTimeout/,
+    );
     const first = await mount("StreamCard.atr.ts", "StreamCard", {});
     const sv = first.mod.runDemo();
     expect(sv.done).toBe(true);
@@ -96,5 +100,25 @@ async function mount(file: string, name: string, props: Record<string, unknown>)
     await click("rollback");
     expect(serialize(container)).toContain('"1"');
     expect(serialize(container)).not.toContain('"beta"');
+  });
+});
+
+/** 评分器自测（常驻，无 env 也跑）：stripComments 不许误剥、不许漏剥硬禁词。 */
+describe("stripComments — grader self-test", () => {
+  it("注释里的禁令字样被剥离（wave-4 误伤复现）", () => {
+    expect(stripComments("// 硬禁 setInterval/setTimeout 打字机\nconst a = 1;")).toBe("\nconst a = 1;");
+    expect(stripComments("/* setInterval */ const a = 1;")).toBe(" const a = 1;");
+  });
+  it("字符串/正则/模板串里的构造不误剥为注释", () => {
+    expect(stripComments(`const s = "/* not a comment */";`)).toBe(`const s = "/* not a comment */";`);
+    expect(stripComments(`const u = "http://x"; // real comment`)).toBe(`const u = "http://x"; `);
+    expect(stripComments(`const re = /['"]/; const t = 1;`)).toBe(`const re = /['"]/; const t = 1;`);
+    expect(stripComments("const t = `a ${b /* c */} // d` + 1;")).toBe("const t = `a ${b } // d` + 1;");
+    // 嵌套模板：TPL→expr→TPL→expr，闭合后各层正文/外层代码都不许被吞
+    expect(stripComments("const n = `x${`y${z /*q*/} w`} v`;")).toBe("const n = `x${`y${z } w`} v`;");
+  });
+  it("真用定时器的代码必须原样留存（硬禁检查仍然有效）", () => {
+    expect(stripComments("setTimeout(fn, 100);")).toContain("setTimeout(fn, 100)");
+    expect(stripComments("const id = setInterval(tick);")).toContain("setInterval(tick)");
   });
 });

@@ -180,6 +180,11 @@ export function $effect(fn: () => void): () => void {
 /**
  * 事务层最小实现（决策 5 雏形）：注册信号的全量快照 checkpoint。
  * 完整版：增量 patch 事件日志 + 命名合并 + 依赖图可查询（本原型为全量快照）。
+ *
+ * 快照语义（重要）：commit 按引用记录信号值，rollback 经 Object.is 判等跳过未变信号。
+ * 因此原地修改数组/对象（如 items.value.push(x)）的内容 rollback 恢复不了——
+ * 必须整体替换引用（items.value = [...items.value, x]）。
+ * 该约束由应用模板守卫测试 tests/state-discipline.test.ts 静态拦截。
  */
 export const store = {
   _signals: new Set<Signal>(),

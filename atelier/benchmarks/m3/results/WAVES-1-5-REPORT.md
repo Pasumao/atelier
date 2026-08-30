@@ -24,6 +24,10 @@
 但文件**头注释**里写了「硬禁手写 setInterval/setTimeout 打字机」字样，触发评分器对源码全文的
 `/setInterval|setTimeout/` 硬禁正则 → 机械 FAIL；修复轮（attempts=2）仅改注释措辞后 PASS。
 这是"禁令复述进注释"被机械检查误伤，不是流式能力缺陷。
+**评分器事后修订（2026-08-30）**：硬禁检查改为对剥注释后的代码文本匹配（`harness/strip-comments.ts`，
+带常驻自测 + 双向 fixture：注释提及必须 PASS、真用定时器必须 FAIL）。按修订后评分器复判，该 run
+首遍即应 PASS——但账本按协议（firstPass = 首个 attempt 当时的 grade.ok）保持原记录不变，skill 臂
+93.3% 是"当时评分器下"的数字；修订后口径下三臂为 15/15 全平。
 
 `report.mjs` 官方输出：
 

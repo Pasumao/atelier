@@ -27,7 +27,7 @@ description: Atelier error code reference. ATR-1xx compile / 2xx contract / 3xx 
 
 | Code | Cause | Example | Fix |
 |---|---|---|---|
-| ATR-301 | Template expression parse failure | `() => {}` inline in template, or `??`/`===` before support | Use named handler (`.locals({ bump })` + `on:click={bump}`); keep expressions simple |
+| ATR-301 | Template expression parse failure | `=>` arrow, `=` assignment, or function call (`.map(...)`) left in a `{...}` expression — leftover tokens are rejected, never silently dropped | Use named handler (`.locals({ bump })` + `on:click={bump}`); precompute with `$derived`; keep expressions simple |
 | ATR-305 | Writing to a `$derived` signal | `double.value = 4` | Derive-only: change upstream `$state` instead |
 
 ## ATR-4xx — MCP / tooling

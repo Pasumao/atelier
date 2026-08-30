@@ -67,7 +67,15 @@ function tokenize(src: string): Tok[] {
       i++;
       continue;
     }
-    throw new Error(`ATR-3xx: 无法解析表达式字符 "${c}"`);
+    if (c === "=" && src[i + 1] === ">")
+      throw new Error(
+        "ATR-301: 模板表达式不支持箭头函数（=>）——在组件函数体内定义普通函数（具名/函数声明），经 locals 绑定后在模板里引用函数名（如 on:click={inc}）",
+      );
+    if (c === "=")
+      throw new Error(
+        "ATR-301: 模板表达式不支持赋值（=）——表达式只读求值；请通过事件处理器（on:click={handler} 等）调用函数修改 $state",
+      );
+    throw new Error(`ATR-301: 无法解析表达式字符 "${c}"`);
   }
   return toks;
 }
@@ -90,10 +98,17 @@ class Parser {
   }
   expectOp(v: string) {
     const t = this.next();
-    if (!t || t.v !== v) throw new Error(`ATR-3xx: 期望 "${v}"，实际 "${t?.v ?? "EOF"}"`);
+    if (!t || t.v !== v) throw new Error(`ATR-301: 期望 "${v}"，实际 "${t?.v ?? "EOF"}"`);
   }
   parse(): (scope: Record<string, unknown>) => unknown {
-    return this.ternary();
+    const ast = this.ternary();
+    if (this.pos < this.toks.length) {
+      const rest = this.toks.slice(this.pos).map((t) => t.v).join(" ");
+      throw new Error(
+        `ATR-301: 表达式含不支持的语法（遗留 "${rest}"）——常见于函数调用（如 .map(...)）或内联箭头函数；请改用 $derived 预计算、或经 locals 绑定具名函数后在模板引用`,
+      );
+    }
+    return ast;
   }
   ternary(): (scope: Record<string, unknown>) => unknown {
     const cond = this.nullish();
@@ -205,7 +220,7 @@ class Parser {
   }
   primary(): (scope: Record<string, unknown>) => unknown {
     const t = this.next();
-    if (!t) throw new Error("ATR-3xx: 表达式意外结束");
+    if (!t) throw new Error("ATR-301: 表达式意外结束");
     if (t.t === "num") {
       const n = Number(t.v);
       return () => n;
@@ -217,7 +232,7 @@ class Parser {
       if (t.v === "true") return () => true;
       if (t.v === "false") return () => false;
       if (t.v === "null" || t.v === "undefined") return () => null;
-      throw new Error(`ATR-3xx: 不支持关键字 ${t.v}`);
+      throw new Error(`ATR-301: 不支持关键字 ${t.v}`);
     }
     if (t.t === "op" && t.v === "(") {
       const inner = this.ternary();
@@ -236,7 +251,7 @@ class Parser {
       if (n.v === ".") {
         this.next();
         const prop = this.next();
-        if (!prop || prop.t !== "id") throw new Error("ATR-3xx: 属性名期望标识符");
+        if (!prop || prop.t !== "id") throw new Error("ATR-301: 属性名期望标识符");
         const prev = fn;
         fn = (s) => (prev(s) as Record<string, unknown>)?.[prop.v];
         continue;
