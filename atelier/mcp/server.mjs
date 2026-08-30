@@ -142,6 +142,9 @@ async function callTool(name, args) {
   if (name === "checkpoint.list") return bridgeCall("checkpoint.list", {});
   if (name === "checkpoint.rollback") return bridgeCall("checkpoint.rollback", args ?? {});
   if (name === "state.time_travel") return bridgeCall("state.time_travel", args ?? {});
+  if (name === "state.graph") return bridgeCall("state.graph", {}); // P2-1：依赖图（F-1 收尾）
+  if (name === "state.journal")
+    return bridgeCall("state.journal", { lines: Math.max(1, Math.min(500, Number(args?.lines ?? 100))) });
   if (name === "audit.log") {
     const j = await devJson(`/__atelier/audit?lines=${Math.max(1, Math.min(500, Number(args?.lines ?? 50)))}`);
     return j.rows;

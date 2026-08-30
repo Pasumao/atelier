@@ -44,6 +44,8 @@
 
 ### 阶段二：agent 纵深与标准对齐（建议窗口 2026-10 ~ 11）
 
+> 状态（2026-08-30）：P2-1 ✅（graph/journal 接线，MCP 23 工具；stdio 快乐径 e2e 实证）· P2-2~P2-5 待启动
+
 | # | 任务 | 内容与依据 | 估量 |
 |---|---|---|---|
 | P2-1 | **F-1 收尾：graph/journal 接线** | `store.graph()` 与 patch journal 暴露进 MCP（state.snapshot 增强 / 新查询工具），BACKLOG 明示的待接线项〔定〕 | S-M |

@@ -16,7 +16,7 @@
 | `atelier/dev/` | dev 面框架件：`atelier-dev-plugin.mjs`（Vite 插件，/__atelier/* 查询/桥接/审计/token 门禁/SSE 下行）、`dev-screenshot.mjs`（CDP 无头截图）、`gen-tailwind-theme.mjs`（决策 16 token→@theme AOT）、`probe-mount.mjs`（挂载诊断探针，PROBE_URL 可换目标）。init 时 vendor 进应用 `scripts/`。 |
 | `atelier/tests/` | runtime 单测（vitest，72 用例：内核/契约/表达式 fuzz/codegen golden DOM 对拍/F-2 静态依赖差分对拍/F-4 覆盖扩张 parity/mcp-confirm 闸）。 |
 | `atelier/templates/app/` | 应用 starter 模板：vite.config / index.html / atelier.config.json（token SSOT）/ src/main.ts + HelloCard 与 ContractProbe 三元共置示例（.atr.ts + .atr.md + .atr.spec.ts）/ manifest.json / llms.txt / atelier-ui.css recipe / styling-discipline + state-discipline 守卫测试。`atelier init` 以此组装自包含应用（specs/ 骨架含 guardrails.md 常驻负例）。 |
-| `atelier/mcp/` | stdio MCP Server（21 工具单源生成，live 工具需一个运行中的应用 dev 面）。 |
+| `atelier/mcp/` | stdio MCP Server（23 工具单源生成，live 工具需一个运行中的应用 dev 面）。 |
 | `atelier/skills/` | 多工具兼容技能包（8 个 kebab-case 目录包）。 |
 | `atelier/scripts/` + `cli.mjs` | init（三步组装：模板 + runtime vendor + dev vendor）/ dev / struct / checkpoint / snapshot / skills / mcp，三级诚实标注。 |
 | `atelier/docs/` | 框架规格文档：ARCHITECTURE / design-decisions 0-16 / BACKLOG（执行队列唯一源）/ ROADMAP（2026H2→2027H1 路线计划书）/ SKILLS-PLAN / TECH-*。 |

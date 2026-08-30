@@ -270,10 +270,12 @@ export const store = {
   log(n = 50): { seq: number; at: number; sig: Signal; from: unknown; to: unknown }[] {
     return this._journal.slice(-n);
   },
-  /** v0.3 依赖图即席查询：全部 $state（kind 标记）+ 每个存活 effect 的依赖边（信号 id 稳定） */
-  graph(): {
-    signals: { id: number; kind: "state" | "derived" }[];
-    effects: { id: number; deps: number[] }[];
+  /** v0.3 依赖图即席查询：全部 $state（kind 标记）+ 每个存活 effect 的依赖边。
+   * 默认 id = WeakMap 稳定键（跨调用可 diff）；可注入 keyOf 换键——dev 桥用 sig-N
+   * 与 state.snapshot 的 signals 键对齐（P2-1 接线）。 */
+  graph(keyOf?: (s: Signal) => string | number): {
+    signals: { id: string | number; kind: "state" | "derived" }[];
+    effects: { id: number; deps: (string | number)[] }[];
   } {
     const idOf = (s: Signal): number => {
       let id = __sigIds.get(s);
@@ -283,9 +285,10 @@ export const store = {
       }
       return id;
     };
+    const key = keyOf ?? idOf;
     return {
-      signals: [...this._signals].map((s) => ({ id: idOf(s), kind: s._kind })),
-      effects: [...__effects].map((e) => ({ id: e.id, deps: [...e.deps].map(idOf) })),
+      signals: [...this._signals].map((s) => ({ id: key(s), kind: s._kind })),
+      effects: [...__effects].map((e) => ({ id: e.id, deps: [...e.deps].map(key) })),
     };
   },
 };

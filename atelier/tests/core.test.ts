@@ -176,4 +176,18 @@ describe("transaction store v0.3 (decision 5 — merge / journal / graph)", () =
     expect(derivedIds.length).toBeGreaterThanOrEqual(1); // derived 不在 _signals，但作为依赖边出现
     stop();
   });
+  it("graph(keyOf): 注入键映射后 signals/effects 全部改用注入键（P2-1 dev 桥 sig-N 对齐）", () => {
+    const a = $state("k-of-a");
+    const stop = $effect(() => {
+      void a.value;
+    });
+    const g = store.graph((s) => `custom-${s._kind}`);
+    expect(g.signals.map((s) => s.id)).toContain("custom-state");
+    const eff = g.effects.at(-1)!;
+    expect(eff.deps).toContain("custom-state");
+    stop();
+    // 默认（无参）仍是 WeakMap 数字键——既有调用方不受影响
+    const g2 = store.graph();
+    expect(g2.signals.every((s) => typeof s.id === "number")).toBe(true);
+  });
 });

@@ -8,11 +8,12 @@
  * 因此任一信号的写入都会在同一个 flush 批次重跑本 effect；节流后在微任务外推最新快照。
  * rollback()/timeTravel() 经 notify → 同一通路自动跟推（回滚可观测）。
  *
- * 完整版差异：双向通道（dev→页面下发 rollback/time_travel）、增量 patch 流、
- * 信号 debugName 与依赖图导出、编译期静态图直连。
+ * P2-1 接线（F-1 收尾）：推送载荷增强 graph（依赖图，sig-N 键与 signals 对齐）与 journal
+ * （最近 50 条 $state 变更事件）；下行新增 state.graph / state.journal 即席查询 op。
+ *
  * 已知边界：仅覆盖安装时点已存在的信号（动态挂载的新组件信号需重装 bridge）。
  */
-import { $effect, store } from "./core.ts";
+import { $effect, store, type Signal } from "./core.ts";
 
 let pushing = false;
 let queued = false;
@@ -24,6 +25,36 @@ function safeValue(v: unknown): unknown {
   } catch {
     return String(v); // 循环引用/DOM 节点等不可序列化值的降级表示
   }
+}
+
+/** sig-N 键表：与 serialize().signals 的下标键对齐——graph/journal 引用同一键空间 */
+function signalKeys(): Map<Signal, string> {
+  return new Map([...store._signals].map((s, i) => [s, `sig-${i}`]));
+}
+
+/** 依赖图 JSON 视图：signals（键+kind）+ effects（依赖边）。JSON 安全、无循环引用。 */
+export function graphJson(): {
+  signals: { key: string; kind: "state" | "derived" }[];
+  effects: { id: number; deps: string[] }[];
+} {
+  const keys = signalKeys();
+  const g = store.graph((s) => keys.get(s) ?? "sig-?");
+  return {
+    signals: g.signals.map((s) => ({ key: String(s.id), kind: s.kind })),
+    effects: g.effects.map((e) => ({ id: e.id, deps: e.deps.map(String) })),
+  };
+}
+
+/** $state 变更事件日志 JSON 视图（时间升序，最近 n 条）：sig 为 sig-N 键，from/to 经 safeValue 降级。 */
+export function journalJson(n = 100): { seq: number; at: number; sig: string; from: unknown; to: unknown }[] {
+  const keys = signalKeys();
+  return store.log(n).map((e) => ({
+    seq: e.seq,
+    at: e.at,
+    sig: keys.get(e.sig) ?? "sig-?",
+    from: safeValue(e.from),
+    to: safeValue(e.to),
+  }));
 }
 
 function serialize(): Record<string, unknown> {
@@ -38,6 +69,8 @@ function serialize(): Record<string, unknown> {
     timeline: store.list(),
     signalCount: signals.length,
     signals,
+    graph: graphJson(), // P2-1：state.snapshot 载荷增强——依赖图与最近事件随推送走
+    journal: journalJson(50),
   };
 }
 
@@ -83,6 +116,12 @@ async function execCommand(c: { id: string; op: string; args?: Record<string, un
         payload.result = { traveledTo: id };
         break;
       }
+      case "state.graph": // P2-1：依赖图即席查询（sig-N 键与 snapshot 对齐）
+        payload.result = graphJson();
+        break;
+      case "state.journal": // P2-1：变更事件日志即席查询（可要更深历史，推送只带最近 50）
+        payload.result = journalJson(Number((c.args as { lines?: number })?.lines ?? 100));
+        break;
       default:
         payload.ok = false;
         payload.error = `ATR-4xx-dev: unknown downlink op "${c.op}"`;

@@ -44,8 +44,12 @@
   `{a}` 简写 / `({...}).x` 后缀链）· 配对花括号解析（引号感知，属性值 `attr={{a:1}}` 同步支持）·
   **错位/游离闭合标签显式拒绝**（此前静默吞掉甚至截断余下模板）· 字面量花括号并入文本（此前静默丢弃）·
   对象键不进静态依赖清单。P0-8 前置报错语义保持。10 新用例，84/84 绿；CLI + 脚手架 sync 后回归通过。
-- **度量**：框架 vitest 53 → 84 · check-skills 31/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4一批)
-  → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5) → `6538ee1`(文档整理) → `69a1a5d`(P1-4)。
+- **P2-1 / F-1 收尾（同日第四批工作）**：graph/journal 接线进 MCP——`store.graph(keyOf)` 键映射注入 ·
+  bridge 推送载荷增强（graph + 最近 50 条 journal，sig-N 键与 signals 对齐）· 下行新 op 两枚 ·
+  MCP 新查询工具 `state.graph`/`state.journal`（23 工具）· `state.snapshot` 同步增强。
+  stdio 快乐径 e2e（截图唤起常驻页面 → 活依赖图返回）；4 新用例 88/88 绿；check-skills 31/0。
+- **度量**：框架 vitest 53 → 88 · check-skills 31/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4一批)
+  → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5) → `6538ee1`(文档整理) → `69a1a5d`(P1-4) → `cac2d04`(F-4二批)。
 - **附带发现**：checkpoint.mjs 仓库发现只认 cwd 下 `.git`，子目录运行会误建嵌套仓（已记入尾巴区；
   AGENTS.md 命令行已加"仓库根运行"提示）。
 
@@ -58,7 +62,7 @@
 
 | # | 项 | 内容 | 估量 |
 |---|---|---|---|
-| F-1 | **事务层完整版（决策 5）** | ✅ **第一期落地（2026-08-30）**：命名合并（同名栈顶幂等锚定，rollback 回到本轮前）+ 增量 patch 事件日志（journal，有界环形可关）+ 依赖图可查询（`store.graph()`，dispose 即注销）。6 用例实证（含 limit 调小裁剪、跨名不合并、derived 出现在依赖边）。诚实边界：恢复仍走全量快照（正确性锚点）；MCP 暴露 graph/log 待接线。**剩余**：无（本期范围全清）；后续增强=回放恢复/编译期静态化归 F-2 | ✅ |
+| F-1 | **事务层完整版（决策 5）** | ✅ **第一期落地（2026-08-30）+ MCP 接线完成（P2-1，2026-08-30）**：命名合并（同名栈顶幂等锚定，rollback 回到本轮前）+ 增量 patch 事件日志（journal，有界环形可关）+ 依赖图可查询（`store.graph()`，dispose 即注销；`graph(keyOf)` 支持注入键映射）。**接线**：bridge 推送载荷增强 graph+journal（sig-N 键与 snapshot.signals 对齐）· 下行新 op `state.graph`/`state.journal` · MCP 新查询工具两枚（23 工具）· `state.snapshot` 载荷同步增强。stdio 快乐径 e2e 实证（活页面返回真实依赖图）。6 用例实证（含 limit 调小裁剪、跨名不合并、derived 出现在依赖边）。诚实边界：恢复仍走全量快照（正确性锚点）。**剩余**：无；后续增强=回放恢复/编译期静态化归 F-2 | ✅ |
 | F-2 | **编译器静态依赖图（决策 3）** | 🔄 **第一期落地（2026-08-30）**：`exprRootIdents`（与求值器同 tokenizer）+ codegen 收集器发射 `deps: {reactive, mount, events}` 清单（compileFunction/compileModuleSource/CLI 产物三处生效）；差分对拍实证两条不变式（追踪集⊆静态集 200 样本；无短路等号 100 样本，钩子 `__withTracking`）。**语义边界**：清单=语法级超集（含未执行分支，{:else if} 链各分支 test 同样入集）。**剩余**：二期=利用清单做跳过追踪快路径 / prod 剥离 / MCP 构建期图查询 | 二期 L |
 | F-3 | **样式纪律收紧（决策 16）** | ✅ **落地（2026-08-30）**：一期颜色纪律 R1/R2/R2b/R3（既有）；**二期间距/字号**——token 新增 `font` 组（runtime `--font-*`，Tailwind `--text-*` 覆盖原生刻度=字号单源）+ `space.xs`；护栏 **R4**（间距只准 var(--space-*) 组合 / calc·无单位系数 / 0 / auto）+ **R5**（font-size 只准 var(--font-*)；text-* 刻度类只准 font 键），扫描面扩到 recipe 层并全量迁移 token。诚实边界：index.html reset 豁免、border/line-height/letter-spacing/阴影变换内长度不辖、radius 纪律留候选。starter 脚手架端到端 18/18 + R4 负例红检实证 + check-skills 31/0 | ✅ |
 | F-4 | **codegen 覆盖扩张** | ✅ **两批落地（2026-08-30）**：**第一批**——`{:else if}` 链（解析期多分支，发射器泛型零改双路径覆盖）；HTML void 元素 13 种（修复 `<img>` 吞后续兄弟缺陷）；未闭合结构解析期显式拒绝（**ATR-101**：编译构建期抛/解释器错误卡/dump CLI 可行动报错）；`{:else}` 消费长度缺陷修复。**第二批**——表达式**对象/数组字面量**（`{{a: x.value}}`/`[a, b]`/`{a}` 简写/`({...}).x` 后缀链，expr.ts 求值器同步扩充）；配对花括号解析（引号感知 matchBrace，属性值同步支持 `attr={{a:1}}`）；**错位/游离闭合标签显式拒绝**（此前静默吞掉甚至截断余下模板）；字面量花括号原样并入文本（此前静默丢弃）；对象键不进静态依赖清单（exprRootIdents 上下文判别）。P0-8 前置报错语义保持（配对即表达式，非法内容 bind 期响亮 ATR-301）。golden parity 18 新用例，84/84 绿。**剩余**：属性级指令（on:/bind: 族）= 新方向候选，需先出设计 | ✅ |

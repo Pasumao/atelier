@@ -1,212 +1,413 @@
 {
-  "$meta": {
-    "name": "atelier-mcp-definitions",
-    "version": "0.2.0",
-    "purpose": "Single source for Atelier built-in MCP tool surface (names/faces/params). Skills and future MCP server must stay consistent with this file (enforced by scripts/check-skills.mjs).",
-    "syncWith": ["atelier/docs/ARCHITECTURE.md#6-mcp-tool-list", "atelier/docs/SPEC-Agentic-DX-v0.1.md", "atelier/docs/design-decisions.md decision 7/12/15"],
-    "schemaRules": "Flat schema only: type / reqProps / optProps / enum / items — no $ref, no oneOf, no generics (H1/decision 6)",
-    "faces": ["query", "operation", "audit"],
-    "statusVocabulary": "implemented = a running Atelier app exposes it (HTTP/dev surface); pending = designed, wiring planned"
+ "$meta": {
+  "name": "atelier-mcp-definitions",
+  "version": "0.2.0",
+  "purpose": "Single source for Atelier built-in MCP tool surface (names/faces/params). Skills and future MCP server must stay consistent with this file (enforced by scripts/check-skills.mjs).",
+  "syncWith": [
+   "atelier/docs/ARCHITECTURE.md#6-mcp-tool-list",
+   "atelier/docs/SPEC-Agentic-DX-v0.1.md",
+   "atelier/docs/design-decisions.md decision 7/12/15"
+  ],
+  "schemaRules": "Flat schema only: type / reqProps / optProps / enum / items — no $ref, no oneOf, no generics (H1/decision 6)",
+  "faces": [
+   "query",
+   "operation",
+   "audit"
+  ],
+  "statusVocabulary": "implemented = a running Atelier app exposes it (HTTP/dev surface); pending = designed, wiring planned"
+ },
+ "tools": [
+  {
+   "name": "registry.list_components",
+   "face": "query",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "List registered components with names/files/contract summaries (from app.registry.json SSOT).",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "errors": []
   },
-  "tools": [
-    {
-      "name": "registry.list_components",
-      "face": "query",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "List registered components with names/files/contract summaries (from app.registry.json SSOT).",
-      "params": { "type": "object", "reqProps": {}, "optProps": {} },
-      "errors": []
+  {
+   "name": "registry.get_component",
+   "face": "query",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Get one component's full contract (flat schema + usage) by name.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "name": {
+      "type": "string"
+     }
     },
-    {
-      "name": "registry.get_component",
-      "face": "query",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Get one component's full contract (flat schema + usage) by name.",
-      "params": { "type": "object", "reqProps": { "name": { "type": "string" } }, "optProps": {} },
-      "errors": ["ATR-401"]
-    },
-    {
-      "name": "tokens.list",
-      "face": "query",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Semantic design tokens available values (from atelier.config.json single source).",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "group": { "type": "string", "enum": ["color", "space", "radius", "font"] } } },
-      "errors": []
-    },
-    {
-      "name": "state.snapshot",
-      "face": "query",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Serialize current UI signal state. Served from the in-page dev bridge (pushed after each settled microtask batch); requires the app to be open in dev preview.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "root": { "type": "string" } } },
-      "errors": []
-    },
-    {
-      "name": "state.get",
-      "face": "query",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Read a single state path from the live signal graph (served from the dev bridge cache). Path syntax: \"sig-<n>\" or \"sig-<n>.<sub.path>\" — signals are keyed sig-N by install order; see state.snapshot for the wire shape.",
-      "params": { "type": "object", "reqProps": { "path": { "type": "string" } }, "optProps": {} },
-      "errors": []
-    },
-    {
-      "name": "ui.screenshot",
-      "face": "query",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Capture current rendered UI as PNG via a transient headless browser (waits for framework mount). Serves as the visual truth for agents.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "format": { "type": "string", "enum": ["png", "jpeg"] } } },
-      "errors": []
-    },
-    {
-      "name": "docs.search",
-      "face": "query",
-      "priority": "P1",
-      "status": "implemented",
-      "summary": "Term search over the framework corpus (atelier/docs specs + skill packages + AGENTS.md + app llms.txt); ranked top-5 with excerpts. Prefer over guessing APIs.",
-      "params": { "type": "object", "reqProps": { "q": { "type": "string" } }, "optProps": {} },
-      "errors": []
-    },
-    {
-      "name": "structure.map",
-      "face": "query",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Six-layer structural ground truth (entry/knowledge/facts/intent/errors/timeline). One call replaces repo exploration — layers checked with severity-tagged findings.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "root": { "type": "string" } } },
-      "errors": []
-    },
-    {
-      "name": "structure.check",
-      "face": "query",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Hard gate over declared-vs-real contradictions (ghost registry entries, broken configs, missing trust guards). WARN/INFO advisory by severity policy.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "root": { "type": "string" } } },
-      "errors": []
-    },
-    {
-      "name": "checkpoint.list",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "List named checkpoints (the human-visible timeline). Executed in the open page via the SSE command downlink; requires a live dev preview client.",
-      "params": { "type": "object", "reqProps": {}, "optProps": {} },
-      "confirmDefault": "auto",
-      "errors": []
-    },
-    {
-      "name": "checkpoint.rollback",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Restore app state to previous named checkpoint (pops it), executed on the open page via the SSE downlink. App state only — see checkpoint.source_rollback for files.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "id": { "type": "string" } } },
-      "confirmDefault": "auto",
-      "errors": ["ATR-402", "ATR-305"]
-    },
-    {
-      "name": "state.time_travel",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Replay UI state to an arbitrary checkpoint id (history preserved), executed on the open page via the SSE downlink.",
-      "params": { "type": "object", "reqProps": { "id": { "type": "string" } }, "optProps": {} },
-      "confirmDefault": "auto",
-      "errors": []
-    },
-    {
-      "name": "checkpoint.source_list",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "List source checkpoints (git anchors created per signed-off AI turn; decision 15).",
-      "params": { "type": "object", "reqProps": {}, "optProps": {} },
-      "confirmDefault": "auto",
-      "errors": []
-    },
-    {
-      "name": "checkpoint.source_commit",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Anchor current working tree as a source checkpoint (git commit). Gate (P2-2 未检不锚): when a snapshot baseline exists and the dev face answers, the live render must MATCH it or the anchor is refused; escape hatch (--no-gate) is CLI-only.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "message": { "type": "string" } } },
-      "confirmDefault": "auto",
-      "errors": ["ATR-402"]
-    },
-    {
-      "name": "checkpoint.source_rollback",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Roll back filesystem to a source checkpoint (git reset --soft + working-tree restore).",
-      "params": { "type": "object", "reqProps": { "id": { "type": "string" } }, "optProps": {} },
-      "confirmDefault": "ask",
-      "errors": ["ATR-402"]
-    },
-    {
-      "name": "test.run",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Run the app's test suite via 'pnpm test' (vitest run — same surface as package.json), 180s cap; filter = vitest positional file-filter. Returns ok/exitCode, summary counts and the output tail.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "filter": { "type": "string" } } },
-      "confirmDefault": "auto",
-      "errors": []
-    },
-    {
-      "name": "snapshot.diff",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Capture a fresh render and compare against .atr/snapshots/baseline.png: byte sha256 tier + pixel tier (in-instance canvas mismatchRatio, config snapshot.mismatchThreshold) → returns paths, match verdict and pixelDiff. Promoting is a human-reviewed CLI act — deliberately not exposed here.",
-      "params": { "type": "object", "reqProps": {}, "optProps": {} },
-      "confirmDefault": "auto",
-      "errors": []
-    },
-    {
-      "name": "snapshot.review_diff",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Fresh capture as base64 PNG alongside the baseline path — mandatory side-by-side review before any promotion.",
-      "params": { "type": "object", "reqProps": {}, "optProps": {} },
-      "confirmDefault": "auto",
-      "errors": []
-    },
-    {
-      "name": "diff.report",
-      "face": "operation",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Generate a reviewable change report of the working tree vs the newest source checkpoint (diff --stat, status, per-file adds/deletes), write it to .atelier/diff-report.md and return it; attach per-change semantic notes when submitting for human approve/disapprove (verdicts land in specs/ — see feedback.read).",
-      "params": { "type": "object", "reqProps": {}, "optProps": {} },
-      "confirmDefault": "auto",
-      "errors": []
-    },
-    {
-      "name": "audit.log",
-      "face": "audit",
-      "priority": "P0",
-      "status": "implemented",
-      "summary": "Side-effect/event log (JSONL: access to mutating routes, command enqueue/ack, screenshots). Read the tail N rows.",
-      "params": { "type": "object", "reqProps": {}, "optProps": { "lines": { "type": "number" } } },
-      "errors": []
-    },
-    {
-      "name": "feedback.read",
-      "face": "audit",
-      "priority": "P1",
-      "status": "implemented",
-      "summary": "Read human approve/disapprove feedback under specs/: JSON lines in specs/feedback.jsonl ({at, verdict: approve|disapprove, target, note}) plus any specs/*.feedback.md verbatim. The agent must read this before its next round.",
-      "params": { "type": "object", "reqProps": {}, "optProps": {} },
-      "errors": []
+    "optProps": {}
+   },
+   "errors": [
+    "ATR-401"
+   ]
+  },
+  {
+   "name": "tokens.list",
+   "face": "query",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Semantic design tokens available values (from atelier.config.json single source).",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "group": {
+      "type": "string",
+      "enum": [
+       "color",
+       "space",
+       "radius",
+       "font"
+      ]
+     }
     }
-  ]
+   },
+   "errors": []
+  },
+  {
+   "name": "state.snapshot",
+   "face": "query",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Serialize current UI signal state. Served from the in-page dev bridge (pushed after each settled microtask batch); requires the app to be open in dev preview.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "root": {
+      "type": "string"
+     }
+    }
+   },
+   "errors": []
+  },
+  {
+   "name": "state.get",
+   "face": "query",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Read a single state path from the live signal graph (served from the dev bridge cache). Path syntax: \"sig-<n>\" or \"sig-<n>.<sub.path>\" — signals are keyed sig-N by install order; see state.snapshot for the wire shape.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "path": {
+      "type": "string"
+     }
+    },
+    "optProps": {}
+   },
+   "errors": []
+  },
+  {
+   "name": "state.graph",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Live dependency graph of the open page: / signals (sig-N keys aligned with state.snapshot signals) and per-effect dependency edges. Executed via the SSE downlink.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "state.journal",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Recent  mutation journal (patch event log, oldest to newest): seq/at/sig (sig-N key)/from/to. Deeper history than the 50 entries pushed with state.snapshot. Executed via the SSE downlink.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "lines": {
+      "type": "number",
+      "min": 1,
+      "max": 500
+     }
+    }
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "ui.screenshot",
+   "face": "query",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Capture current rendered UI as PNG via a transient headless browser (waits for framework mount). Serves as the visual truth for agents.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "format": {
+      "type": "string",
+      "enum": [
+       "png",
+       "jpeg"
+      ]
+     }
+    }
+   },
+   "errors": []
+  },
+  {
+   "name": "docs.search",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Term search over the framework corpus (atelier/docs specs + skill packages + AGENTS.md + app llms.txt); ranked top-5 with excerpts. Prefer over guessing APIs.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "q": {
+      "type": "string"
+     }
+    },
+    "optProps": {}
+   },
+   "errors": []
+  },
+  {
+   "name": "structure.map",
+   "face": "query",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Six-layer structural ground truth (entry/knowledge/facts/intent/errors/timeline). One call replaces repo exploration — layers checked with severity-tagged findings.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "root": {
+      "type": "string"
+     }
+    }
+   },
+   "errors": []
+  },
+  {
+   "name": "structure.check",
+   "face": "query",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Hard gate over declared-vs-real contradictions (ghost registry entries, broken configs, missing trust guards). WARN/INFO advisory by severity policy.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "root": {
+      "type": "string"
+     }
+    }
+   },
+   "errors": []
+  },
+  {
+   "name": "checkpoint.list",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "List named checkpoints (the human-visible timeline). Executed in the open page via the SSE command downlink; requires a live dev preview client.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "checkpoint.rollback",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Restore app state to previous named checkpoint (pops it), executed on the open page via the SSE downlink. App state only — see checkpoint.source_rollback for files.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "id": {
+      "type": "string"
+     }
+    }
+   },
+   "confirmDefault": "auto",
+   "errors": [
+    "ATR-402",
+    "ATR-305"
+   ]
+  },
+  {
+   "name": "state.time_travel",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Replay UI state to an arbitrary checkpoint id (history preserved), executed on the open page via the SSE downlink.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "id": {
+      "type": "string"
+     }
+    },
+    "optProps": {}
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "checkpoint.source_list",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "List source checkpoints (git anchors created per signed-off AI turn; decision 15).",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "checkpoint.source_commit",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Anchor current working tree as a source checkpoint (git commit). Gate (P2-2 未检不锚): when a snapshot baseline exists and the dev face answers, the live render must MATCH it or the anchor is refused; escape hatch (--no-gate) is CLI-only.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "message": {
+      "type": "string"
+     }
+    }
+   },
+   "confirmDefault": "auto",
+   "errors": [
+    "ATR-402"
+   ]
+  },
+  {
+   "name": "checkpoint.source_rollback",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Roll back filesystem to a source checkpoint (git reset --soft + working-tree restore).",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "id": {
+      "type": "string"
+     }
+    },
+    "optProps": {}
+   },
+   "confirmDefault": "ask",
+   "errors": [
+    "ATR-402"
+   ]
+  },
+  {
+   "name": "test.run",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Run the app's test suite via 'pnpm test' (vitest run — same surface as package.json), 180s cap; filter = vitest positional file-filter. Returns ok/exitCode, summary counts and the output tail.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "filter": {
+      "type": "string"
+     }
+    }
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "snapshot.diff",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Capture a fresh render and compare against .atr/snapshots/baseline.png: byte sha256 tier + pixel tier (in-instance canvas mismatchRatio, config snapshot.mismatchThreshold) → returns paths, match verdict and pixelDiff. Promoting is a human-reviewed CLI act — deliberately not exposed here.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "snapshot.review_diff",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Fresh capture as base64 PNG alongside the baseline path — mandatory side-by-side review before any promotion.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "diff.report",
+   "face": "operation",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Generate a reviewable change report of the working tree vs the newest source checkpoint (diff --stat, status, per-file adds/deletes), write it to .atelier/diff-report.md and return it; attach per-change semantic notes when submitting for human approve/disapprove (verdicts land in specs/ — see feedback.read).",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
+   "name": "audit.log",
+   "face": "audit",
+   "priority": "P0",
+   "status": "implemented",
+   "summary": "Side-effect/event log (JSONL: access to mutating routes, command enqueue/ack, screenshots). Read the tail N rows.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "lines": {
+      "type": "number"
+     }
+    }
+   },
+   "errors": []
+  },
+  {
+   "name": "feedback.read",
+   "face": "audit",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Read human approve/disapprove feedback under specs/: JSON lines in specs/feedback.jsonl ({at, verdict: approve|disapprove, target, note}) plus any specs/*.feedback.md verbatim. The agent must read this before its next round.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "errors": []
+  }
+ ]
 }
