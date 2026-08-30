@@ -2,32 +2,335 @@
   "$schema": "m3-results/0.1",
   "note": "累计账本（每 wave 追加，只记已评分 run）；react 臂含 rubric 评分（10 分制）。attempts>1 表示经历修复轮。wave-1 基础设施崩溃的会话经 [ready] 续跑救回，不计 agent 可见 attempts。",
   "runs": [
-    { "arm": "skill", "task": "task1-counter", "run": 1, "firstPass": true, "attempts": 1 },
-    { "arm": "skill", "task": "task2-stream", "run": 1, "firstPass": true, "attempts": 1 },
-    { "arm": "skill", "task": "task3-rollback", "run": 1, "firstPass": true, "attempts": 1 },
-    { "arm": "noskill", "task": "task1-counter", "run": 1, "firstPass": true, "attempts": 1 },
-    { "arm": "noskill", "task": "task3-rollback", "run": 1, "firstPass": true, "attempts": 1 },
-    { "arm": "noskill", "task": "task2-stream", "run": 1, "firstPass": true, "attempts": 1 },
-    { "arm": "react", "task": "task1-counter", "run": 1, "firstPass": true, "attempts": 1, "score": 10 },
-    { "arm": "react", "task": "task2-stream", "run": 1, "firstPass": true, "attempts": 1, "score": 10 },
-    { "arm": "react", "task": "task3-rollback", "run": 1, "firstPass": true, "attempts": 1, "score": 10 },
-    { "arm": "skill", "task": "task1-counter", "run": 2, "firstPass": true, "attempts": 1 },
-    { "arm": "react", "task": "task2-stream", "run": 2, "firstPass": true, "attempts": 1, "score": 10 },
-    { "arm": "react", "task": "task3-rollback", "run": 2, "firstPass": true, "attempts": 1, "score": 10 },
-    { "arm": "noskill", "task": "task1-counter", "run": 2, "firstPass": true, "attempts": 1 },
-    { "arm": "noskill", "task": "task2-stream", "run": 2, "firstPass": true, "attempts": 1 },
-    { "arm": "noskill", "task": "task2-stream", "run": 3, "firstPass": true, "attempts": 1 },
-    { "arm": "react", "task": "task3-rollback", "run": 3, "firstPass": true, "attempts": 1, "score": 10 },
-    { "arm": "noskill", "task": "task3-rollback", "run": 3, "firstPass": true, "attempts": 1 },
-    { "arm": "react", "task": "task2-stream", "run": 3, "firstPass": true, "attempts": 1, "score": 10 },
-    { "arm": "noskill", "task": "task3-rollback", "run": 2, "firstPass": true, "attempts": 1 },
-    { "arm": "skill", "task": "task3-rollback", "run": 2, "firstPass": true, "attempts": 1 },
-    { "arm": "react", "task": "task1-counter", "run": 2, "firstPass": true, "attempts": 1, "score": 10 },
-    { "arm": "skill", "task": "task2-stream", "run": 2, "firstPass": true, "attempts": 1 },
-    { "arm": "skill", "task": "task1-counter", "run": 3, "firstPass": true, "attempts": 1 },
-    { "arm": "skill", "task": "task2-stream", "run": 3, "firstPass": true, "attempts": 1 },
-    { "arm": "skill", "task": "task3-rollback", "run": 3, "firstPass": true, "attempts": 1 },
-    { "arm": "noskill", "task": "task1-counter", "run": 3, "firstPass": true, "attempts": 1 },
-    { "arm": "react", "task": "task1-counter", "run": 3, "firstPass": true, "attempts": 1, "score": 10 }
+    {
+      "arm": "skill",
+      "task": "task1-counter",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task2-stream",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task3-rollback",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task1-counter",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task3-rollback",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task2-stream",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task1-counter",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "react",
+      "task": "task2-stream",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "react",
+      "task": "task3-rollback",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "skill",
+      "task": "task1-counter",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task2-stream",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "react",
+      "task": "task3-rollback",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task1-counter",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task2-stream",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task2-stream",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task3-rollback",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task3-rollback",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task2-stream",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task3-rollback",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task3-rollback",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task1-counter",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "skill",
+      "task": "task2-stream",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task1-counter",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task2-stream",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task3-rollback",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task1-counter",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task1-counter",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task1-counter",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task1-counter",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task1-counter",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task2-stream",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task2-stream",
+      "run": 4,
+      "firstPass": false,
+      "attempts": 2
+    },
+    {
+      "arm": "react",
+      "task": "task2-stream",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task3-rollback",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task3-rollback",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task3-rollback",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task1-counter",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task1-counter",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task1-counter",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task2-stream",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task2-stream",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task2-stream",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    },
+    {
+      "arm": "noskill",
+      "task": "task3-rollback",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task3-rollback",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task3-rollback",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1,
+      "score": 10
+    }
   ]
 }
