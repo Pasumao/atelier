@@ -8,8 +8,9 @@
  *
  * Commands:
  *   save <name>       snapshot the working tree as a named checkpoint (git commit; auto `git init` on first use)
- *                     [--no-gate] skip the P2-2 未检不锚 gate (deliberate wip anchors only)
- *                     gate: if .atr/snapshots/baseline.png exists and the dev face answers, the live render
+ *                     [--no-gate] skip the 未检不锚 gates (deliberate wip anchors only)
+ *                     gate 1 (决策 15 test gate): the package.json test suite must pass — a red suite refuses the anchor
+ *                     gate 2 (P2-2 snapshot gate): if .atr/snapshots/baseline.png exists and the dev face answers, the live render
  *                     must MATCH it — MISMATCH refuses the anchor (fix via `atelier snapshot check --update`)
  *   list [--json]     show the human-visible timeline (.atelier/checkpoints.jsonl — versioned & auditable)
  *   rollback <id>     move the branch window back to a checkpoint; a backup tag keeps the future reachable
@@ -65,6 +66,34 @@ function headSha(repo) {
  * for deliberate wip anchors). Unreachable dev face / no baseline → vacuous pass,
  * printed honestly rather than silently skipped.
  */
+/* ---- 决策 15 提交闸门接线（P1-5 设计备忘）：atelier test 通过才允许锚定 ——「未检不锚」的测试半边 ----
+ * 定位 package.json 的 test 脚本（应用根优先，其次框架仓 atelier/ 布局），pnpm 优先、缺则退 npm。
+ * 无 test 脚本 → vacuous pass（诚实打印，不静默）。逃生口与快照门禁同口径：--no-gate / ATELIER_TEST_GATE=off。
+ * MCP checkpoint.source_commit 走同一 save 路径 ⇒ 闸门对 MCP 来源的锚定同样生效。
+ */
+function testGate(repo, skip) {
+  if (skip) return; // --no-gate（deliberate wip anchor）跳过全部门禁
+  if (process.env.ATELIER_TEST_GATE === "off") { console.log("[gate] test gate off (ATELIER_TEST_GATE=off)"); return; }
+  for (const p of [path.join(repo, "package.json"), path.join(repo, "atelier", "package.json")]) {
+    if (!fs.existsSync(p)) continue;
+    let pkg;
+    try { pkg = JSON.parse(fs.readFileSync(p, "utf8")); } catch { continue; }
+    if (!pkg.scripts?.test) continue;
+    const cwd = path.dirname(p);
+    const shell = process.platform === "win32";
+    console.log(`[gate] running test suite (${path.relative(repo, cwd) || "."} — 未检不锚·测试半边)...`);
+    let r = spawnSync("pnpm", ["test"], { cwd, encoding: "utf8", shell });
+    if (r.error && r.error.code === "ENOENT") r = spawnSync("npm", ["test"], { cwd, encoding: "utf8", shell });
+    if (r.status === 0) { console.log("[gate] tests green — anchor permitted ✔"); return; }
+    const tail = `${r.stdout ?? ""}\n${r.stderr ?? ""}`.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12).join("\n  ");
+    die(1,
+      "error: 未检不锚 — test suite failed; refusing to anchor this checkpoint",
+      `fix the failing tests first (tail below), or deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.\n  ${tail}`,
+    );
+  }
+  console.log("[gate] no package.json test script found — test gate vacuous");
+}
+
 async function snapshotGate(repo, skip) {
   if (skip) { console.log("[gate] snapshot gate skipped (--no-gate)"); return; }
   if (process.env.ATELIER_SNAPSHOT_GATE === "off") { console.log("[gate] snapshot gate off (ATELIER_SNAPSHOT_GATE=off)"); return; }
@@ -153,6 +182,7 @@ async function cmdSave(repo, name, skipGate, jsonMode) {
     console.log(`nothing changed since last checkpoint ${last ? `${last.id} "${last.name}"` : "(fresh repo)"}`);
     return;
   }
+  await testGate(repo, skipGate); // 决策 15 提交闸门（测试半边）: a red suite must not be silently anchored
   await snapshotGate(repo, skipGate); // P2-2 未检不锚: a red render must not be silently anchored
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-m", `checkpoint(${name}): AI turn snapshot`]);

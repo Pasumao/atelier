@@ -29,6 +29,7 @@ import readline from "node:readline";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { inspectStructure } from "../scripts/struct.mjs";
+import { confirmGate, readAgentConfig } from "./confirm.mjs";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const DEFS = JSON.parse(fs.readFileSync(path.join(HERE, "mcp-definitions.json"), "utf8"));
@@ -132,6 +133,10 @@ function checkpointCli(args, cwd) {
 
 async function callTool(name, args) {
   const PROJECT_ROOT = process.env.ATELIER_PROJECT_ROOT ?? process.cwd();
+
+  /* ---- confirm 闸（决策 15）：破坏性操作（回滚族）过 agent.confirm 档，deny → ATR-402 结构化拒绝 ---- */
+  const denial = confirmGate(readAgentConfig(PROJECT_ROOT), name);
+  if (denial) throw toolError(`${denial.code}: ${denial.message}`, denial.fix);
 
   /* ---- downlink-executed tools (runtime lives in the open page; P0-1 SSE channel) ---- */
   if (name === "checkpoint.list") return bridgeCall("checkpoint.list", {});

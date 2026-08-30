@@ -185,6 +185,7 @@
   - 用户禁用 git 时：源码回滚降级为 `.atr/backups/` 文件树快照（每次变更前拷贝），CLI 明示"无版本基线，回滚能力降级"。
 - 取舍弃：自研文件版本库（重造 git，且 agent 生态已理解 git diff/commit 语义）；仅状态回滚（决策 5 的 checkpoint 只覆盖应用状态——agent 每轮真正改的是文件系统，缺源码回滚则"可逆是自治前提"落空）。
 - 时间：原型验证（prototype）暴露该缺口后确立；为 v0.2 强制项，v0.1 实现 `init/checkpoint.source_rollback` 最小路径。
+- **闸门接线（2026-08-30，P1-5）**：① `checkpoint save` 新增**测试门禁**——test 套件不绿拒绝锚定（定位 package.json test 脚本：应用根/框架仓 `atelier/` 两布局；pnpm 退 npm；逃生口 `--no-gate` / `ATELIER_TEST_GATE=off`；MCP `checkpoint.source_commit` 同路径生效）——「提交闸门 = atelier test 通过才允许锚定」的测试半边闭环，快照半边（P2-2）待 baseline 武装；② confirm 三档执行点收口 `mcp/confirm.mjs`：破坏性操作（回滚族三工具）在 MCP 调用面过 `agent.confirm` 档，**deny = ATR-402 结构化拒绝**（stdio e2e 实证）；**诚实边界：ask 档暂同 auto**（stdio 无人工审批通道，审批面接线属后续）。负例规格常驻 `specs/guardrails.md`（init 生成）+ 框架测试 `tests/mcp-confirm.test.ts`。
 
 ## 决策 16：工具类样式层（Tailwind v4）
 - **定论**：引入 **Tailwind v4（CLI AOT 模式）** 作为决策 8 中「编译期生成 utility」层的实现。`atelier.config.json` 保持唯一样式值真值：dev/build 前 `scripts/gen-tailwind-theme.mjs` 将 token 派生为 `@theme` 指令文件 `src/tailwind.input.css`（`color.*`→`--color-*`、`space.*`→`--spacing-*`、`radius.*`→`--radius-*`），经 `@tailwindcss/cli` 一次性 AOT 编译出 `src/atelier-tailwind.css`（应用唯一引入，产物勿手改）。

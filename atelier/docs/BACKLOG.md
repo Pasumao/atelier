@@ -38,9 +38,10 @@
 
 ### 设计备忘（半天级，按需触发）
 
-- schema 按「仍扁平」原则扩展 min/max/pattern（无 $ref/oneOf 红线不动）；
-- confirm 三档的 `deny` 补场景负例进 specs/；
-- 决策 15 gate 接线：source_commit 由测试通过自动触发（接线点 cli.mjs）。
+- ✅ **三项全清（2026-08-30，P1-5）**：
+  - schema 扩 min/max/pattern（`runtime/contract.ts`：number 数值界 / string 长度界+pattern（JSON Schema 非锚定语义）/ array 长度界；无效 pattern 显式报错；**扁平红线不动**）+ 6 用例；
+  - confirm 三档 `deny` 执行点落地：`mcp/confirm.mjs`（单一执行点，破坏性=回滚族三工具）→ MCP stdio e2e 实证 deny=ATR-402 结构化拒绝、auto/缺省放行；**诚实边界：ask 档暂同 auto**（stdio 无人工审批通道）；负例规格进 `specs/guardrails.md`（init 常驻生成）+ 框架测试 mcp-confirm.test.ts；
+  - 决策 15 gate 接线：`checkpoint save` 新增**测试门禁**（定位 package.json test 脚本：应用根/框架仓两布局，pnpm 退 npm；红=拒绝锚定；`--no-gate`/`ATELIER_TEST_GATE=off` 逃生）——MCP source_commit 同路径生效，「未检不锚」测试半边闭环（快照半边仍待 baseline 武装）。
 
 ### 尾巴（诚实标注的已知项）
 
