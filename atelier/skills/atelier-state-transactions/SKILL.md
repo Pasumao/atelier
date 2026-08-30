@@ -14,9 +14,13 @@ store.commit("AI round 2");   // named checkpoint: N mutations = 1 operation (me
 store.rollback();             // restore to previous named checkpoint (pops it)
 store.timeTravel("cp-3");     // replay-anywhere; history stays intact
 store.list();                 // [{ id, name, at }] — the human-visible timeline
+store.log(50);                // recent patch events [{ seq, at, sig, from, to }] — audit trail
+store.graph();                // { signals: [{id, kind}], effects: [{id, deps}] } — queryable dep graph
 ```
 
 - Checkpoint granularity = atomic change; **name it per AI turn** ("one round = one checkpoint")
+- **Named merge**: a commit whose name equals the top-of-stack checkpoint is idempotent (same id, no new
+  entry) — the *earliest* snapshot is kept, so `rollback()` after the round undoes the whole round
 - Tracked signals are only `$state` — `$derived` recomputes from upstream automatically (never snapshot it)
 - **Snapshot is by-reference**: replace the whole value, never mutate in place — `items.value = [...items.value, x]`, NOT `items.value.push(x)` (in-place changes cannot be rolled back; guarded by `tests/state-discipline.test.ts`)
 

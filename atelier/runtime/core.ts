@@ -11,6 +11,10 @@
  *   同步失效语义）；真正的 DOM/effect 重跑仍享受批处理。
  *
  * 完整版差异：依赖图由编译器静态化（本原型为运行时追踪）。
+ *
+ * v0.3 事务层（决策 5 完整版第一期）：命名合并（同名栈顶幂等锚定 = 轮级回滚）、
+ *   增量 patch 事件日志（journal，有界环形可关）、依赖图可查询（store.graph()，
+ *   effect dispose 即注销、信号 id 走 WeakMap，查询不驻留对象）。
  */
 
 export type Subscription = { run: () => void; batched?: boolean };
@@ -21,11 +25,19 @@ export type Signal<T = unknown> = {
   set: (v: T) => void;
   /** @internal 订阅者集合 */
   _subs: Set<Subscription>;
+  /** @internal 依赖图节点种类（store.graph() 查询用） */
+  _kind: "state" | "derived";
 };
 
 let tracking: Set<Signal> | null = null;
 const pending = new Set<() => void>();
 let flushing = false;
+
+/** v0.3 依赖图登记：effect 记录（dispose 时移除，不驻留死节点）+ 信号稳定 id（WeakMap，不阻止回收） */
+const __effects = new Set<{ id: number; deps: Set<Signal> }>();
+let __effectSeq = 0;
+const __sigIds = new WeakMap<Signal, number>();
+let __sigSeq = 0;
 
 /** 统一分发：批量订阅入队延迟执行；失效类订阅立即同步执行 */
 function deliver(sub: Subscription): void {
@@ -82,13 +94,16 @@ export function $state<T>(init: T): Signal<T> {
   let v = init;
   const sig: Signal<T> = {
     _subs: new Set(),
+    _kind: "state",
     get value() {
       track(sig as Signal);
       return v;
     },
     set value(nv: T) {
       if (Object.is(nv, v)) return;
+      const prev = v;
       v = nv;
+      store.journalPush(sig as Signal, prev, nv); // v0.3 增量事件日志：每变更自动入账
       notify(sig as Signal);
     },
     get: () => v,
@@ -134,6 +149,7 @@ export function $derived<T>(fn: () => T): Signal<T> {
 
   const sig: Signal<T> = {
     _subs: subs,
+    _kind: "derived",
     get value() {
       track(sig as Signal);
       return compute();
@@ -150,48 +166,70 @@ export function $derived<T>(fn: () => T): Signal<T> {
 }
 
 export function $effect(fn: () => void): () => void {
-  let deps = new Set<Signal>();
+  const record = { id: ++__effectSeq, deps: new Set<Signal>() };
+  __effects.add(record);
   let alive = true;
 
   const sub: Subscription = {
     batched: true,
     run: () => {
       if (!alive) return;
-      for (const d of deps) d._subs.delete(sub);
-      deps = new Set<Signal>();
+      for (const d of record.deps) d._subs.delete(sub);
+      record.deps = new Set<Signal>();
       const prev = tracking;
-      tracking = deps;
+      tracking = record.deps;
       try {
         fn();
       } finally {
         tracking = prev;
       }
-      for (const s of deps) s._subs.add(sub);
+      for (const s of record.deps) s._subs.add(sub);
     },
   };
 
   sub.run();
   return () => {
     alive = false;
-    for (const d of deps) d._subs.delete(sub);
+    for (const d of record.deps) d._subs.delete(sub);
+    __effects.delete(record); // v0.3：注销依赖图登记，不驻留死节点
   };
 }
 
 /**
- * 事务层最小实现（决策 5 雏形）：注册信号的全量快照 checkpoint。
- * 完整版：增量 patch 事件日志 + 命名合并 + 依赖图可查询（本原型为全量快照）。
+ * 事务层 v0.3（决策 5）：全量快照为正确性锚点 + 增量 patch 事件日志 + 命名合并 + 依赖图可查询。
+ *
+ * - **命名合并**：同名 commit 且位于栈顶 → 幂等锚定（保留**最早**快照作整轮回滚点）。
+ *   "AI 一轮 N 次变更 = 1 个可命名 checkpoint，rollback 粒度对人类是一次操作"——
+ *   也就是说 round 内第二次 commit 不新增条目，rollback() 直接回到本轮开始前。
+ * - **增量事件日志**：每个 $state 写入自动入账（from/to/sig），有界环形（journalLimit，默认 500），
+ *   `store.journal = false` 可整体关闭。日志只追加、不受 rollback/timeTravel 改写（审计语义）。
+ * - **依赖图**：`store.graph()` 即席查询 states（含 kind）与 effects 的依赖边；
+ *   effect dispose 即从登记移除，信号 id 走 WeakMap——查询不驻留对象。
  *
  * 快照语义（重要）：commit 按引用记录信号值，rollback 经 Object.is 判等跳过未变信号。
- * 因此原地修改数组/对象（如 items.value.push(x)）的内容 rollback 恢复不了——
- * 必须整体替换引用（items.value = [...items.value, x]）。
- * 该约束由应用模板守卫测试 tests/state-discipline.test.ts 静态拦截。
+ * 原地修改数组/对象（如 items.value.push(x)）的内容 rollback 恢复不了——必须整体替换引用
+ * （items.value = [...items.value, x]）。该约束由应用模板守卫测试 tests/state-discipline.test.ts 静态拦截。
  */
 export const store = {
   _signals: new Set<Signal>(),
   _checkpoints: [] as { id: string; name: string; at: number; snap: Map<Signal, unknown> }[],
   _seq: 0,
+  /** v0.3 事件日志开关（默认开，写入路径多一次入账调用，热路径可关） */
+  journal: true,
+  journalLimit: 500,
+  _journal: [] as { seq: number; at: number; sig: Signal; from: unknown; to: unknown }[],
+  _journalSeq: 0,
+
+  journalPush(sig: Signal, from: unknown, to: unknown): void {
+    if (!this.journal) return;
+    while (this._journal.length >= this.journalLimit) this._journal.shift(); // 裁到限额内（含 limit 调小的情形）
+    this._journal.push({ seq: ++this._journalSeq, at: Date.now(), sig, from, to });
+  },
 
   commit(name: string): string {
+    // v0.3 命名合并：同名人栈顶 → 幂等锚定，保留最早快照 = 整轮回滚点
+    const top = this._checkpoints[this._checkpoints.length - 1];
+    if (top && top.name === name) return top.id;
     const id = `cp-${++this._seq}`;
     const snap = new Map<Signal, unknown>();
     for (const s of this._signals) snap.set(s, s.value);
@@ -215,5 +253,27 @@ export const store = {
   },
   list(): { id: string; name: string; at: number }[] {
     return this._checkpoints.map((c) => ({ id: c.id, name: c.name, at: c.at }));
+  },
+  /** v0.3 最近 n 条变更事件（时间升序；sig 为信号引用，可定位到具体状态） */
+  log(n = 50): { seq: number; at: number; sig: Signal; from: unknown; to: unknown }[] {
+    return this._journal.slice(-n);
+  },
+  /** v0.3 依赖图即席查询：全部 $state（kind 标记）+ 每个存活 effect 的依赖边（信号 id 稳定） */
+  graph(): {
+    signals: { id: number; kind: "state" | "derived" }[];
+    effects: { id: number; deps: number[] }[];
+  } {
+    const idOf = (s: Signal): number => {
+      let id = __sigIds.get(s);
+      if (id === undefined) {
+        id = ++__sigSeq;
+        __sigIds.set(s, id);
+      }
+      return id;
+    };
+    return {
+      signals: [...this._signals].map((s) => ({ id: idOf(s), kind: s._kind })),
+      effects: [...__effects].map((e) => ({ id: e.id, deps: [...e.deps].map(idOf) })),
+    };
   },
 };

@@ -101,3 +101,79 @@ describe("transaction store", () => {
     }
   });
 });
+
+describe("transaction store v0.3 (decision 5 — merge / journal / graph)", () => {
+  it("named merge: same-name commit at stack top is idempotent — rollback undoes the whole round", () => {
+    const a = $state("m0");
+    store.commit("merge-round");
+    a.value = "m1";
+    const again = store.commit("merge-round"); // 同名合并 → 同 id，不新增条目
+    const rows = store.list().filter((r) => r.name === "merge-round");
+    expect(rows.length).toBe(1);
+    expect(again).toBe(rows[0].id);
+    a.value = "m2";
+    store.rollback(); // 轮级回滚：直接回到本轮 commit 之前
+    expect(a.value).toBe("m0");
+  });
+
+  it("named merge only applies at stack top — interleaved names create new checkpoints", () => {
+    const a = $state("i0");
+    store.commit("roundA");
+    a.value = "i1";
+    store.commit("roundB");
+    const before = store.list().length;
+    store.commit("roundA"); // roundA 不在栈顶 → 新 checkpoint，不合并
+    expect(store.list().length).toBe(before + 1);
+  });
+
+  it("journal records every mutation (from/to/sig), log() reads recent entries", () => {
+    const a = $state("j0");
+    const before = store.log().length;
+    a.value = "j1";
+    a.value = "j2";
+    const log = store.log();
+    expect(log.length).toBe(before + 2);
+    expect(log.at(-1)!.from).toBe("j1");
+    expect(log.at(-1)!.to).toBe("j2");
+    expect(log.at(-1)!.sig).toBe(a);
+  });
+
+  it("journal can be disabled and is bounded by journalLimit", () => {
+    const prevLimit = store.journalLimit;
+    store.journalLimit = 4;
+    const a = $state("k0");
+    for (let i = 1; i <= 7; i++) a.value = `k${i}`;
+    expect(store.log().length).toBe(4);
+    expect(store.log().at(-1)!.to).toBe("k7"); // 最旧的被挤出
+    store.journal = false;
+    a.value = "k-off";
+    expect(store.log().some((e) => e.to === "k-off")).toBe(false);
+    store.journal = true;
+    store.journalLimit = prevLimit;
+  });
+
+  it("graph: live effects are queryable with dep ids; dispose removes the entry", () => {
+    const a = $state("g0");
+    const stop = $effect(() => {
+      void a.value;
+    });
+    const g = store.graph();
+    const eff = g.effects.at(-1)!;
+    expect(eff.deps.length).toBeGreaterThanOrEqual(1); // 读过的信号成为依赖边
+    stop();
+    expect(store.graph().effects.some((e) => e.id === eff.id)).toBe(false);
+  });
+
+  it("graph: derived signals appear in deps with kind marker (not in _signals)", () => {
+    const base = $state("d-base");
+    const dbl = $derived(() => base.value.length);
+    const stop = $effect(() => {
+      void dbl.value;
+    });
+    const g = store.graph();
+    const eff = g.effects.at(-1)!;
+    const derivedIds = eff.deps.filter((id) => !g.signals.some((s) => s.id === id));
+    expect(derivedIds.length).toBeGreaterThanOrEqual(1); // derived 不在 _signals，但作为依赖边出现
+    stop();
+  });
+});

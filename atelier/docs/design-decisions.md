@@ -70,6 +70,14 @@
   替换引用（`items.value = [...items.value, x]`）。该约束写进 runtime JSDoc、state-transactions 技能包，
   并由应用模板守卫测试 `tests/state-discipline.test.ts` 静态拦截；结构性深拷贝快照因任意值类型
   （函数/类实例/DOM 引用）拷贝语义不可靠而暂不采用。
+- **v0.3 事务层落地（2026-08-30，F-1 第一期）**：承诺三项全部兑现——①**命名合并**：同名 commit 且
+  位于栈顶 → 幂等锚定，保留**最早**快照作整轮回滚点（"AI 一轮 N 变更 = 1 个回滚点"语义成立，
+  rollback 直接回到本轮开始前；跨其他 checkpoint 的同名 commit 不合并，只认栈顶）；②**增量 patch
+  事件日志**：每个 $state 写入自动入账（from/to/sig），有界环形（journalLimit 默认 500，可整体关闭），
+  rollback/timeTravel 的恢复写入同样入账（审计语义）；③**依赖图可查询**：`store.graph()` 即席查询
+  全部 $state（kind 标记）+ 存活 effect 的依赖边，effect dispose 即注销、信号 id 走 WeakMap——查询
+  不驻留对象。诚实边界：rollback/timeTravel 的**恢复仍是全量快照**（正确性锚点，事件日志用于审计
+  与展示，不做回放恢复）；依赖图为运行时追踪（编译期静态化归 F-2）。
 
 ## 决策 6：契约层
 - **定论**：**TS 类型为单源（A）**。
