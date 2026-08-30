@@ -36,3 +36,4 @@
 {"type":"save","id":"b3a872b","sha":"b3a872b60292b6f6a8595a8d277a737a97580a68","name":"M3 wave-4/5 恢复收官（45/45：noskill 100%/skill 93.3%/react 100%，§7 绝对口径 PASS；报告 WAVES-1-5-REPORT，BACKLOG 同步）","at":"2026-08-30T11:07:18.467Z"}
 {"type":"save","id":"ff35100","sha":"ff35100c5428fa65cdd891091518ecfcfd8d8615","name":"P0-8 评分器与 footgun 修复（硬禁打剥注释后代码文本+双向fixture；expr 三路 ATR-301 前置报错含静默丢尾修复；store 快照按引用语义 JSDoc+守卫测试+技能包同步；43/43 绿，三正控 3/3）","at":"2026-08-30T11:42:37.223Z"}
 {"type":"save","id":"8460144","sha":"8460144712c00387b26ebfe0c478acd78041cd9f","name":"F-1 事务层完整版第一期（决策 5：命名合并+增量patch事件日志+依赖图可查询 store v0.3，6 用例实证 49/49 绿）+ BACKLOG 精简归档 + 决策5/技能包文档同步","at":"2026-08-30T12:04:03.851Z"}
+{"type":"save","id":"0c3636a","sha":"0c3636a8a19378f27f7825a5002546e8473fa764","name":"F-2 静态依赖图第一期（exprRootIdents 同源提取 + codegen deps 清单三处生效 + 超集不变式/无短路等号差分对拍 + __withTracking 钩子；53/53 绿，smoke-app 管线端到端验证）","at":"2026-08-30T12:24:16.076Z"}
