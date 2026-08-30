@@ -282,3 +282,21 @@ export function evalExpr(src: string, scope: Record<string, unknown>): unknown {
   const ast = new Parser(src).parse();
   return ast(scope);
 }
+
+/**
+ * 表达式的根标识符（作用域引用）集合——编译期静态依赖提取（决策 3 / F-2）用。
+ * 规则：id token 且前一个 token 不是 "."（属性链 x.y.z 只取根 x）；关键字与字面量天然排除。
+ * 语义边界（诚实标注）：这是**语法级引用集**——包含 ternary/&&/|| 未被求值的分支，
+ * 因此是运行时追踪集的**超集**（等号仅在无短路、且全部经 .value 读信号的表达式上成立）。
+ */
+export function exprRootIdents(src: string): string[] {
+  const toks = tokenize(src);
+  const out: string[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t.t !== "id") continue;
+    if (i > 0 && toks[i - 1].v === ".") continue;
+    if (!out.includes(t.v)) out.push(t.v);
+  }
+  return out;
+}

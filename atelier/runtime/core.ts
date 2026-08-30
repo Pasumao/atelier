@@ -90,6 +90,11 @@ function withTrack<R>(fn: () => R): { result: R; deps: Set<Signal> } {
   }
 }
 
+/** @internal 测试/工具钩子：在显式追踪上下文里执行 fn，返回结果与追踪到的信号集合（F-2 静态/动态依赖对拍用） */
+export function __withTracking<R>(fn: () => R): { result: R; deps: Set<Signal> } {
+  return withTrack(fn);
+}
+
 export function $state<T>(init: T): Signal<T> {
   let v = init;
   const sig: Signal<T> = {

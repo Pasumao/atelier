@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evalExpr } from "../runtime/expr";
+import { evalExpr, exprRootIdents } from "../runtime/expr";
 
 describe("evalExpr — supported subset matrix", () => {
   const scope = { a: 10, b: -3, name: "deepseek", list: ["x", "y"], cfg: { enabled: true }, flag: false, empty: "" };
@@ -43,6 +43,15 @@ describe("evalExpr — supported subset matrix", () => {
     // 函数调用曾被静默丢尾（求出函数本身）——现在遗留 token 显式报错
     expect(() => evalExpr("list.map(f)", scope)).toThrowError(/ATR-301.*遗留/);
     expect(() => evalExpr("a + b) (", scope)).toThrowError(/ATR-301.*遗留/);
+  });
+
+  it("exprRootIdents：根标识符提取（属性链只取根；F-2 静态依赖用）", () => {
+    expect(exprRootIdents("count.value + label")).toEqual(["count", "label"]);
+    expect(exprRootIdents("props.stream.values")).toEqual(["props"]); // 属性链不算根
+    expect(exprRootIdents("list[0] === 'x'")).toEqual(["list"]); // 字符串字面量/数字不入
+    expect(exprRootIdents("a.b[c] ?? flag ? d.value : 'f'")).toEqual(["a", "c", "flag", "d"]);
+    expect(exprRootIdents("true && null")).toEqual([]); // 关键字/字面量排除
+    expect(exprRootIdents("flag ?? flag")).toEqual(["flag"]); // 重复根去重
   });
 });
 

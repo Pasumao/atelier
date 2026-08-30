@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { $state } from "../runtime/core.ts";
+import { $state, __withTracking } from "../runtime/core.ts";
 import {
   compiledTemplateCount,
   mountComponent,
@@ -22,6 +22,7 @@ import {
   type ComponentDef,
 } from "../runtime/template.ts";
 import { compileFunction, compileModuleSource } from "../compiler/codegen.mjs";
+import { evalExpr, exprRootIdents } from "../runtime/expr.ts";
 import { findByTag, makeContainer, serialize } from "./dom-shim.ts";
 
 type CaseResult = { frames: string[] };
@@ -242,3 +243,110 @@ describe("P0-2③ 编译管线本身", () => {
     expect(compiledTemplateCount()).toBe(before + 1);
   });
 });
+
+/* ================= F-2 静态依赖图（决策 3 第一期） ================= */
+
+describe("F-2 static deps manifest (superset semantics)", () => {
+  it("清单分桶：reactive / mount / events，each 子作用域变量被滤除", () => {
+    const raw =
+      `<div><p>{n.value}</p><span data-k={open.value}>` +
+      `{#each items.value as it, idx}<b>{it.name}</b><i>{idx} {label.value}</i>{/each}</span>` +
+      `{#if flag.value}on{:else}off{/if}` +
+      `<button on:click={bump}>b</button><Child p={n.value} q="static"/></div>`;
+    const c = compileFunction("DepManifest", raw);
+    expect([...c.deps.reactive].sort()).toEqual(["flag", "items", "label", "n", "open"]);
+    expect(c.deps.events).toEqual(["bump"]);
+    expect(c.deps.mount).toEqual(["n"]); // 子组件 props 为挂载期一次性求值
+    expect(c.deps.reactive).not.toContain("it"); // 子作用域变量不是外层依赖
+    expect(c.deps.reactive).not.toContain("idx");
+    // 模块形态同样携带清单
+    const src = compileModuleSource("DepManifest", [raw]);
+    expect(src).toContain('reactive: [');
+    expect(src).toContain('"label"');
+  });
+
+  /** 差分底座：以 __withTracking 捕获真实追踪集，映射回信号名 */
+  function makeWorld() {
+    const a = $state(6);
+    const b = $state(7);
+    const c = $state(8);
+    const flag = $state(true);
+    const list = $state([10, 20, 30]);
+    const i = $state(1);
+    const cfg = { on: 1, off: 0 }; // 非信号作用域根：读它的属性不触发追踪
+    const scope = { a, b, c, flag, list, i, cfg };
+    const nameOf = new Map<SignalLike, string>([
+      [a as SignalLike, "a"],
+      [b as SignalLike, "b"],
+      [c as SignalLike, "c"],
+      [flag as SignalLike, "flag"],
+      [list as SignalLike, "list"],
+      [i as SignalLike, "i"],
+    ]);
+    return { scope, nameOf };
+  }
+  type SignalLike = { _subs: Set<unknown> };
+
+  function runtimeDeps(scope: Record<string, unknown>, nameOf: Map<SignalLike, string>, src: string): string[] {
+    const { deps } = __withTracking(() => evalExpr(src, scope));
+    return [...deps].map((s) => nameOf.get(s as SignalLike)!).filter(Boolean);
+  }
+
+  it("超集不变式（含三元/&&/||/?? 短路）：运行时追踪集 ⊆ 静态引用集，200 样本", () => {
+    // deterministic PRNG（与 expr.test.ts fuzz 同风格）
+    let seed = 20260830;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    const pick = <T,>(arr: T[]): T => arr[Math.floor(rnd() * arr.length)];
+    const sigLeaf = () => pick(["a", "b", "c", "flag", "list", "i"]) + ".value";
+    const plainLeaf = () => pick(["cfg.on", "cfg.off"]); // 静态入集、运行时不追踪
+    const leaf = () => (rnd() < 0.75 ? sigLeaf() : plainLeaf());
+    const idxLeaf = () => `list.value[i.value]`;
+    function genExpr(depth: number): string {
+      if (depth <= 0) return rnd() < 0.85 ? leaf() : idxLeaf();
+      const kind = rnd();
+      const L = genExpr(depth - 1);
+      const R = genExpr(depth - 1);
+      if (kind < 0.35) return `(${L} ${pick(["+", "-", "*", "/"])} ${R})`; // 二元
+      if (kind < 0.5) return `(${L} ${pick([">", "<", ">=", "<=", "===", "!=="])} ${R})`;
+      if (kind < 0.62) return `(${L} ? (${R}) : (${L}))`; // 三元：静态并入两支，运行时只追一支
+      if (kind < 0.74) return `((${L}) ${pick(["&&", "||", "??"])} (${R}))`; // 短路
+      if (kind < 0.87) return `(${L})`;
+      return `(!(${L}))`;
+    }
+    const { scope, nameOf } = makeWorld();
+    for (let n = 0; n < 200; n++) {
+      const src = genExpr(3);
+      const tracked = runtimeDeps(scope, nameOf, src);
+      const statics = new Set(exprRootIdents(src));
+      for (const name of tracked) {
+        expect(statics.has(name), `sample #${n} "${src}": 运行时追踪了 "${name}" 但静态引用集未含`).toBe(true);
+      }
+    }
+  });
+
+  it("无短路 + 全信号访问的表达式：静态集 === 运行时集（等号成立的边界）", () => {
+    let seed = 4260830;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    const { scope, nameOf } = makeWorld();
+    for (let n = 0; n < 100; n++) {
+      const leaves = ["a.value", "b.value", "c.value", "flag.value", "list.value", "i.value"];
+      const L = pick2(leaves, rnd);
+      let src = L;
+      for (let k = 0; k < 2; k++) {
+        src = `(${src} ${pick2(["+", "-", "*", ">", "<", "==="], rnd)} ${pick2(leaves, rnd)})`;
+      }
+      const tracked = runtimeDeps(scope, nameOf, src).sort();
+      expect(tracked, src).toEqual(exprRootIdents(src).sort());
+    }
+  });
+});
+
+function pick2<T>(arr: T[], rnd: () => number): T {
+  return arr[Math.floor(rnd() * arr.length)];
+}
