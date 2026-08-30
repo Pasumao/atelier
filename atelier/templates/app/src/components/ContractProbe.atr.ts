@@ -18,7 +18,7 @@ export const ContractProbe = component(function ContractProbe(props: { title: st
   };
   return html`
     <div class="ppanel">
-      <h2 class="text-base font-semibold">{props.title}</h2>
+      <h2 class="text-md font-semibold">{props.title}</h2>
       <p class="text-muted">level: {props.level} · bump: {bumped.value}</p>
       <button class="btn" on:click={bump}>bump</button>
     </div>

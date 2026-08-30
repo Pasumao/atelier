@@ -9,10 +9,12 @@ description: Atelier styling with semantic tokens. atelier.config.json single so
 
 ```jsonc
 { "tokens": { "color": { "primary": "#4D6BFE", "surface": "#171C28" },
-              "space": { "md": "16px" }, "radius": { "md": "10px" } } }
+              "space": { "xs": "4px", "sm": "8px", "md": "16px" },
+              "font": { "sm": "0.85rem", "md": "0.95rem" },
+              "radius": { "md": "10px" } } }
 ```
 
-→ compiles to CSS custom properties: `--color-primary`, `--space-md`, `--radius-md` (group.name → kebab-case)
+→ compiles to CSS custom properties: `--color-primary`, `--space-md`, `--font-sm`, `--radius-md` (group.name → kebab-case)
 
 ## Hard rule (H3)
 
@@ -38,8 +40,15 @@ return html`
 | Token shape | Example | Utility |
 |---|---|---|
 | color | `--color-primary` | `bg-primary` / `text-primary` (generated) |
-| space | `--space-md` | `p-md` / `m-md` (generated on demand) |
+| space | `--space-md` | `p-md` / `m-md` / `gap-md` (generated on demand) |
+| font | `--font-sm` | `text-sm` / `text-md` (font-size scale — defined keys override the native scale) |
 | radius | `--radius-md` | `rounded-md` |
+
+## Discipline guard (app-side `tests/styling-discipline.test.ts`)
+
+- R1 no native palette classes · R2 no raw color literals · R2b `var(--token)` only in scoped CSS/recipe
+- R3 `<style scoped>` allowlist only · R4 spacing only `var(--space-*)` / `calc(var(--space-*)·factor)` / `0` / `auto`
+- R5 `font-size` only `var(--font-*)`; `text-<scale>` classes must be keys of the `font` group in `atelier.config.json`
 
 ## Common failures
 

@@ -4,8 +4,9 @@
  * atelier.config.json 是唯一样式值真值（H3）。流程：
  *   1. 生成 src/tailwind.input.css（@theme 块 + @source 扫描声明，生成产物勿手改）
  *        color.*  → --color-*   → bg-/text-/border-/透明度修饰 等语义工具类
- *        space.*  → --spacing-* → p/m/gap/w 系列
+ *        space.*  → --spacing-* → p/m/gap 系列（命名键 p-sm/gap-md…）
  *        radius.* → --radius-*  → rounded 系列
+ *        font.*   → --text-*    → text-* 字号刻度（定义即覆盖原生刻度 = token 单源，F-3 第二期）
  *   2. @tailwindcss/cli AOT 编译 → src/atelier-tailwind.css（应用唯一引入的样式产物）
  *
  * 为什么走 CLI 而不是 @tailwindcss/vite 插件：插件 dev 管线在本环境触发
@@ -32,6 +33,7 @@ export function generateThemeFile() {
   for (const [k, v] of Object.entries(t.color ?? {})) lines.push(`  --color-${k}: ${v};`);
   for (const [k, v] of Object.entries(t.space ?? {})) lines.push(`  --spacing-${k}: ${v};`);
   for (const [k, v] of Object.entries(t.radius ?? {})) lines.push(`  --radius-${k}: ${v};`);
+  for (const [k, v] of Object.entries(t.font ?? {})) lines.push(`  --text-${k}: ${v};`);
 
   const inputCss =
     `/* GENERATED from atelier.config.json — token 单源派生，勿手改（决策 16）。\n` +

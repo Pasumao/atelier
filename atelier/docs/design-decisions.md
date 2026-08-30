@@ -195,6 +195,8 @@
 - **取舍**：+2 构建依赖（`tailwindcss`/`@tailwindcss/cli`）；接受类名即样式——换取 AI 首遍正确率（分布内词汇，收窄"DSL 分布外"风险敞口）、样式错误可 grep、组件内样式代码量约减半。模板表达式限制（整值属性、无带参调用）不受影响，条件类名仍在 TS 侧拼装。
 - **状态**：11 组件全量迁移（五面板/三区块/StatsStrip/壳层）+ 4 组件白名单保留；机检 41/41、快照 MATCH、视觉复查通过。
 - 时间：2026-08-27。
+- **第二期（2026-08-30，F-3 间距/字号纪律，recipe 层同责）**：token 组新增 **`font`**（字号刻度；runtime 注入 `--font-*`，Tailwind 映射 `--text-*`——定义即覆盖原生刻度，字号单源收口）+ `space.xs`（4px）。护栏新增 **R4**（间距声明只准 `var(--space-*)` 组合 / `calc(var(--space-*)·无单位系数)` / 0 / auto）与 **R5**（CSS `font-size` 只准 `var(--font-*)`；模板 `text-<刻度>` 类只准 config font 组键名）；R2/R2b 扫描面扩到 recipe `atelier-ui.css`，recipe 取值全量迁移 token（padding/font-size/scroll-margin）。诚实边界：index.html 基线 reset 豁免（preflight 不引入）；border 宽度 / line-height / letter-spacing / 阴影与 transform 内长度不属 R4 管辖；**radius 纪律留后续候选**；recipe 数值迁移为就近 token（±几 px 级归一）。验证：starter 脚手架端到端 18/18 绿 + R4 负例红检（裸 `0.52rem` 实证被抓）+ `text-md` 工具类生成实证；check-skills 31/0；技能包 atelier-styling 同步。
+- 时间（二期）：2026-08-30。
 
 ## 未决项
 - 需要用户确认的可选 slogan 未定稿：「意图进，界面出」（中文） / *Intent in, interface out.*（英文），待命名正式对外时再定稿。——当前仅存档备选。

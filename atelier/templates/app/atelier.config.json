@@ -12,7 +12,8 @@
       "warn": "#F0A93B",
       "danger": "#E5484D"
     },
-    "space": { "sm": "8px", "md": "16px", "lg": "24px", "xl": "40px" },
+    "space": { "xs": "4px", "sm": "8px", "md": "16px", "lg": "24px", "xl": "40px" },
+    "font": { "xs": "0.72rem", "sm": "0.85rem", "md": "0.95rem", "lg": "1.1rem", "xl": "1.65rem" },
     "radius": { "sm": "6px", "md": "10px", "lg": "16px" }
   },
   "locked": [],

@@ -33,7 +33,7 @@
 |---|---|---|---|
 | F-1 | **事务层完整版（决策 5）** | ✅ **第一期落地（2026-08-30）**：命名合并（同名栈顶幂等锚定，rollback 回到本轮前）+ 增量 patch 事件日志（journal，有界环形可关）+ 依赖图可查询（`store.graph()`，dispose 即注销）。6 用例实证（含 limit 调小裁剪、跨名不合并、derived 出现在依赖边）。诚实边界：恢复仍走全量快照（正确性锚点）；MCP 暴露 graph/log 待接线。**剩余**：无（本期范围全清）；后续增强=回放恢复/编译期静态化归 F-2 | ✅ |
 | F-2 | **编译器静态依赖图（决策 3）** | 🔄 **第一期落地（2026-08-30）**：`exprRootIdents`（与求值器同 tokenizer）+ codegen 收集器发射 `deps: {reactive, mount, events}` 清单（compileFunction/compileModuleSource/CLI 产物三处生效）；差分对拍实证两条不变式（追踪集⊆静态集 200 样本；无短路等号 100 样本，钩子 `__withTracking`）。**语义边界**：清单=语法级超集（含未执行分支，{:else if} 链各分支 test 同样入集）。**剩余**：二期=利用清单做跳过追踪快路径 / prod 剥离 / MCP 构建期图查询 | 二期 L |
-| F-3 | **样式纪律收紧（决策 16）** | 颜色试点 → 间距 / 字号纪律（随 recipe 层落地） | M |
+| F-3 | **样式纪律收紧（决策 16）** | ✅ **落地（2026-08-30）**：一期颜色纪律 R1/R2/R2b/R3（既有）；**二期间距/字号**——token 新增 `font` 组（runtime `--font-*`，Tailwind `--text-*` 覆盖原生刻度=字号单源）+ `space.xs`；护栏 **R4**（间距只准 var(--space-*) 组合 / calc·无单位系数 / 0 / auto）+ **R5**（font-size 只准 var(--font-*)；text-* 刻度类只准 font 键），扫描面扩到 recipe 层并全量迁移 token。诚实边界：index.html reset 豁免、border/line-height/letter-spacing/阴影变换内长度不辖、radius 纪律留候选。starter 脚手架端到端 18/18 + R4 负例红检实证 + check-skills 31/0 | ✅ |
 | F-4 | **codegen 覆盖扩张** | 🔄 **第一批落地（2026-08-30）**：模板子集扩张三件 + 一修复——① `{:else if}` 链（解析期多分支 blocks；emitIf/renderNode 分派本就泛型，两路径零改自动覆盖）；② HTML void 元素 13 种（br/hr/img/input/link/meta…，修复 `<img>` 把后续兄弟节点吞成 children 的缺陷）；③ 未闭合结构解析期显式拒绝（`{#if}`/`{#each}`/元素缺闭合 → **ATR-101** 四段式：编译路径构建期抛、解释器路径错误卡不白屏、dump CLI 可行动报错）；④ 顺带修复 `{:else}` 消费长度缺陷（`}` 漏进 else 分支文本，两路径同源故 parity 抓不到、快照回归抓到）。golden parity 8 新用例，61/61 绿。诚实边界：错位闭合标签（`</span>` 配 `<div>`）与游离 `{` 仍宽容。**剩余**：下一批候选=错位闭合拒绝 / 表达式内嵌套 `{}`（对象字面量）/ 属性级指令 | M |
 
 ### 设计备忘（半天级，按需触发）
@@ -48,6 +48,7 @@
 - HMR 三边界：旧 effects 不逐个 dispose（dev-only 有界泄漏）/ 模板结构大改时按序还原可能错位 /
   跨交换 checkpoint 不回落新信号；
 - CI snapshot-smoke job 已写、待首次运行验证；`atelier review` CLI 为占位；
+- checkpoint.mjs 仓库发现只认 cwd 下的 `.git`（不做向上查找）：在 `atelier/` 子目录跑会误引导嵌套 git 仓（2026-08-30 实证，已手动清理；从仓库根运行即无此问题），候选修法=cwd 无 `.git` 时向上 `rev-parse` 找根；
 - P1-9 baseline.png 视觉复核留待用户（`.dsh-trash/smoke-app/.atr/snapshots/`）。
 
 ### 挂起区（等 F 线里程碑后启动）
