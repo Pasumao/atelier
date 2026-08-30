@@ -154,7 +154,16 @@ function main() {
         warnings.push(`${path.relative(ROOT, file)}: html\` at offset ${offset} precedes any component declaration — dumped as "(module)"`);
         owner = "(module)";
       }
-      const ast = parseTemplate(raw);
+      let ast;
+      try {
+        ast = parseTemplate(raw);
+      } catch (e) {
+        const err = e;
+        die(
+          `${path.relative(ROOT, file)}: ${err.code ?? "ATR"} ${err.message ?? String(e)}`,
+          err.fix ?? "检查模板语法（ATR-1xx = 模板解析错误家族）",
+        );
+      }
       const rel = path.relative(ROOT, file).replaceAll("\\", "/");
       if (!components.has(owner)) components.set(owner, { file: rel, templates: [] });
       components.get(owner).templates.push({ index: components.get(owner).templates.length, raw, ast });

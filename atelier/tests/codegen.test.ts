@@ -350,3 +350,112 @@ describe("F-2 static deps manifest (superset semantics)", () => {
 function pick2<T>(arr: T[], rnd: () => number): T {
   return arr[Math.floor(rnd() * arr.length)];
 }
+
+/* ================= F-4 codegen 覆盖扩张（第一批：else-if 链 / void 元素 / 解析期显式拒绝） ================= */
+
+describe("F-4 覆盖扩张第一批 golden DOM parity", () => {
+  it("{:else if} 链（多分支首中即停，分支互斥）", async () => {
+    const raw =
+      `<div>{#if s.value === 1}<b>one</b>{:else if s.value === 2}<i>two</i>` +
+      `{:else if s.value === 3}<u>three</u>{:else}<s>other</s>{/if}</div>`;
+    const r = await parity("ParityElseIf", raw, () => {
+      const s = $state(1);
+      return {
+        scope: { s },
+        steps: [
+          async () => { s.value = 2; },
+          async () => { s.value = 3; },
+          async () => { s.value = 99; }, // 全不命中 → {:else}
+          async () => { s.value = 1; }, // 回到首分支
+        ],
+      };
+    });
+    expect(r.frames[0]).toContain('"one"');
+    expect(r.frames[1]).toContain('"two"');
+    expect(r.frames[2]).toContain('"three"');
+    expect(r.frames[3]).toContain('"other"');
+    expect(r.frames[4]).toContain('"one"');
+    // 锚点清空语义：每帧只有命中分支的文本
+    expect(r.frames[1]).not.toContain('"one"');
+    expect(r.frames[3]).not.toContain('"three"');
+  });
+
+  it("void 元素（<img>/<input>/<br>）不吞后续兄弟节点 + void 上的动态 attr", async () => {
+    const raw =
+      `<div class="wrap"><img src={u.value} alt="logo"><input type="text" value={t.value}><br>` +
+      `<p>after {t.value}</p></div>`;
+    const r = await parity("ParityVoid", raw, () => {
+      const u = $state("/a.png");
+      const t = $state("hi");
+      return {
+        scope: { u, t },
+        steps: [
+          async () => { u.value = "/b.png"; },
+          async () => { t.value = "yo"; },
+        ],
+      };
+    });
+    // 回归（吞兄弟节点缺陷）：after 文本与 img 同级渲染，而非成为 img 的子节点后消失
+    expect(r.frames[0]).toContain('"after "');
+    expect(r.frames[0]).toContain('"hi"');
+    expect(r.frames[1]).toContain('src="/b.png"');
+    expect(r.frames[2]).toContain('"yo"');
+    expect(r.frames[2]).toContain('value="yo"');
+    expect(r.frames[2]).toContain('alt="logo"');
+  });
+
+  it("{:else} 不再把 } 漏进分支文本（pos 偏移回归）", async () => {
+    const raw = `<p>{#if open.value}ON{:else}OFF{/if}</p>`;
+    const r = await parity("ParityElseBrace", raw, () => {
+      const open = $state(false);
+      return { scope: { open }, steps: [async () => { open.value = true; }] };
+    });
+    expect(r.frames[0]).toContain('"OFF"');
+    expect(r.frames[0]).not.toContain('"}');
+    expect(r.frames[1]).toContain('"ON"');
+  });
+
+  it("else-if 链的静态依赖清单：各分支 test 与全部插值的根标识符入集（超集语义）", () => {
+    const raw = `<div>{#if a.value}<b>{x.value}</b>{:else if b.value}<i>{y.value}</i>{:else}<u>{z.value}</u>{/if}</div>`;
+    const c = compileFunction("DepElseIf", raw);
+    expect([...c.deps.reactive].sort()).toEqual(["a", "b", "x", "y", "z"]);
+  });
+});
+
+describe("F-4 解析期显式拒绝（ATR-101）", () => {
+  const cases: Array<[string, string]> = [
+    ["{#if 未闭合", "{#if open.value}<i>x</i>"],
+    ["{#each 未闭合", "{#each list.value as x}<i>{x}</i>"],
+    ["元素未闭合", "<div><p>x</p>"],
+  ];
+  for (const [label, raw] of cases) {
+    it(`${label} → 编译路径构建期抛 ATR-101（四段式）`, () => {
+      let thrown: { code?: string; message?: string; fix?: string } | undefined;
+      try {
+        compileFunction(`Reject_${label}`, raw);
+      } catch (e) {
+        thrown = e as never;
+      }
+      expect(thrown?.code).toBe("ATR-101");
+      expect(thrown?.message).toMatch(/未闭合/);
+      expect(typeof thrown?.fix).toBe("string");
+      expect(thrown!.fix!.length).toBeGreaterThan(0);
+    });
+  }
+
+  it("解释器路径：mountComponent 错误边界渲染可行动错误卡（不白屏）", () => {
+    const container = makeContainer();
+    mountComponent(
+      { name: "RejectMount", render: () => ({ raw: "{#each list.value as x}<i>{x}</i>", scope: {} }) as never },
+      {},
+      container,
+      new Map(),
+      okValidate as never,
+    );
+    const s = serialize(container);
+    expect(s).toContain("atr-error-card");
+    expect(s).toContain("ATR-101");
+    expect(s).toContain("{/each}");
+  });
+});
+

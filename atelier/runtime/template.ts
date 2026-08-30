@@ -1,7 +1,11 @@
 /**
  * Atelier prototype — 类 HTML 模板解释器（决策 1/8 雏形）。
- * 支持子集：{expr} 文本插值 / {#if}{:else}{/if} / {#each arr as item, idx} / 动态属性 attr={expr}
- *         / on:click={handler} 事件 / <style scoped>（token 校验）/ 子组件 <ModelCard ... />（大写标签）。
+ * 支持子集：{expr} 文本插值 / {#if}{:else if}{:else}{/if} / {#each arr as item, idx [by key]}
+ *         / 动态属性 attr={expr} / on:click={handler} 事件 / HTML void 元素（<br>/<img>/<input>… 无闭合）
+ *         / <style scoped>（token 校验）/ 子组件 <ModelCard ... />（大写标签）。
+ * 解析期显式拒绝（ATR-101）：未闭合的 {#if}/{#each}/元素标签——不静默吞掉（编译路径构建期即抛，
+ * 解释器路径渲染为可行动错误卡）。诚实边界：错位闭合标签（</span> 配 <div>）与游离 `{` 仍按
+ * 既有宽容语义处理，两路径同源一致。
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
@@ -104,6 +108,7 @@ class Parser {
       if (c === "{") {
         if (
           this.src.startsWith("{:else}", this.pos) ||
+          /^\{:else\s+if[\s(]/.test(rest) || // {:else if 也是块终止符：嵌套块的 parseContent 不能吞掉外层分支
           this.src.startsWith("{/if}", this.pos) ||
           this.src.startsWith("{/each}", this.pos)
         )
@@ -113,11 +118,22 @@ class Parser {
           this.pos += mIf[0].length;
           const blocks: { test: string | null; children: Node[] }[] = [];
           blocks.push({ test: mIf[1], children: this.parseContent() });
-          while (this.src.startsWith("{:else}", this.pos)) {
-            this.pos += 6;
-            blocks.push({ test: null, children: this.parseContent() });
+          for (;;) {
+            const mElseIf = /^\{:else\s+if\s+([^}]+)\}/.exec(this.src.slice(this.pos));
+            if (mElseIf) {
+              this.pos += mElseIf[0].length;
+              blocks.push({ test: mElseIf[1], children: this.parseContent() });
+              continue;
+            }
+            if (this.src.startsWith("{:else}", this.pos)) {
+              this.pos += 7; // "{:else}".length——此前 6 会把 } 漏进 else 分支当文本节点
+              blocks.push({ test: null, children: this.parseContent() });
+              continue;
+            }
+            break;
           }
-          if (this.src.startsWith("{/if}", this.pos)) this.pos += 5;
+          if (!this.src.startsWith("{/if}", this.pos)) parseFail(`{#if} 未闭合 — 缺少 {/if}`, "补上与 {#if} 配对的 {/if}（{:else if} / {:else} 分支同样要在 {/if} 前结束）");
+          this.pos += 5;
           nodes.push({ kind: "if", blocks });
           continue;
         }
@@ -125,7 +141,8 @@ class Parser {
         if (mEach) {
           this.pos += mEach[0].length;
           const children = this.parseContent();
-          if (this.src.startsWith("{/each}", this.pos)) this.pos += 7;
+          if (!this.src.startsWith("{/each}", this.pos)) parseFail(`{#each} 未闭合 — 缺少 {/each}`, "补上与 {#each} 配对的 {/each}");
+          this.pos += 7;
           nodes.push({ kind: "each", expr: mEach[1].trim(), item: mEach[2], index: mEach[3] ?? "__i", keyExpr: mEach[4]?.trim(), children });
           continue;
         }
@@ -161,6 +178,10 @@ class Parser {
       if (this.src.startsWith(">", i)) {
         i += 1;
         this.pos = i;
+        if (VOID_TAGS.has(tag.toLowerCase())) {
+          // void 元素无子内容也不需要闭合标签——否则后续兄弟节点会被吞成它的 children
+          return { kind: "element", tag, component: false, attrs, children: [] };
+        }
         break;
       }
       if (this.src.startsWith("</", i)) break;
@@ -209,9 +230,21 @@ class Parser {
     const endRe = new RegExp(`</${tag}>`);
     const rest = this.src.slice(this.pos);
     const em = endRe.exec(rest);
-    if (em) this.pos += em.index + em[0].length;
+    if (!em) parseFail(`<${tag}> 未闭合 — 缺少 </${tag}>`, `补上闭合标签 </${tag}>（HTML void 元素如 <br>/<img>/<input> 无需闭合）`);
+    this.pos += em.index + em[0].length;
     return { kind: "element", tag, component: /^[A-Z]/.test(tag), attrs, children };
   }
+}
+
+/** HTML void 元素（无子内容、无闭合标签） */
+const VOID_TAGS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr",
+]);
+
+/** 模板解析错误（ATR-1xx 家族）：解析期显式拒绝而非静默吞掉——解释器路径被组件错误边界接住
+ * 渲染为可行动错误卡，编译路径（compileFunction/dump）在构建期即抛出。 */
+function parseFail(message: string, fix: string): never {
+  throw { code: "ATR-101", message, context: {}, fix } as AtrError;
 }
 
 /**
