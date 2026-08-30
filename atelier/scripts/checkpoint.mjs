@@ -81,9 +81,12 @@ function testGate(repo, skip) {
     if (!pkg.scripts?.test) continue;
     const cwd = path.dirname(p);
     const shell = process.platform === "win32";
+    // win32 下 pnpm 是 .cmd 需要 shell；此时命令须为单串（args+shell 触发 Node DEP0190 弃用告警）
+    const run = (cmd) =>
+      shell ? spawnSync(`${cmd} test`, { cwd, encoding: "utf8", shell }) : spawnSync(cmd, ["test"], { cwd, encoding: "utf8" });
     console.log(`[gate] running test suite (${path.relative(repo, cwd) || "."} — 未检不锚·测试半边)...`);
-    let r = spawnSync("pnpm", ["test"], { cwd, encoding: "utf8", shell });
-    if (r.error && r.error.code === "ENOENT") r = spawnSync("npm", ["test"], { cwd, encoding: "utf8", shell });
+    let r = run("pnpm");
+    if (r.error && r.error.code === "ENOENT") r = run("npm");
     if (r.status === 0) { console.log("[gate] tests green — anchor permitted ✔"); return; }
     const tail = `${r.stdout ?? ""}\n${r.stderr ?? ""}`.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12).join("\n  ");
     die(1,
