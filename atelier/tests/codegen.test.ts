@@ -17,6 +17,7 @@ import { $state, __withTracking } from "../runtime/core.ts";
 import {
   compiledTemplateCount,
   mountComponent,
+  parseTemplate,
   registerCompiled,
   tokenState,
   type ComponentDef,
@@ -350,6 +351,103 @@ describe("F-2 static deps manifest (superset semantics)", () => {
 function pick2<T>(arr: T[], rnd: () => number): T {
   return arr[Math.floor(rnd() * arr.length)];
 }
+
+/* ================= F-4 覆盖扩张（第二批：对象/数组字面量 / 错位闭合显式拒绝 / 字面量花括号） ================= */
+
+describe("F-4 覆盖扩张第二批 golden DOM parity", () => {
+  it("对象字面量插值 {{a: n.value, k: 'x'}}（stringify JSON 渲染 + 更新跟随）", async () => {
+    const raw = `<p>{{a: n.value, k: "x"}}</p>`;
+    const r = await parity("ParityObjLit", raw, () => {
+      const n = $state(1);
+      return { scope: { n }, steps: [async () => { n.value = 7; }] };
+    });
+    // shim serialize 对文本节点再包一层 JSON.stringify ⇒ 引号以 \" 转义形态出现
+    expect(r.frames[0]).toContain('{\\"a\\":1,\\"k\\":\\"x\\"}');
+    expect(r.frames[1]).toContain('{\\"a\\":7,\\"k\\":\\"x\\"}');
+  });
+
+  it("数组字面量 / {a} 简写（普通作用域值）/ ({...}).x 后缀链", async () => {
+    const raw = `<div>{[1, n.value, n.value * 2]}|{{w}}|{({a: n.value}).a}</div>`;
+    const r = await parity("ParityArrLit", raw, () => {
+      const n = $state(3);
+      const w = "plain"; // 简写 {w} 取作用域字面值——信号对象会被 stringify 泄漏内部字段，此处用普通值
+      return { scope: { n, w }, steps: [async () => { n.value = 5; }] };
+    });
+    expect(r.frames[0]).toContain('"[1,3,6]"');
+    expect(r.frames[0]).toContain('{\\"w\\":\\"plain\\"}');
+    expect(r.frames[1]).toContain('"[1,5,10]"');
+    expect(r.frames[1]).toContain('"5"');
+  });
+
+  it("对象字面量经组件 props 挂载期一次性求值（F-2 mount 语义：不随信号后续变化）", async () => {
+    const raw = `<section><Sub dataCfg={{lvl: n.value}} /></section>`;
+    const registry = new Map<string, ComponentDef>();
+    registry.set("Sub", {
+      name: "Sub",
+      render: () => ({ raw: `<em>{props.dataCfg.lvl}</em>`, scope: {} }) as never,
+    });
+    const r = await parity(
+      "ParityObjProp",
+      raw,
+      () => {
+        const n = $state(2);
+        return { scope: { n }, steps: [] };
+      },
+      { registry },
+    );
+    expect(r.frames[0]).toContain('"2"');
+  });
+
+  it("字面量花括号原样并入文本（配对失败的 { 不再静默丢弃；{ } 空体同为字面量）", async () => {
+    const raw = `<p>a { b 与 {{ 及 { } 尾</p>`;
+    const r = await parity("ParityLiteralBraces", raw, () => {
+      const n = $state(1);
+      return { scope: { n }, steps: [] };
+    });
+    expect(r.frames[0]).toContain('"a { b 与 {{ 及 { } 尾"');
+  });
+
+  it("解析非法的配对表达式仍走 bindExpr 求值期 ATR-301 错误卡（P0-8 前置报错语义保持）", async () => {
+    const raw = `<p>{n.value +}</p>`;
+    const r = await parity("ParityBadExpr", raw, () => {
+      const n = $state(1);
+      return { scope: { n }, steps: [] };
+    });
+    expect(r.frames[0]).toContain("⚠");
+    expect(r.frames[0]).toContain("ATR-301");
+  });
+
+  it("对象字面量的键不进静态依赖清单；值引用照常入集", () => {
+    const c = compileFunction("DepObjLit", `<i>{{a: x.value, b: [y.value], self: z.value}}</i>`);
+    expect([...c.deps.reactive].sort()).toEqual(["x", "y", "z"]);
+  });
+});
+
+describe("F-4 第二批解析期显式拒绝（错位/游离闭合 → ATR-101）", () => {
+  const cases: Array<[string, string, RegExp]> = [
+    ["错位闭合（span 配 div）", "<div><span>x</div>", /未闭合/],
+    ["游离闭合（顶层无开标签）", "</span>{x}", /多余的闭合标签/],
+    ["块内游离闭合", "{#if open.value}</div>{/if}", /多余的闭合标签/],
+  ];
+  for (const [label, raw, re] of cases) {
+    it(`${label} → 构建期抛 ATR-101（不再静默吞掉/截断）`, () => {
+      let thrown: { code?: string; message?: string } | undefined;
+      try {
+        compileFunction(`Reject_${label}`, raw);
+      } catch (e) {
+        thrown = e as never;
+      }
+      expect(thrown?.code).toBe("ATR-101");
+      expect(thrown?.message).toMatch(re);
+    });
+  }
+
+  it("合法嵌套同名/异名标签不受影响（回归守卫）", () => {
+    const ast = parseTemplate(`<div><section><span>x</span></section><div>y</div></div>`);
+    expect(ast).toHaveLength(1);
+    expect((ast[0] as { children: unknown[] }).children).toHaveLength(2);
+  });
+});
 
 /* ================= F-4 codegen 覆盖扩张（第一批：else-if 链 / void 元素 / 解析期显式拒绝） ================= */
 

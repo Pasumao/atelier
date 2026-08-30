@@ -1,7 +1,8 @@
 /**
  * Atelier prototype — 模板表达式迷你求值器。
  * 替代 new Function/eval（决策 12：产物零 eval 精神）；
- * 支持子集：属性访问 / 索引 / 字符串数字布尔字面量 / === == != !== > < >= <= && || ! ?: + - * /
+ * 支持子集：属性访问 / 索引 / 字符串数字布尔字面量 / 数组与对象字面量（F-4 第二期，含 {a} 简写
+ * 与 ({...}).x 成员链）/ === == != !== > < >= <= && || ! ?: + - * /
  * 完整版：编译器将表达式转换为直接闭包调用（本原型为解释求值）。
  */
 
@@ -62,7 +63,7 @@ function tokenize(src: string): Tok[] {
       i += 2;
       continue;
     }
-    if ("+-*/<>!?:,()[].".includes(c)) {
+    if ("+-*/<>!?:,()[].{}".includes(c)) {
       toks.push({ t: "op", v: c });
       i++;
       continue;
@@ -237,14 +238,22 @@ class Parser {
     if (t.t === "op" && t.v === "(") {
       const inner = this.ternary();
       this.expectOp(")");
-      return inner;
+      return this.chain(inner); // F-4 第二期：({...}).x / (arr)[0] 后缀链
     }
     if (t.t === "op" && t.v === "!") {
       const inner = this.primary();
       return (s) => !booly(inner(s));
     }
+    if (t.t === "op" && t.v === "{") return this.objectLiteral();
+    if (t.t === "op" && t.v === "[") return this.arrayLiteral();
+    if (t.t !== "id") throw new Error(`ATR-301: 意外的符号 "${t.v}"`);
     // identifier chain: a.b.c[0]
-    let fn: (s: Record<string, unknown>) => unknown = (s) => s[t.v];
+    return this.chain((s) => s[t.v]);
+  }
+
+  /** 属性/索引后缀链：base.x.y[0]（也服务 (expr).x 与字面量后缀，F-4 第二期） */
+  chain(base: (s: Record<string, unknown>) => unknown): (s: Record<string, unknown>) => unknown {
+    let fn = base;
     for (;;) {
       const n = this.peek();
       if (!n) break;
@@ -268,6 +277,55 @@ class Parser {
     }
     return fn;
   }
+
+  /** 对象字面量 {key: expr, ...}；{a} 简写 = 取作用域 a（F-4 第二期）。键为标识符或字符串。 */
+  objectLiteral(): (s: Record<string, unknown>) => unknown {
+    const props: { k: string; v: (s: Record<string, unknown>) => unknown }[] = [];
+    if (this.peek()?.v !== "}") {
+      for (;;) {
+        const kt = this.next();
+        if (!kt || (kt.t !== "id" && kt.t !== "str")) {
+          throw new Error("ATR-301: 对象字面量键期望标识符或字符串");
+        }
+        if (this.peek()?.v === ":") {
+          this.next();
+          props.push({ k: kt.v, v: this.ternary() });
+        } else {
+          if (kt.t !== "id") throw new Error("ATR-301: 对象字面量简写仅支持标识符键");
+          const key = kt.v;
+          props.push({ k: key, v: (s) => s[key] });
+        }
+        if (this.peek()?.v === ",") {
+          this.next();
+          continue;
+        }
+        break;
+      }
+    }
+    this.expectOp("}");
+    return this.chain((s) => {
+      const o: Record<string, unknown> = {};
+      for (const p of props) o[p.k] = p.v(s);
+      return o;
+    });
+  }
+
+  /** 数组字面量 [expr, ...]（F-4 第二期） */
+  arrayLiteral(): (s: Record<string, unknown>) => unknown {
+    const items: ((s: Record<string, unknown>) => unknown)[] = [];
+    if (this.peek()?.v !== "]") {
+      for (;;) {
+        items.push(this.ternary());
+        if (this.peek()?.v === ",") {
+          this.next();
+          continue;
+        }
+        break;
+      }
+    }
+    this.expectOp("]");
+    return this.chain((s) => items.map((f) => f(s)));
+  }
 }
 
 function booly(v: unknown): boolean {
@@ -285,18 +343,29 @@ export function evalExpr(src: string, scope: Record<string, unknown>): unknown {
 
 /**
  * 表达式的根标识符（作用域引用）集合——编译期静态依赖提取（决策 3 / F-2）用。
- * 规则：id token 且前一个 token 不是 "."（属性链 x.y.z 只取根 x）；关键字与字面量天然排除。
+ * 规则：id token 且前一个 token 不是 "."（属性链 x.y.z 只取根 x）；关键字与字面量天然排除；
+ * 对象字面量的键（前一 token 是 "{" 或 "," 且后随 ":"）不是作用域引用，不计入。
  * 语义边界（诚实标注）：这是**语法级引用集**——包含 ternary/&&/|| 未被求值的分支，
  * 因此是运行时追踪集的**超集**（等号仅在无短路、且全部经 .value 读信号的表达式上成立）。
  */
 export function exprRootIdents(src: string): string[] {
   const toks = tokenize(src);
   const out: string[] = [];
+  let prev = "";
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
-    if (t.t !== "id") continue;
-    if (i > 0 && toks[i - 1].v === ".") continue;
-    if (!out.includes(t.v)) out.push(t.v);
+    if (t.t !== "id") {
+      prev = t.v;
+      continue;
+    }
+    const next = toks[i + 1];
+    if (prev === ".") {
+      prev = t.v;
+      continue; // 属性链 x.y.z 的成员不是根引用
+    }
+    const isObjKey = next?.v === ":" && (prev === "{" || prev === ",");
+    if (!isObjKey && !out.includes(t.v)) out.push(t.v);
+    prev = t.v;
   }
   return out;
 }

@@ -1,11 +1,12 @@
 /**
  * Atelier prototype — 类 HTML 模板解释器（决策 1/8 雏形）。
- * 支持子集：{expr} 文本插值 / {#if}{:else if}{:else}{/if} / {#each arr as item, idx [by key]}
+ * 支持子集：{expr} 文本插值（含对象/数组字面量 {{a: x.value}} 与 {a} 简写，F-4 第二期）
+ *         / {#if}{:else if}{:else}{/if} / {#each arr as item, idx [by key]}
  *         / 动态属性 attr={expr} / on:click={handler} 事件 / HTML void 元素（<br>/<img>/<input>… 无闭合）
  *         / <style scoped>（token 校验）/ 子组件 <ModelCard ... />（大写标签）。
- * 解析期显式拒绝（ATR-101）：未闭合的 {#if}/{#each}/元素标签——不静默吞掉（编译路径构建期即抛，
- * 解释器路径渲染为可行动错误卡）。诚实边界：错位闭合标签（</span> 配 <div>）与游离 `{` 仍按
- * 既有宽容语义处理，两路径同源一致。
+ * 解析期显式拒绝（ATR-101）：未闭合的 {#if}/{#each}/元素标签、错位与游离闭合标签——不静默吞掉
+ * （编译路径构建期即抛，解释器路径渲染为可行动错误卡）。字面量花括号（非表达式候选）原样并入
+ * 文本，不再静默丢弃。诚实边界：残缺 "</"（无标签名）拒绝；表达式不支持箭头函数/赋值（ATR-301）。
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
@@ -85,7 +86,18 @@ class Parser {
   eof(): boolean {
     return this.pos >= this.src.length;
   }
-  parseContent(): Node[] {
+  /** 块语法起始判定（{:else if / {:else} / {/if} / {/each}）——主循环与文本扫描共用 */
+  private blockStartsAt(i: number): boolean {
+    return (
+      this.src.startsWith("{:else}", i) ||
+      /^\{:else\s+if[\s(]/.test(this.src.slice(i)) ||
+      this.src.startsWith("{/if}", i) ||
+      this.src.startsWith("{/each}", i)
+    );
+  }
+
+  /** expectedClose = 所属元素的标签名（元素子内容）；缺省 = 顶层或块子内容（任何 </ 均为游离闭合） */
+  parseContent(expectedClose?: string): Node[] {
     const nodes: Node[] = [];
     while (!this.eof()) {
       const rest = this.src.slice(this.pos);
@@ -96,7 +108,19 @@ class Parser {
           this.pos = end < 0 ? this.src.length : end + 3;
           continue;
         }
-        if (this.src.startsWith("</", this.pos)) break; // 交给父级处理
+        if (this.src.startsWith("</", this.pos)) {
+          // 闭合标签配对校验（F-4 第二期）：错位/游离闭合显式拒绝——此前会静默吞掉甚至截断余下模板
+          const m = /^<\/([A-Za-z][\w-]*)>/.exec(rest);
+          if (!m) parseFail("残缺的闭合标签（</ 后无合法标签名）", "补全闭合标签名，如 </div>");
+          if (expectedClose && m[1] === expectedClose) break; // 配对命中，交由所属元素消费
+          if (expectedClose) {
+            parseFail(
+              `<${expectedClose}> 未闭合 — 遇到 </${m[1]}>（闭合标签不匹配）`,
+              `补上 </${expectedClose}> 或调整嵌套层级（void 元素如 <br>/<img> 无需闭合）`,
+            );
+          }
+          parseFail(`多余的闭合标签 </${m[1]}>（无对应开标签）`, `删除 </${m[1]}> 或补上对应的开标签`);
+        }
         const tagMatch = /^<([A-Za-z][\w-]*)/.exec(rest);
         if (!tagMatch) {
           this.pos++;
@@ -106,13 +130,7 @@ class Parser {
         continue;
       }
       if (c === "{") {
-        if (
-          this.src.startsWith("{:else}", this.pos) ||
-          /^\{:else\s+if[\s(]/.test(rest) || // {:else if 也是块终止符：嵌套块的 parseContent 不能吞掉外层分支
-          this.src.startsWith("{/if}", this.pos) ||
-          this.src.startsWith("{/each}", this.pos)
-        )
-          break; // 块终止符，交给所属块处理
+        if (this.blockStartsAt(this.pos)) break; // 块终止符，交给所属块处理
         const mIf = /^\{#if\s+([^}]+)\}/.exec(rest);
         if (mIf) {
           this.pos += mIf[0].length;
@@ -146,20 +164,36 @@ class Parser {
           nodes.push({ kind: "each", expr: mEach[1].trim(), item: mEach[2], index: mEach[3] ?? "__i", keyExpr: mEach[4]?.trim(), children });
           continue;
         }
-        const mExpr = /^\{([^{}]+)\}/.exec(rest);
-        if (mExpr) {
-          this.pos += mExpr[0].length;
-          const text = mExpr[1].trim();
-          if (text.length > 0) nodes.push({ kind: "expr", expr: text });
+        // 表达式：引号感知配对扫描（F-4 第二期）。配对成功即表达式节点——内容非法由 bindExpr
+        // 求值期以 ATR-301 错误卡响亮报错（P0-8 前置报错语义不变）；仅配对失败的 { 才是字面量。
+        const close = matchBrace(this.src, this.pos);
+        if (close > this.pos + 1 && this.src.slice(this.pos + 1, close).trim().length > 0) {
+          nodes.push({ kind: "expr", expr: this.src.slice(this.pos + 1, close).trim() });
+          this.pos = close + 1;
           continue;
         }
-        this.pos++;
-        continue;
+        // 非表达式 {（{ } 空体 / 配对失败）：不推进、不丢弃——落入下方文本分支原样并入
       }
-      // 文本
+      // 文本：字面量 { 原样并入（此前被静默丢弃）；块语法与表达式候选交回主循环
       let j = this.pos;
-      while (j < this.src.length && this.src[j] !== "<" && this.src[j] !== "{") j++;
-      if (j > this.pos) nodes.push({ kind: "text", text: this.src.slice(this.pos, j) });
+      let buf = "";
+      while (j < this.src.length) {
+        const ch = this.src[j];
+        if (ch === "<") break;
+        if (ch === "{") {
+          const restJ = this.src.slice(j);
+          const close2 = matchBrace(this.src, j);
+          const probeExpr =
+            close2 > j + 1 && this.src.slice(j + 1, close2).trim().length > 0; // 与主分支发射条件一致——否则互相踢皮球死循环
+          if (this.blockStartsAt(j) || /^\{#if\s/.test(restJ) || /^\{#each\s/.test(restJ) || probeExpr) break;
+          buf += ch;
+          j++;
+          continue;
+        }
+        buf += ch;
+        j++;
+      }
+      if (buf) nodes.push({ kind: "text", text: buf });
       this.pos = j;
     }
     return nodes;
@@ -207,31 +241,35 @@ class Parser {
             i++;
           }
           i++;
-          const vm = /^\{([^{}]+)\}$/.exec(v.trim());
-          if (vm) {
+          // 引号内 {expr} 判别用配对扫描——对象字面量 attr="{{a: 1}}" 同样支持（F-4 第二期）
+          const tv = v.trim();
+          const qb = tv.startsWith("{") ? matchBrace(tv, 0) : -1;
+          if (qb === tv.length - 1 && tv.slice(1, qb).trim().length > 0) {
             dynamic = true;
-            value = vm[1].trim();
+            value = tv.slice(1, qb).trim();
           } else {
             value = v;
           }
         } else if (this.src[i] === "{") {
-          const mm = /^\{([^{}]+)\}/.exec(this.src.slice(i));
-          if (mm) {
+          const close = matchBrace(this.src, i);
+          if (close > i + 1 && this.src.slice(i + 1, close).trim().length > 0) {
             dynamic = true;
-            value = mm[1].trim();
-            i += mm[0].length;
+            value = this.src.slice(i + 1, close).trim();
+            i = close + 1;
           }
         }
       }
       attrs.push({ name, value, dynamic });
     }
-    // 子内容：递归解析直到匹配的闭合标签
-    const children = this.parseContent();
-    const endRe = new RegExp(`</${tag}>`);
-    const rest = this.src.slice(this.pos);
-    const em = endRe.exec(rest);
-    if (!em) parseFail(`<${tag}> 未闭合 — 缺少 </${tag}>`, `补上闭合标签 </${tag}>（HTML void 元素如 <br>/<img>/<input> 无需闭合）`);
-    this.pos += em.index + em[0].length;
+    // 子内容：递归解析（传入本元素标签 → 配对闭合由 parseContent 校验后停在这里）
+    const children = this.parseContent(tag);
+    if (!this.src.startsWith(`</${tag}>`, this.pos)) {
+      parseFail(
+        `<${tag}> 未闭合 — 缺少 </${tag}>`,
+        `补上闭合标签 </${tag}>（HTML void 元素如 <br>/<img>/<input> 无需闭合）`,
+      );
+    }
+    this.pos += tag.length + 3;
     return { kind: "element", tag, component: /^[A-Z]/.test(tag), attrs, children };
   }
 }
@@ -245,6 +283,35 @@ const VOID_TAGS = new Set([
  * 渲染为可行动错误卡，编译路径（compileFunction/dump）在构建期即抛出。 */
 function parseFail(message: string, fix: string): never {
   throw { code: "ATR-101", message, context: {}, fix } as AtrError;
+}
+
+/** 引号感知的 {} 配对扫描：返回与 src[start] 的 { 配对的 } 索引（无配对 → -1）。
+ * 字符串字面量内的花括号不计深度——{x === "}" ? 1 : 2} 一类表达式得以完整摘出。 */
+function matchBrace(src: string, start: number): number {
+  let depth = 0;
+  let q: string | null = null;
+  let i = start;
+  while (i < src.length) {
+    const c = src[i];
+    if (q) {
+      if (c === "\\") i++;
+      else if (c === q) q = null;
+      i++;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      q = c;
+      i++;
+      continue;
+    }
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i++;
+  }
+  return -1;
 }
 
 /**
