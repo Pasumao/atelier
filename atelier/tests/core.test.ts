@@ -103,6 +103,23 @@ describe("transaction store", () => {
 });
 
 describe("transaction store v0.3 (decision 5 — merge / journal / graph)", () => {
+  it("P2-2⑤ equals 选项：TC39 Signal.State 对齐出口——自定义等值视为 no-op（不通知不入账）", async () => {
+    const lenEq = $state("abc", { equals: (a: string, b: string) => a.length === b.length });
+    let runs = 0;
+    $effect(() => {
+      void lenEq.value;
+      runs++;
+    });
+    await Promise.resolve(); // 首跑 flush
+    const base = runs;
+    lenEq.value = "xyz"; // 长度相等 → equals 判等 → no-op
+    await Promise.resolve();
+    expect(runs).toBe(base);
+    lenEq.value = "abcd"; // 长度变化 → 正常通知
+    await Promise.resolve();
+    expect(runs).toBe(base + 1);
+  });
+
   it("named merge: same-name commit at stack top is idempotent — rollback undoes the whole round", () => {
     const a = $state("m0");
     store.commit("merge-round");

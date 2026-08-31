@@ -100,7 +100,11 @@ export function __withTracking<R>(fn: () => R): { result: R; deps: Set<Signal> }
   return withTrack(fn);
 }
 
-export function $state<T>(init: T): Signal<T> {
+export function $state<T>(init: T, options?: { equals?: (a: T, b: T) => boolean }): Signal<T> {
+  // P2-2⑤：TC39 Signal.State（signal-polyfill）语义对齐出口——`equals` 选项决定写入是否视为变更
+  // （等值写入 = no-op，与 polyfill 的 ignores-write 语义一致）。诚实边界：对齐仅限 State 的
+  // equals；Signal.Computed/Watcher/notEqual 等内核暂无对应物（$derived/$effect 为自有调度语义）。
+  const eq = options?.equals ?? Object.is;
   let v = init;
   const sig: Signal<T> = {
     _subs: new Set(),
@@ -110,7 +114,7 @@ export function $state<T>(init: T): Signal<T> {
       return v;
     },
     set value(nv: T) {
-      if (Object.is(nv, v)) return;
+      if (eq(nv, v)) return;
       const prev = v;
       v = nv;
       store.journalPush(sig as Signal, prev, nv); // v0.3 增量事件日志：每变更自动入账

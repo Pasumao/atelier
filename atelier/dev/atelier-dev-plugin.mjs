@@ -18,7 +18,7 @@
  * 审计：非 GET 的 /__atelier/* 与命令回执均追加 .atelier/audit.jsonl。
  */
 import { createRequire } from "node:module";
-import { capturePagePersistent as capturePage } from "./dev-screenshot.mjs";
+import { capturePagePersistent as capturePage, captureA11yPersistent } from "./dev-screenshot.mjs";
 
 export function atelierDevPlugin() {
   const require = createRequire(import.meta.url);
@@ -39,6 +39,7 @@ export function atelierDevPlugin() {
 
   let latestBridgeState;
   let screenshotInflight = null;
+  let a11yInflight = null;
 
   /* ---- downlink (P0-1): queue → SSE broadcast → ack → status poll ---- */
   const sseClients = new Set();
@@ -184,6 +185,21 @@ export function atelierDevPlugin() {
             if (lastErr) throw lastErr;
             audit("screenshot", { bytes: imageBase64.length, pixel: pixelDiff ? pixelDiff.mismatchRatio : null });
             res.end(JSON.stringify({ ok: true, format: "png", imageBase64, pixelDiff, threshold, capturedFrom: appUrl, at: Date.now() }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+          }
+          return;
+        }
+
+        /* ---------- P2-2③ a11y 快照（无障碍树文本化；agent 检视语义优先于像素）---------- */
+        if (url === "/__atelier/a11y") {
+          const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/`;
+          try {
+            a11yInflight ??= captureA11yPersistent({ url: appUrl }).finally(() => { a11yInflight = null; });
+            const r = await a11yInflight;
+            audit("a11y", { nodes: r.nodeCount });
+            res.end(JSON.stringify({ ok: true, a11y: r.a11y, nodeCount: r.nodeCount, capturedFrom: appUrl, at: Date.now() }));
           } catch (e) {
             res.statusCode = 500;
             res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));

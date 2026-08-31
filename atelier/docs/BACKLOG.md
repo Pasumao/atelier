@@ -48,8 +48,16 @@
   bridge 推送载荷增强（graph + 最近 50 条 journal，sig-N 键与 signals 对齐）· 下行新 op 两枚 ·
   MCP 新查询工具 `state.graph`/`state.journal`（23 工具）· `state.snapshot` 同步增强。
   stdio 快乐径 e2e（截图唤起常驻页面 → 活依赖图返回）；4 新用例 88/88 绿；check-skills 31/0。
-- **度量**：框架 vitest 53 → 88 · check-skills 31/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4一批)
-  → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5) → `6538ee1`(文档整理) → `69a1a5d`(P1-4) → `cac2d04`(F-4二批)。
+- **P2-2 / 标准对齐五件套（同日第五批工作）**：① check-skills 新增 **S 门禁**（agentskills.io：name ≤64
+  kebab-case / description ≤1024 / 未知 frontmatter 字段拒绝 / 包结构仅 SKILL.md+scripts+references+assets；
+  负例 fixture 实证会红）· ② MCP **structured error**（isError + structuredContent{code,message,fix}，文本形态
+  不变）+ **ATELIER_TOOLSETS** 按 face 分组按需暴露（23→11 实证）· ③ dev 面 **/​__atelier/a11y** 端点 +
+  MCP `ui.a11y`（无障碍树文本化，42 节点 e2e 实证；与截图共用常驻实例与导航/就绪单一来源）·
+  ④ **DTCG 互导**（`atelier tokens export|import`，roundtrip 实证）· ⑤ `$state` **equals 选项**（TC39
+  Signal.State 对齐出口，Signal.Computed/Watcher 诚实标注未对齐）。5 新用例，93/93 绿。
+- **度量**：框架 vitest 53 → 93 · check-skills 56/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4一批)
+  → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5) → `6538ee1`(文档整理) → `69a1a5d`(P1-4) → `cac2d04`(F-4二批)
+  → `60a5d4d`(P2-1)。
 - **附带发现**：checkpoint.mjs 仓库发现只认 cwd 下 `.git`，子目录运行会误建嵌套仓（已记入尾巴区；
   AGENTS.md 命令行已加"仓库根运行"提示）。
 

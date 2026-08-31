@@ -91,7 +91,7 @@ ChatMessage.atr.ts
 | 审计 | `audit.log` | 全部写操作副作用日志 | P0 |
 | 审计 | `feedback.read` | 读取 specs/ 内人类点踩/批准反馈 | P1 |
 
-> **实现状态（v0.2 脚本态，wire 实达口径）**：**21/21 全部接线**（2026-08-29：P0-1 命令下行通道转绿 checkpoint.list/rollback、state.time_travel；P0 收尾批次转绿 state.get / docs.search / test.run / diff.report / feedback.read——明细见 BACKLOG 进度面板）。工具描述由 `atelier/mcp/mcp-definitions.json` 单源生成。
+> **实现状态（v0.2 脚本态，wire 实达口径）**：**24/24 全部接线**（2026-08-29 P0 批次转绿；2026-08-30 P2-1/P2-2 转绿 state.graph / state.journal / ui.a11y——明细见 BACKLOG 进度面板）。工具描述由 `atelier/mcp/mcp-definitions.json` 单源生成；错误响应 = isError + structuredContent{code,message,fix} 四段结构化映射；`ATELIER_TOOLSETS=query,operation` 可按 face 按需暴露工具子集。
 
 ## 7. atelier.config.json（单一扁平配置）
 

@@ -27,6 +27,8 @@ PROJECT
                                                                          @atelier/review packages (v0.2+)
   atelier sync [--target <dir>]                                    FULL  re-vendor runtime + dev face into
                                                                          an existing app (拉齐到框架当前时点)
+  atelier tokens export|import --in <f> --out <f>                  FULL  W3C DTCG 设计令牌互导
+                                                                         (atelier.config.json ↔ .tokens.json)
 
 AGENT SURFACE
   atelier mcp                                                      FULL  built-in MCP server (stdio)
@@ -135,6 +137,10 @@ switch (cmd) {
     break;
   case "sync":
     runScript("sync-project.mjs", [sub, ...rest]);
+    break;
+  case "tokens":
+    // P2-2④：W3C DTCG 设计令牌互导（export: config→DTCG；import: DTCG→扁平片段）
+    runScript("tokens-dtcg.mjs", [sub, ...rest]);
     break;
   case "review": {
     // MINI（P1-4 落地）：review UI 最小版实跑在 dev 面（/__atelier/review，P2-5 L5）。

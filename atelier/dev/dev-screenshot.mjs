@@ -152,7 +152,8 @@ function drainEvents(cdp, method) {
   }
 }
 
-async function captureOnSession(cdp, { url, settleMs, compareBase64 = null, threshold = 0.12, readyPollMs = 250 }) {
+/** 导航 + 框架级就绪（#app 实际有子节点）——截图与 a11y 快照共用的单一来源（P2-2③ 抽取） */
+async function navigateAndSettle(cdp, { url, settleMs, readyPollMs = 250 }) {
   if (!cdp.__pageEnabled) {
     await cdp.send("Page.enable");
     cdp.__pageEnabled = true;
@@ -185,6 +186,10 @@ async function captureOnSession(cdp, { url, settleMs, compareBase64 = null, thre
     }
   }
   await sleep(settleMs); // let microtask renders / fonts settle
+}
+
+async function captureOnSession(cdp, { url, settleMs, compareBase64 = null, threshold = 0.12, readyPollMs = 250 }) {
+  await navigateAndSettle(cdp, { url, settleMs, readyPollMs });
 
   // 捕获 + 单次重试：captureScreenshot 偶发瞬态挂起（合成器），重试即成功；
   // 重试前重验挂载——防止「优化重载清空 DOM 后把白屏当成功」污染基线
@@ -250,6 +255,55 @@ export async function capturePage({ url, settleMs = 1200, compareBase64 = null, 
   } finally {
     session.close(); // ws close + browser kill + delayed profile cleanup
   }
+}
+
+/* ---------- P2-2③：a11y 快照（无障碍树文本化——agent 检视界面语义优先于像素） ---------- */
+
+/** AX 树 → 缩进文本（role "name" value=…；ignored 节点跳过但其子树照走；封顶 400 行防刷屏） */
+function formatA11yTree(nodes) {
+  const byId = new Map(nodes.map((n) => [n.nodeId, n]));
+  const referenced = new Set();
+  for (const n of nodes) for (const c of n.childIds ?? []) referenced.add(c);
+  const out = [];
+  const walk = (id, depth) => {
+    const n = byId.get(id);
+    if (!n) return;
+    if (!n.ignored) {
+      const role = n.role?.value ?? "";
+      const name = String(n.name?.value ?? "").trim();
+      const val = n.value?.value;
+      const parts = [role];
+      if (name) parts.push(JSON.stringify(name.slice(0, 80)));
+      if (val !== undefined && val !== null && String(val).length) parts.push(`value=${String(val).slice(0, 60)}`);
+      if (parts.length > 1 || role) out.push(`${"  ".repeat(depth)}- ${parts.join(" ")}`);
+    }
+    for (const c of n.childIds ?? []) walk(c, depth + 1);
+  };
+  for (const n of nodes) if (!referenced.has(n.nodeId)) walk(n.nodeId, 0);
+  return out.slice(0, 400).join("\n");
+}
+
+async function a11yOnSession(cdp, { url, readyPollMs = 250 }) {
+  await navigateAndSettle(cdp, { url, settleMs: 150, readyPollMs });
+  const r = await cdp.send("Accessibility.getFullAXTree", {}, 15000);
+  const nodes = (r.nodes ?? []).filter((n) => !n.ignored);
+  return { a11y: formatA11yTree(nodes), nodeCount: nodes.length };
+}
+
+/** P2-2③ 常驻实例 a11y 捕获：与截图共用同一只无头浏览器与崩溃自愈模式（探针→失败销毁重建 ×2）。 */
+export async function captureA11yPersistent({ url, readyPollMs = 50 }) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const session = await getPersistentSession();
+    try {
+      await session.cdp.send("Runtime.evaluate", { expression: "1", returnByValue: true }, 2000);
+      return await a11yOnSession(session.cdp, { url, readyPollMs });
+    } catch (e) {
+      lastErr = e;
+      await destroyPersistentSession();
+    }
+  }
+  throw lastErr;
 }
 
 /* ---------- P0-6：常驻无头实例（崩溃自愈） ---------- */

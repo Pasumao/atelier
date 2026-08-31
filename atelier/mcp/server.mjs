@@ -60,15 +60,27 @@ function flatToJsonSchema(params) {
   };
 }
 
-const TOOLS = DEFS.tools.map((t) => ({
-  name: t.name,
-  description: `[${t.face}]${t.status === "pending" ? " (specified, wiring pending)" : ""} ${t.summary}`,
-  inputSchema: flatToJsonSchema(t.params),
-}));
+/** P2-2② toolsets 分组按需启用：ATELIER_TOOLSETS=query,operation（逗号分隔 face 名）只暴露
+ * 子集——上下文窗口紧张或权限面收敛时用；缺省全部暴露。face 取值见 mcp-definitions.json。 */
+const TOOLSETS = (process.env.ATELIER_TOOLSETS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const TOOLS = DEFS.tools
+  .filter((t) => TOOLSETS.length === 0 || TOOLSETS.includes(t.face))
+  .map((t) => ({
+    name: t.name,
+    description: `[${t.face}]${t.status === "pending" ? " (specified, wiring pending)" : ""} ${t.summary}`,
+    inputSchema: flatToJsonSchema(t.params),
+  }));
 
-/* ---------- tool error helper: every failure is actionable (SPEC §3) ---------- */
+/** P2-2② 四段式错误 → MCP structured error：isError=true + structuredContent{code,message,fix}，
+ * 文本保持原形（"\nfix: ..."）——不破坏既有解析方，宿主可二选一消费。 */
 function toolError(codeText, fixText) {
-  return new Error(`${codeText}\nfix: ${fixText}`);
+  const e = new Error(`${codeText}\nfix: ${fixText}`);
+  const m = /^(ATR-[\w-]+):\s*([\s\S]*)$/.exec(codeText);
+  e.atr = { code: m ? m[1] : "ATR-ERR", message: m ? m[2] : codeText, fix: fixText };
+  return e;
 }
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -145,6 +157,10 @@ async function callTool(name, args) {
   if (name === "state.graph") return bridgeCall("state.graph", {}); // P2-1：依赖图（F-1 收尾）
   if (name === "state.journal")
     return bridgeCall("state.journal", { lines: Math.max(1, Math.min(500, Number(args?.lines ?? 100))) });
+  if (name === "ui.a11y") {
+    const j = await devJson("/__atelier/a11y"); // P2-2③：无障碍树文本化
+    return j;
+  }
   if (name === "audit.log") {
     const j = await devJson(`/__atelier/audit?lines=${Math.max(1, Math.min(500, Number(args?.lines ?? 50)))}`);
     return j.rows;
@@ -500,10 +516,12 @@ async function handle(msg) {
           isError: false,
         });
       } catch (e) {
-        reply(id, {
+        const result = {
           content: [{ type: "text", text: e?.message ?? String(e) }],
           isError: true,
-        });
+        };
+        if (e?.atr) result.structuredContent = e.atr; // P2-2②：四段式结构化映射
+        reply(id, result);
       }
       return;
     }

@@ -36,8 +36,16 @@ const LINE_LIMITS = {
 const TEMPLATE_LIMITS = { "templates/AGENTS.md.template": 60, "templates/llms.txt.template": 120 };
 
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const CLI_VERBS = new Set(["init", "dev", "review", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct", "checkpoint", "mcp", "skills", "compile", "bench"]);
-const FLAGS = new Set(["--ai", "--static", "--electron", "--update", "--no-gate", "--json"]);
+/** Agent Skills 标准（agentskills.io）frontmatter 已知字段——未知字段拒绝（P2-2①） */
+const AGENT_SKILLS_FIELDS = new Set(["name", "description", "license", "allowed-tools", "metadata"]);
+const AGENT_SKILLS_NAME_MAX = 64; // 标准：name ≤64 字符 kebab-case
+const AGENT_SKILLS_DESC_MAX = 1024; // 标准：description ≤1024 字符
+const CLI_VERBS = new Set(["init", "dev", "review", "sync", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct", "checkpoint", "mcp", "skills", "compile", "bench", "tokens"]);
+const FLAGS = new Set([
+  "--ai", "--static", "--electron", "--update", "--no-gate", "--json",
+  "--target", "--name", "--no-ai", "--open", "--root", "--out", "--stdout", "--quiet",
+  "--keep", "--app", "--port", "--no-dsh", "--no-agents", "--no-mcp",
+]);
 const TOOL_PREFIXES = /^(?:registry|tokens|state|ui|docs|checkpoint|test|snapshot|diff|audit|feedback|structure)\./;
 const RUNTIME_API = new Set([
   "component", "$state", "$derived", "$effect", "html", "streamValue", "optimisticList",
@@ -107,6 +115,32 @@ for (const entry of fs.readdirSync(SKILLS)) {
   if (fs.statSync(p).isFile()) fail("A.extra", `stray file under skills/: ${entry} (only <name>/SKILL.md packages allowed)`);
 }
 
+/* S: Agent Skills 标准符合性（agentskills.io，P2-2①）——过门禁 = 40+ 客户端分发通道 */
+/*    标准：SKILL.md 必备 frontmatter（name ≤64 kebab-case + description ≤1024）；已知字段之外拒绝；
+ *    包内只允许 SKILL.md + scripts/ + references/ + assets/（渐进披露三层资产）。 */
+const AGENT_SKILLS_DIRS = new Set(["scripts", "references", "assets"]);
+for (const dir of skillDirs.sort()) {
+  const rel = `${dir}/SKILL.md`;
+  const p = path.join(SKILLS, rel);
+  if (!fs.existsSync(p)) continue; // A.exists 已报
+  const fm = parseFrontmatter(readMd(p));
+  if (!fm) continue; // A.fm 已报
+  if (fm.name && fm.name.length > AGENT_SKILLS_NAME_MAX) fail("S.name", `${rel}: name ${fm.name.length} chars > ${AGENT_SKILLS_NAME_MAX} (agentskills.io)`);
+  else if (fm.name) ok("S.name", `${dir}: ≤${AGENT_SKILLS_NAME_MAX} ok`);
+  if (fm.description && fm.description.length > AGENT_SKILLS_DESC_MAX) fail("S.desc", `${rel}: description ${fm.description.length} chars > ${AGENT_SKILLS_DESC_MAX} (agentskills.io)`);
+  else if (fm.description) ok("S.desc", `${dir}: ≤${AGENT_SKILLS_DESC_MAX} ok`);
+  for (const key of Object.keys(fm)) {
+    if (!AGENT_SKILLS_FIELDS.has(key)) fail("S.fields", `${rel}: unknown frontmatter field "${key}" (agentskills.io 已知字段：${[...AGENT_SKILLS_FIELDS].join(", ")})`);
+  }
+  const pkgFiles = fs.readdirSync(path.join(SKILLS, dir), { withFileTypes: true });
+  for (const f of pkgFiles) {
+    if (f.isFile() && f.name !== "SKILL.md") fail("S.files", `${dir}/${f.name}: 包内仅允许 SKILL.md + scripts/ + references/ + assets/（agentskills.io）`);
+    if (f.isDirectory() && !AGENT_SKILLS_DIRS.has(f.name)) fail("S.files", `${dir}/${f.name}/: 非标准资产目录（agentskills.io 允许 scripts/references/assets）`);
+  }
+  if (!findings.some((f) => f.id === "S.files" && f.msg.startsWith(`${dir}/`))) ok("S.files", `${dir}: 包结构 ok`);
+}
+ok("S.standard", "agentskills.io conformance scan done");
+
 /* C: commands & flags (prose only; exclude frontmatter) */
 for (const dir of skillDirs) {
   const p = path.join(SKILLS, dir, "SKILL.md");
@@ -153,7 +187,7 @@ for (const dir of skillDirs) {
   const p = path.join(SKILLS, dir, "SKILL.md");
   if (!fs.existsSync(p)) continue;
   const text = readMd(p).replace(/^---\r?\n[\s\S]*?\r?\n---/, "");
-  for (const m of stripCode(text).matchAll(/[A-Za-z][\w]*\.[a-z][a-z_]*/g)) {
+  for (const m of stripCode(text).matchAll(/[A-Za-z][\w]*\.[a-z][\w]*/g)) { // 后缀放宽到 \w：ui.a11y 等含数字工具名；误配由 TOOL_PREFIXES 与扩展名排除兜底
     const name = m[0];
     if (!TOOL_PREFIXES.test(name)) continue;
     if (/\.(json|md|ts|mjs)$/.test(name.slice(name.indexOf(".") + 1))) continue;

@@ -44,7 +44,7 @@
 
 ### 阶段二：agent 纵深与标准对齐（建议窗口 2026-10 ~ 11）
 
-> 状态（2026-08-30）：P2-1 ✅（graph/journal 接线，MCP 23 工具；stdio 快乐径 e2e 实证）· P2-2~P2-5 待启动
+> 状态（2026-08-30）：P2-1 ✅（graph/journal 接线，MCP 24 工具；stdio 快乐径 e2e 实证）· P2-2 ✅（标准对齐五件套：S 门禁/structured error+toolsets/a11y 端点/DTCG/equals；Registry 提交待账号就绪）· P2-3~P2-5 待启动
 
 | # | 任务 | 内容与依据 | 估量 |
 |---|---|---|---|

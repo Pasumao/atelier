@@ -162,6 +162,20 @@
    "errors": []
   },
   {
+   "name": "ui.a11y",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Accessibility tree snapshot of the running app as indented text (role, name, value) via the dev face headless session. Semantics-first alternative to ui.screenshot for agents.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "confirmDefault": "auto",
+   "errors": []
+  },
+  {
    "name": "docs.search",
    "face": "query",
    "priority": "P1",
