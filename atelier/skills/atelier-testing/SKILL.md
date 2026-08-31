@@ -41,3 +41,9 @@ verify(() => finalState === "done");   // stream-aware: assert final state, not 
 | Tests green but UI broken | You accepted a snapshot diff — revert baseline and review visually |
 | Flaky snapshot | Freeze timing/seed in test (`playtest.fixed_delta`-style deterministic mode) |
 | `check` red on union | Contract has wide union — switch to literal discriminant |
+
+## Spec discipline (EARS + constitution)
+
+- 开工阅读序：`specs/constitution.md` → `specs/guardrails.md` → 对应 spec → 代码；违反宪法条款的 spec 提案直接拒绝（feedback 注明条款号）。
+- 验收语句用 **EARS**（`WHEN/IF/WHILE/WHERE … THE SYSTEM SHALL …`）——每条落点 = `.atr.spec.ts` 命名用例；没有用例承接的验收不算完成（**规格 = 可执行测试**）。
+- spec 文件 human-owned：可提案修改，不得静默改写。

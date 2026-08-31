@@ -14,11 +14,13 @@
 | stream | `streamValue<T>() → { values, value, done, push, finish }` | streaming text/values; no manual setInterval |
 | optimistic | `optimisticList<T>() → { values, optimisticAdd, commit, revert }` | pending → committed / rollback |
 | store | `store.commit/rollback/timeTravel/list` | named checkpoints; app-state only (source = git, decision 15) |
-| validate | `validateFlat(schema, data)` → `{ ok, error?: AtrError }` | flat schema (no $ref/oneOf) |
+| graph | `store.graph(keyOf?)` | live dependency graph (signals + effect edges); keyOf remaps ids |
+| log | `store.log(n)` | $state mutation journal (seq/at/sig/from/to, bounded ring) |
+| validate | `validateFlat(schema, data)` → `{ ok, error?: AtrError }` | flat schema (no $ref/oneOf); leaf constraints min/max/pattern |
 
 ## Template DSL
 
-`{expr}` · `{#if expr}{:else}{/if}` · `{#each arr as item, idx}{/each}` · `on:click={handler}` · `attr={expr}` · `<StyleBlock scoped>` — expressions are compiled in v0.1 (prototype: subset evaluator).
+`{expr}`（对象/数组字面量 `{{a: x.value}}`、`{a}` 简写）· `{#if}{:else if}{:else}{/if}` · `{#each arr as item, idx [by key]}` · `on:click={handler}` · `attr={expr}`（含对象字面量）· void 元素 `<br>/<img>/<input>` · `<StyleBlock scoped>` — 解析期显式拒绝未闭合/错位结构（ATR-101）。
 
 ## Contract (flat schema)
 

@@ -7,8 +7,10 @@
  * 查询（GET，需 token）
  *  - /__atelier/registry · tokens · docs · state-snapshot
  *  - /__atelier/screenshot                 常驻无头实例截图（P0-6：同 tab 复用，崩溃自愈；视觉真相）
+ *  - /__atelier/a11y                       无障碍树文本化（P2-2③：agent 检视语义优先于像素）
+ *  - /__atelier/agent-health               agent 体检（P2-4：UA 分类台账 + 最近错误，JSON 结构化）
  *  - /__atelier/audit?lines=N              审计日志尾读
- *  - /__atelier/bridge/commands?token=     SSE 命令下行流（页面 EventSource 订阅）
+ *  - /__atelier/bridge/commands?token=     SSE 命令下行流（页面 EventSource 订阅；连接自报 UA → 体检入账）
  * 桥接
  *  - POST /__atelier/bridge/state          页面状态推送（缓存给 state.snapshot）
  *  - POST /__atelier/bridge/enqueue        MCP/CLI 下发命令 {op,args} → SSE 广播
@@ -19,6 +21,17 @@
  */
 import { createRequire } from "node:module";
 import { capturePagePersistent as capturePage, captureA11yPersistent } from "./dev-screenshot.mjs";
+
+/** P2-4 agent 体检：UA 启发式分类（Astro 7 模式借鉴）。诚实边界：启发式可被伪造——
+ * 面向的是检视而非鉴权；页面桥 SSE 连接自报 UA 是最可靠的信号（MCP 工具链调用无 UA）。 */
+function classifyAgent(ua) {
+  const s = String(ua ?? "");
+  if (!s) return "tooling"; // 无 UA：MCP server fetch / curl 等工具链调用
+  if (/HeadlessChrome|Puppeteer|Playwright|electron/i.test(s)) return "headless";
+  if (/^curl|^Wget|python-requests|Claude|GPTBot|anthropic/i.test(s)) return "tooling";
+  if (/Mozilla/i.test(s)) return "human";
+  return "unknown";
+}
 
 export function atelierDevPlugin() {
   const require = createRequire(import.meta.url);
@@ -40,6 +53,13 @@ export function atelierDevPlugin() {
   let latestBridgeState;
   let screenshotInflight = null;
   let a11yInflight = null;
+
+  /* ---- P2-4 agent 体检台账：连接分类 + 最近错误（JSON 结构化，/__atelier/agent-health 出口） ---- */
+  const agentLedger = {
+    startedAt: Date.now(),
+    connections: { human: 0, headless: 0, tooling: 0, unknown: 0 },
+    lastError: null,
+  };
 
   /* ---- downlink (P0-1): queue → SSE broadcast → ack → status poll ---- */
   const sseClients = new Set();
@@ -88,10 +108,28 @@ export function atelierDevPlugin() {
         }
 
         // 审计策略：查询（GET）不入账；一切非 GET（命令/上报回执之外的实际动作）入账
-        if (req.method !== "GET") audit("access", { method: req.method, url: rawUrl.split("?")[0] });
+        if (req.method !== "GET")
+          audit("access", { method: req.method, url: rawUrl.split("?")[0], agent: classifyAgent(req.headers["user-agent"]) });
 
         const url = rawUrl.split("?")[0];
         res.setHeader("Content-Type", "application/json; charset=utf-8");
+
+        // P2-4：agent 体检出口（token 门内，JSON 结构化）
+        if (url === "/__atelier/agent-health") {
+          res.end(
+            JSON.stringify({
+              ok: true,
+              at: Date.now(),
+              uptimeMs: Date.now() - agentLedger.startedAt,
+              connections: agentLedger.connections,
+              sseClients: sseClients.size,
+              bridgeStateAt: latestBridgeState?.at ?? null,
+              lastError: agentLedger.lastError,
+              note: "UA 启发式分类（human/headless/tooling），面向检视不面向鉴权",
+            }),
+          );
+          return;
+        }
 
         /* ---------- query face ---------- */
         if (url === "/__atelier/registry") {
@@ -340,6 +378,9 @@ loadState(); loadImages(); loadHistory();
         }
         if (url === "/__atelier/bridge/commands") {
           // SSE downlink stream
+          const agent = classifyAgent(req.headers["user-agent"]);
+          agentLedger.connections[agent] = (agentLedger.connections[agent] ?? 0) + 1;
+          audit("page-connect", { agent, ua: String(req.headers["user-agent"] ?? "") }); // P2-4：结构化日志
           res.setHeader("Content-Type", "text/event-stream");
           res.setHeader("Cache-Control", "no-cache");
           res.setHeader("Connection", "keep-alive");
@@ -373,6 +414,7 @@ loadState(); loadImages(); loadHistory();
           try {
             const j = JSON.parse(body);
             resolved.set(j.id, { status: "done", ok: !!j.ok, result: j.result, error: j.error, at: new Date().toISOString() });
+            if (!j.ok && j.error) agentLedger.lastError = String(j.error).slice(0, 300); // P2-4
             audit("command.ack", { id: j.id, ok: j.ok });
             res.end(JSON.stringify({ ok: true }));
           } catch {

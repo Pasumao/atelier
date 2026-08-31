@@ -55,9 +55,17 @@
   MCP `ui.a11y`（无障碍树文本化，42 节点 e2e 实证；与截图共用常驻实例与导航/就绪单一来源）·
   ④ **DTCG 互导**（`atelier tokens export|import`，roundtrip 实证）· ⑤ `$state` **equals 选项**（TC39
   Signal.State 对齐出口，Signal.Computed/Watcher 诚实标注未对齐）。5 新用例，93/93 绿。
+- **P2-3 / specs v2（同日第六批）**：`specs/constitution.md`（Spec Kit 同款概念：H1-H6 + token 单源/
+  事务纪律/快照纪律项目化，修宪=单独 spec+人批准）· spec 模板验收改 **EARS** 记法（WHEN/IF/WHILE/WHERE
+  … THE SYSTEM SHALL …，每条落点=.atr.spec.ts 命名用例）· testing 技能补 spec discipline 段 ·
+  llms.txt 模板同步今日运行时真值（graph/log/对象字面量/else-if/void/ATR-101）。
+- **P2-4 / dev 面 agent 体检（同日第六批）**：UA 启发式分类（human/headless/tooling，诚实标注面向检视
+  不面向鉴权）· 页面桥 SSE 连接自报 UA 入账 · `page-connect`/`access` 结构化审计带 agent 字段 ·
+  `/__atelier/agent-health` 端点（连接台账 + 最近错误 + bridge 状态时点）。e2e 实证：截图唤起 headless
+  页面 → `connections.headless=1` 入账。
 - **度量**：框架 vitest 53 → 93 · check-skills 56/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4一批)
   → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5) → `6538ee1`(文档整理) → `69a1a5d`(P1-4) → `cac2d04`(F-4二批)
-  → `60a5d4d`(P2-1)。
+  → `60a5d4d`(P2-1) → `dba9827`(P2-2)。
 - **附带发现**：checkpoint.mjs 仓库发现只认 cwd 下 `.git`，子目录运行会误建嵌套仓（已记入尾巴区；
   AGENTS.md 命令行已加"仓库根运行"提示）。
 

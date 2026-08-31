@@ -40,6 +40,7 @@ Tools accept **flat** schemas (no `$ref`/`oneOf`) — identical to component con
 - `state.graph`：活依赖图——signals（sig-N 键+kind）与每条 effect 依赖边；sig-N 与 `state.snapshot.signals` 同一键空间；适合改代码前判断"动哪个信号会影响哪些 effect"。
 - `state.journal`：$state 变更事件日志（时间升序，sig/from/to）——`state.snapshot` 推送只带最近 50 条，本工具可 `lines` 取更深（≤500）；"谁改了 sig-2"从这里查。
 - `ui.a11y`：无障碍树缩进文本（role/name/value）——检视界面语义优先于像素（Playwright MCP 同款结论）；`ATELIER_TOOLSETS=query` 可按 face 只暴露子集工具。
+- `agent-health` 端点（`/__atelier/agent-health`，token 门内）：连接 UA 分类台账（human/headless/tooling）+ 最近错误——"页面上是谁在操作"从这里看；UA 启发式面向检视不面向鉴权。
 - MCP 错误为结构化四段：`isError=true` + `structuredContent{code,message,fix}`，文本形态不变（`\nfix: ...`）——两种消费方式任选。
 - `docs.search`：语料 = 框架 `atelier/docs/` + skill 包 + 工作区 `AGENTS.md` + 应用 `llms.txt`；返回 top-5 带摘录。
 - `test.run`：跑应用 `pnpm test`（vitest run 同一表面），180s 上限；`filter` 是 vitest 文件名过滤（禁 shell 元字符）。
