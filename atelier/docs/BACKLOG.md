@@ -63,9 +63,12 @@
   不面向鉴权）· 页面桥 SSE 连接自报 UA 入账 · `page-connect`/`access` 结构化审计带 agent 字段 ·
   `/__atelier/agent-health` 端点（连接台账 + 最近错误 + bridge 状态时点）。e2e 实证：截图唤起 headless
   页面 → `connections.headless=1` 入账。
+- **P2-5 / 对外叙事件（同日第七批）**：根 README 重写为定位面——AX（Agentic Experience）叙事 +
+  四无人区按**四段式自检**呈现（主张/机制/实测/复现命令，凡 claim 必有实测支撑）+ 标准对齐地板段 +
+  诚实纪律前置（正确率主张克制条款、FULL/MINI/STUB、双门禁）。**措辞终审待用户**（对外发布前）。
 - **度量**：框架 vitest 53 → 93 · check-skills 56/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4一批)
   → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5) → `6538ee1`(文档整理) → `69a1a5d`(P1-4) → `cac2d04`(F-4二批)
-  → `60a5d4d`(P2-1) → `dba9827`(P2-2)。
+  → `60a5d4d`(P2-1) → `dba9827`(P2-2) → `464efe7`(P2-3/4)。
 - **附带发现**：checkpoint.mjs 仓库发现只认 cwd 下 `.git`，子目录运行会误建嵌套仓（已记入尾巴区；
   AGENTS.md 命令行已加"仓库根运行"提示）。
 
