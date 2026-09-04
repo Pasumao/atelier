@@ -9,8 +9,9 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { mountComponent, type ComponentDef } from "../../../runtime/template.ts";
+import { initTokens, mountComponent, type ComponentDef } from "../../../runtime/template.ts";
 import { validateFlat } from "../../../runtime/contract.ts";
+import { streamValue } from "../../../runtime/primitives.ts";
 import { findByTag, makeContainer, serialize } from "../../../tests/dom-shim.ts";
 import { stripComments } from "./strip-comments.ts";
 
@@ -50,7 +51,7 @@ async function mount(file: string, name: string, props: Record<string, unknown>)
 
 (TASK ? describe : describe.skip)(`M3 acceptance [${TASK || "none"}]`, () => {
   it("task 已选定", () => {
-    expect(TASK).toMatch(/^task[123]-(counter|stream|rollback)$/);
+    expect(TASK).toMatch(/^task[1-6]-(counter|stream|rollback|agent-cards|txn-board|token-discipline)$/);
     expect(fs.existsSync(ATTEMPT), `attempt 目录存在：${ATTEMPT}`).toBe(true);
   });
 
@@ -100,6 +101,92 @@ async function mount(file: string, name: string, props: Record<string, unknown>)
     await click("rollback");
     expect(serialize(container)).toContain('"1"');
     expect(serialize(container)).not.toContain('"beta"');
+  });
+
+  it("task4-agent-cards：流式解析 + keyed each + 状态徽标 + 迟到推送", async () => {
+    if (TASK !== "task4-agent-cards") return;
+    const mod: any = await import(pathToFileURL(path.join(ATTEMPT, "src", "components", "ToolCallPanel.atr.ts")).href);
+    expect(mod.runDemo, "必须导出 runDemo()").toBeTruthy();
+    const s = mod.runDemo() as ReturnType<typeof streamValue<string>>;
+    const { container } = await mount("ToolCallPanel.atr.ts", "ToolCallPanel", { stream: s });
+    const ser = () => serialize(container);
+    // 三张卡 + 名字与徽标一一对应
+    expect(ser()).toContain('"search"');
+    expect(ser()).toContain('"read"');
+    expect(ser()).toContain('"write"');
+    expect(ser()).toContain('"✓"');
+    expect(ser()).toContain('"✗"');
+    expect(ser()).toContain('"⏳"');
+    // 卡序 = 流序（t1 < t2 < t3）
+    const i = (n: string) => ser().indexOf(`"${n}"`);
+    expect(i("search")).toBeLessThan(i("read"));
+    expect(i("read")).toBeLessThan(i("write"));
+    // 迟到推送：流仍在推进时新卡自动出现（流式响应性）
+    s.push('{"id":"t4","name":"deploy","status":"done"}');
+    await flush();
+    expect(ser()).toContain('"deploy"');
+  });
+
+  it("task4-agent-cards：乱序流按键复用（DOM 顺序跟随流序）", async () => {
+    if (TASK !== "task4-agent-cards") return;
+    const s2 = streamValue<string>();
+    s2.push('{"id":"t2","name":"read","status":"running"}');
+    s2.push('{"id":"t3","name":"write","status":"error"}');
+    s2.push('{"id":"t1","name":"search","status":"done"}');
+    const { container } = await mount("ToolCallPanel.atr.ts", "ToolCallPanel", { stream: s2 });
+    const i = (n: string) => serialize(container).indexOf(`"${n}"`);
+    expect(i("read")).toBeLessThan(i("write"));
+    expect(i("write")).toBeLessThan(i("search"));
+  });
+
+  it("task5-txn-board：父子组合 + store 事务 + 子组件无私有状态", async () => {
+    if (TASK !== "task5-txn-board") return;
+    const itemMod: any = await import(pathToFileURL(path.join(ATTEMPT, "src", "components", "TxnItem.atr.ts")).href);
+    expect(itemMod.TxnItem, "TxnItem.atr.ts 必须导出 TxnItem").toBeTruthy();
+    const itemSrc = fs.readFileSync(path.join(ATTEMPT, "src", "components", "TxnItem.atr.ts"), "utf8");
+    expect(stripComments(itemSrc), "TxnItem 不得自建 $state（状态上提到父组件）").not.toMatch(/\$state\b/);
+    const registry = new Map<string, ComponentDef>();
+    registry.set("TxnItem", itemMod.TxnItem);
+    const mod: any = await import(pathToFileURL(path.join(ATTEMPT, "src", "components", "TxnBoard.atr.ts")).href);
+    expect(mod.TxnBoard, "TxnBoard.atr.ts 必须导出 TxnBoard").toBeTruthy();
+    const container = makeContainer();
+    mountComponent(mod.TxnBoard, {}, container, registry, validate);
+    await flush();
+    expect(serialize(container)).toContain('"alpha"');
+    expect(serialize(container)).toContain('" ×"');
+    const click = async (label: string) => {
+      const b = findByText(container, label);
+      expect(b, `按钮「${label}」存在`).toBeTruthy();
+      b.dispatchEvent({ type: "click" });
+      await flush();
+    };
+    await click("commit");
+    await click("add");
+    expect(serialize(container)).toContain('"beta"');
+    expect(serialize(container)).toContain('"2"');
+    await click("rollback");
+    expect(serialize(container)).not.toContain('"beta"');
+    expect(serialize(container)).not.toContain('"2"');
+    expect(serialize(container)).toContain('"alpha"');
+  });
+
+  it("task6-token-discipline：token 单源 + ATR-204 + 逃生舱登记", async () => {
+    if (TASK !== "task6-token-discipline") return;
+    const cfg = JSON.parse(fs.readFileSync(path.join(ATTEMPT, "atelier.config.json"), "utf8"));
+    expect(cfg.tokens?.color?.accent, "config 必须新增 tokens.color.accent").toBeTruthy();
+    const testSrc = fs.readFileSync(path.join(ATTEMPT, "tests", "styling-discipline.test.ts"), "utf8");
+    expect(testSrc).toContain('"PricingCard.atr.ts"'); // SCOPED_ALLOWLIST 已登记
+    const src = fs.readFileSync(path.join(ATTEMPT, "src", "components", "PricingCard.atr.ts"), "utf8");
+    const style = /<style[^>]*>([\s\S]*?)<\/style>/i.exec(src)?.[1] ?? "";
+    expect(style, "组件必须含 <style scoped> 且引用新 token").toContain("var(--color-accent)");
+    expect(style).toContain("var(--space-md)");
+    // 运行时路径：以 attempt 配置初始化 tokenState 再挂载——引用未定义 token 会渲染 ATR-204 错误卡
+    initTokens({ tokens: cfg.tokens });
+    const { container } = await mount("PricingCard.atr.ts", "PricingCard", { plan: "Pro" });
+    const ser = serialize(container);
+    expect(ser).toContain('"Pro"');
+    expect(ser).toContain('"●"');
+    expect(ser, "出现 ATR-204 = 引用了未定义 token").not.toContain("ATR-204");
   });
 });
 

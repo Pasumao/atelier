@@ -1,20 +1,24 @@
 {
   "task": "task1-counter",
   "attempt": "D:/Agentic/atelier/benchmarks/m3/reference/task1-counter",
-  "at": "2026-08-30T11:34:38.294Z",
+  "at": "2026-09-04T15:43:19.850Z",
   "ok": true,
   "exitCode": 0,
   "summary": {
-    "tests": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m7 passed\u001b[39m\u001b[22m\u001b[90m (7)\u001b[39m"
+    "tests": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m11 passed\u001b[39m\u001b[22m\u001b[90m (11)\u001b[39m"
   },
   "tail": [
-    "Already up to date",
-    "Done in 386ms using pnpm v11.21.0",
+    "│                                          │",
+    "│   Update available! 11.21.0 → 11.25.0.   │",
+    "│   Changelog: https://pnpm.io/v/11.25.0   │",
+    "│     To update, run: pnpm add -g pnpm     │",
+    "│                                          │",
+    "╰──────────────────────────────────────────╯",
     "\u001b[1m\u001b[30m\u001b[46m RUN \u001b[49m\u001b[39m\u001b[22m \u001b[36mv4.1.11 \u001b[39m\u001b[90mD:/Agentic/atelier\u001b[39m",
-    "\u001b[32m✓\u001b[39m benchmarks/m3/harness/acceptance.spec.ts \u001b[2m(\u001b[22m\u001b[2m7 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 72\u001b[2mms\u001b[22m\u001b[39m",
+    "\u001b[32m✓\u001b[39m benchmarks/m3/harness/acceptance.spec.ts \u001b[2m(\u001b[22m\u001b[2m11 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 51\u001b[2mms\u001b[22m\u001b[39m",
     "\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m",
-    "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m7 passed\u001b[39m\u001b[22m\u001b[90m (7)\u001b[39m",
-    "\u001b[2m   Start at \u001b[22m 19:34:37",
-    "\u001b[2m   Duration \u001b[22m 425ms\u001b[2m (transform 97ms, setup 0ms, import 177ms, tests 72ms, environment 0ms)\u001b[22m"
+    "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m11 passed\u001b[39m\u001b[22m\u001b[90m (11)\u001b[39m",
+    "\u001b[2m   Start at \u001b[22m 23:43:18",
+    "\u001b[2m   Duration \u001b[22m 848ms\u001b[2m (transform 93ms, setup 0ms, import 180ms, tests 51ms, environment 0ms)\u001b[22m"
   ]
 }

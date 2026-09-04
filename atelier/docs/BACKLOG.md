@@ -72,6 +72,18 @@
 - **附带发现**：checkpoint.mjs 仓库发现只认 cwd 下 `.git`，子目录运行会误建嵌套仓（已记入尾巴区；
   AGENTS.md 命令行已加"仓库根运行"提示）。
 
+### 已完成（2026-08-31 · P3-1 M3 加难任务层落地，会话归档）
+
+- **P3-1 前置 / M3 加难任务层 task4-6**（挂起区转正，候选源自 WAVES-1-5-REPORT §4）：
+  `task4-agent-cards`（流式输入 + $derived 解析 + keyed each 按 id 复用 + {:else if} 徽标；断言含乱序流
+  顺序与迟到推送响应性）· `task5-txn-board`（父子组合 registry 接线 + 对象字面量 props + store
+  commit/add/rollback；子组件禁 $state 静态检查）· `task6-token-discipline`（config 增补语义 token +
+  SCOPED_ALLOWLIST 逃生舱登记 + ATR-204 运行时校验；harness 以 attempt 配置 initTokens 后挂载，多文件产出）。
+  protocol.md / grade.mjs / acceptance.spec.ts 同步扩张；dom-shim 补 style.setProperty 最小面。
+  六正控回归全 PASS（2026-09-04 复核）+ 框架 93/93 绿 + grader fixtures（comment-only PASS /
+  real-timer FAIL）保持。**诚实边界**：任务层就绪 ≠ 实验完成——三臂出数仍待 ROADMAP 阶段三窗口执行；
+  北极星判据继续以加难层为准（task1-3 全平数据不再引用）。
+
 ## 活跃队列
 
 ### F 线 — 功能债（决策书承诺未兑现，壮大框架的主菜）
@@ -112,5 +124,5 @@
 
 ### 挂起区（等 F 线里程碑后启动）
 
-- M3 加难任务层 task4-6（候选见 `benchmarks/m3/results/WAVES-1-5-REPORT.md` §4）；
+- ~~M3 加难任务层 task4-6~~ ✅ **已转正落地（2026-08-31，见上方归档区）**；
 - 干扰面实验（不给源码只给 CLI/错误输出）——技能包价值（核心竞争力）的决定性检验。

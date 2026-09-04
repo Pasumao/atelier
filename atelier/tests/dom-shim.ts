@@ -39,7 +39,10 @@ class MElement {
   childNodes: AnyNode[] = [];
   parentNode: AnyNode = null;
   listeners = new Map<string, ((e: unknown) => void)[]>();
-  style: Record<string, string> = {};
+  /** CSSStyleDeclaration 最小面：initTokens 走 setProperty 写 CSS 变量（P3-1 task6 评分依赖） */
+  style: Record<string, string> & { setProperty: (k: string, v: string) => void } = {
+    setProperty: (k: string, v: string) => this.setAttribute(k, v),
+  };
 
   constructor(tag: string, type: "element" | "fragment" = "element") {
     this.tag = tag;

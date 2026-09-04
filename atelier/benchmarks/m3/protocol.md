@@ -18,6 +18,16 @@
 2. `task2-stream` — 流式卡片：streamValue push/finish（自动评分 + 源码禁打字机检查）
 3. `task3-rollback` — 状态回滚：store.commit/rollback 可视化（自动评分）
 
+### 加难层（P3-1 转正；任务层落地 2026-08-31，六正控回归 2026-09-04 全绿；天花板效应的解药）
+
+4. `task4-agent-cards` — 工具调用卡片：流式输入 + $derived 解析 + keyed each 按 id 复用 + {:else if} 状态徽标 + 迟到推送（自动评分：含乱序流顺序断言）
+5. `task5-txn-board` — 跨组件状态事务：父子组合（registry 接线）+ 对象字面量 props + store commit/add/rollback；子组件禁 $state（静态检查）（自动评分）
+6. `task6-token-discipline` — 样式纪律陷阱：config 增补语义 token + scoped 逃生舱登记 + ATR-204 运行时校验（harness 以 attempt 配置 initTokens 后挂载，引用未定义 token = 错误卡 = fail）（自动评分：多文件产出）
+
+难度递进 rationale：task1-3 单文件单机制（冒烟正控层，已知全平）；task4-6 要求多机制组合/多文件纪律/
+对守卫文档的阅读理解——预期拉开 skill 臂与 noskill/react 臂差距，使 §7 判据重新有效。
+`reference/` 六分任务参考解为正控样本：**改评分器后必跑六正控回归**（grade.mjs 逐个 PASS）。
+
 ## 首遍正确率（first-pass rate）与返工
 
 - 一次 run = 一个全新臂会话完成任务书，产出 attempt 目录（约定布局见 briefs）。

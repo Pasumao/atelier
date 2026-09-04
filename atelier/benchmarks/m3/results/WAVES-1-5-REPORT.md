@@ -62,6 +62,10 @@ react    runs=15  firstPass=100%
 "工具调用卡片"；跨组件状态事务；带 ATR-204 token 陷阱的样式任务），或引入**干扰面**（不给 runtime
 源码、只给公开 CLI/错误输出）。当前三任务保留为「冒烟正控」层。
 
+> 转正注记（2026-08-31）：三候选已落地为 `benchmarks/m3/tasks/task4-agent-cards` / `task5-txn-board` /
+> `task6-token-discipline`（参考解 + harness 扩张 + 六正控回归全绿，见 protocol.md「加难层」）；
+> 三臂出数待 ROADMAP 阶段三窗口执行。
+
 ## 5. 基础设施事件记录（影响可信度的因素，如实申报）
 
 - wave-1~3（2026-08-29）：子代理批跑高崩溃率——wave-1 首发 9 个死 4；wave-2 死 5/9；重试批全秒挂；

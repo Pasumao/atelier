@@ -17,6 +17,9 @@ const TASKS = {
   "task1-counter": "Counter.atr.ts",
   "task2-stream": "StreamCard.atr.ts",
   "task3-rollback": "RollbackDemo.atr.ts",
+  "task4-agent-cards": "ToolCallPanel.atr.ts", // 加难层（P3-1）：流式 + keyed each + 嵌套作用域
+  "task5-txn-board": "TxnBoard.atr.ts", // 加难层：父子组合 + store 事务（还需 TxnItem.atr.ts）
+  "task6-token-discipline": "PricingCard.atr.ts", // 加难层：token 纪律 + 逃生舱（还需 config + 守卫测试）
 };
 
 function die(message, fix) {

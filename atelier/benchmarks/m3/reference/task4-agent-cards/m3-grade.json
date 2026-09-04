@@ -1,7 +1,7 @@
 {
-  "task": "task3-rollback",
-  "attempt": "D:/Agentic/atelier/benchmarks/m3/reference/task3-rollback",
-  "at": "2026-09-04T15:43:22.912Z",
+  "task": "task4-agent-cards",
+  "attempt": "D:/Agentic/atelier/benchmarks/m3/reference/task4-agent-cards",
+  "at": "2026-09-04T15:43:24.419Z",
   "ok": true,
   "exitCode": 0,
   "summary": {
@@ -9,12 +9,12 @@
   },
   "tail": [
     "Already up to date",
-    "Done in 318ms using pnpm v11.21.0",
+    "Done in 313ms using pnpm v11.21.0",
     "\u001b[1m\u001b[30m\u001b[46m RUN \u001b[49m\u001b[39m\u001b[22m \u001b[36mv4.1.11 \u001b[39m\u001b[90mD:/Agentic/atelier\u001b[39m",
-    "\u001b[32m✓\u001b[39m benchmarks/m3/harness/acceptance.spec.ts \u001b[2m(\u001b[22m\u001b[2m11 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 43\u001b[2mms\u001b[22m\u001b[39m",
+    "\u001b[32m✓\u001b[39m benchmarks/m3/harness/acceptance.spec.ts \u001b[2m(\u001b[22m\u001b[2m11 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 42\u001b[2mms\u001b[22m\u001b[39m",
     "\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m",
     "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m11 passed\u001b[39m\u001b[22m\u001b[90m (11)\u001b[39m",
-    "\u001b[2m   Start at \u001b[22m 23:43:22",
-    "\u001b[2m   Duration \u001b[22m 339ms\u001b[2m (transform 86ms, setup 0ms, import 158ms, tests 43ms, environment 0ms)\u001b[22m"
+    "\u001b[2m   Start at \u001b[22m 23:43:24",
+    "\u001b[2m   Duration \u001b[22m 332ms\u001b[2m (transform 84ms, setup 0ms, import 151ms, tests 42ms, environment 0ms)\u001b[22m"
   ]
 }
