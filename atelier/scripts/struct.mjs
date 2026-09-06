@@ -150,6 +150,36 @@ function probeChecks(root) {
   if (!manifestOk && !has("atelier.config.json"))
     add({ id: "FACT_MANIFEST", layer: 3, severity: "INFO", detail: "no component registry found yet (fine before first component)", fix: "exporting a component creates one automatically in full Atelier" });
 
+  // ---- token 引用静态对账（2026-09-06 锐评整改：struct 检出力补强，构建期镜像运行时 ATR-204）----
+  // 扫描 *.atr.ts 的 <style> 块 var(--x) 引用，对账 atelier.config.json token 单源；
+  // 判 ERROR 的口径与运行时 injectScopedStyle 完全一致（引用未定义 token = 渲染 ATR-204 错误卡
+  // = 真实缺陷，"不假红"纪律不破）。config 缺失时不判（无单源可对账，别处可能定义）。
+  try {
+    const cfgRaw = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    const known = new Set();
+    for (const [group, map] of Object.entries(cfgRaw.tokens ?? {}))
+      for (const name of Object.keys(map ?? {})) known.add(`--${group}.${name}`.replaceAll(".", "-"));
+    if (known.size > 0) {
+      const comps = [...findSuffixDeep(root, ".atr.ts", 6)];
+      const missing = [];
+      for (const f of comps) {
+        const src = fs.readFileSync(f, "utf8");
+        for (const m of src.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) {
+          for (const v of m[1].matchAll(/var\(\s*(--[\w-]+)\s*\)/g)) {
+            if (!known.has(v[1])) missing.push(`${path.relative(root, f)} → ${v[1]}`);
+          }
+        }
+      }
+      add(
+        missing.length === 0
+          ? { id: "FACT_TOKEN_REFS", layer: 3, severity: null, detail: `${comps.length} component file(s): every var(--token) resolves against config single source` }
+          : { id: "FACT_TOKEN_REFS", layer: 3, severity: "ERROR", detail: `${missing.length} unresolved token reference(s) — runtime renders ATR-204 error card: ${missing.slice(0, 4).join(" · ")}${missing.length > 4 ? " …" : ""}`, fix: "add the token to atelier.config.json, or reference an existing one (token single source, decision 8/16)" },
+      );
+    }
+  } catch {
+    /* config 不可解析已由 FACT_CONFIG_PARSE 报告，此处不重复 */
+  }
+
   /* ---- 4 intent ---- */
   const coSpecs = [...findSuffixDeep(root, ".atr.md", 6)];
   const coSpecTests = [...findSuffixDeep(root, ".atr.spec.ts", 6)];

@@ -37,7 +37,9 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 
 ### 候选池（锐评衍生 + 既有候选，按需触发，未排期）
 
-- **struct check 检出力补强**：当前 ERROR 仅 4 种（config/manifest/existsSync 级）——把 `.atr.spec.ts` 用例与 manifest 组件集不一致、token 引用不存在键等真实违例升 ERROR，或诚实降调"六层结构公理"措辞（名实对齐，与 README 措辞终审合并处理）。
+- ~~struct check 检出力补强~~ → **已落地（2026-09-06）**：新增 `FACT_TOKEN_REFS`（*.atr.ts style 块
+  var(--token) 对账 config 单源；未解析引用 = ERROR——构建期镜像运行时 ATR-204，"不假红"不破；
+  红检/绿检双实证）。名实对齐：六层现在有真实代码级 ERROR 检查三种（幽灵组件/manifest 解析/token 对账）。
 - **schema 编译期提取**：contract.ts 完整版承诺（TS 类型 AST → schema），替代手写组件元数据。
 - **真实浏览器测试转正**：113 用例全跑在 dom-shim 上；snapshot-smoke 是唯一真实浏览器路径且 continue-on-error——候选 = CI 中把 snapshot-smoke 升正式 gate（需 per-platform baseline）。
 - 属性级指令（on:/bind: 族，归 F-4 剩余）· radius 纪律（F-3 剩余）。
