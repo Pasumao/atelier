@@ -46,6 +46,8 @@
     node atelier/benchmarks/m3/grade.mjs --task task1-counter --attempt <dir>   # 评一个 attempt
     node atelier/benchmarks/m3/report.mjs --results <dir|file>                  # 汇总出数 + §7 判定
 
+三臂 run 的逐步执行操作卡 = [RUNBOOK.md](RUNBOOK.md)（attempt 布局/prompt 纪律/污染处置/入册格式，2026-09-06）。
+
 `reference/` 内有三分任务的参考解（**正控样本**：评分器必须给 pass；改动评分器后必跑正控回归）。
 
 > 实现注记（2026-08-29）：atelier 臂 attempt 的 src/runtime 以 junction 指向框架 atelier/runtime（同一份实现），保证评分 harness 单一模块实例——vendored 拷贝会被 vite 视为独立模块，导致跨实例信号不追踪（对受控代理透明，不影响臂设定）。

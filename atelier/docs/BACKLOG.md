@@ -82,7 +82,9 @@
   protocol.md / grade.mjs / acceptance.spec.ts 同步扩张；dom-shim 补 style.setProperty 最小面。
   六正控回归全 PASS（2026-09-04 复核）+ 框架 93/93 绿 + grader fixtures（comment-only PASS /
   real-timer FAIL）保持。**诚实边界**：任务层就绪 ≠ 实验完成——三臂出数仍待 ROADMAP 阶段三窗口执行；
-  北极星判据继续以加难层为准（task1-3 全平数据不再引用）。
+  北极星判据继续以加难层为准（task1-3 全平数据不再引用）。**出数前置（2026-09-06）**：
+  逐臂执行操作卡已就绪 = `benchmarks/m3/RUNBOOK.md`（attempt 布局/prompt 纪律/污染处置/入册格式，
+  ≥90 run 矩阵），执行仍需逐臂独立会话（诚实边界不变）。
 
 ### 已完成（2026-09-06 · P3-4 API diff 门禁与漂移度量原型，会话归档）
 
