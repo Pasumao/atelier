@@ -64,6 +64,14 @@
       "run": 1,
       "firstPass": true,
       "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task4-agent-cards",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1,
+      "note": "brief v2 (sync-push disambiguation) validation run"
     }
   ]
 }

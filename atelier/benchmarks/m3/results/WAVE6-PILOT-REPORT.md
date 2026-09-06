@@ -11,7 +11,7 @@
 | 臂 | firstPass | 明细 |
 |---|---|---|
 | noskill | 3/3 | task4/5/6 全 PASS（机械评分） |
-| skill | 2/3 | task4 FAIL（见发现①）；task5/6 PASS |
+| skill | 2/3（r1）；**task4 r2（brief v2 验证跑）PASS → 歧义整改闭环** |
 | react | 3/3 | 盲评 9 / 8.5 / 9.5（≥8 计 pass） |
 
 数据：`runs-wave6-pilot.json`（report.mjs 判定：N/A — 数据不足，诚实拒绝出结论）。
@@ -27,6 +27,8 @@
 3. **观察信号（不作主张）**：noskill 全过的"天花板"苗头在加难层仍有迹象（n=1 不可引用）；
    skill 臂唯一 FAIL 恰是行为差异（异步流）而非能力缺失——提醒判据要区分"错误"与"合法但
    不合 harness 预设"。
+
+**发现①闭环**：brief v2 消歧后重跑同格（skill.task4 r2）→ 机械评分 PASS，整改有效。
 
 ## 后续
 

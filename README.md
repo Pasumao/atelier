@@ -1,14 +1,17 @@
 # Atelier — 为 AI 编程代理设计的前端框架
 
 > **定位一句话**：不参与"更快渲染"的主流竞赛；下注"当编码代理成为前端第一类使用者，框架应内建契约、检视、恢复与结构公理"。
-> 备选 slogan（待定稿）：意图进，界面出 / *Intent in, interface out.*
-> <!-- AUDIT: 2026-09-06 机器核过事实项；措辞终审待用户 -->
+> Slogan（措辞终审 2026-09-06，用户全权委托拍板）：**意图进，界面出 / *Intent in, interface out.***
 >
 > 本工作区即框架仓库（script-form v0.2）。框架规格见 `atelier/docs/`；缺口与改进队列 = `atelier/docs/BACKLOG.md`；路线计划 = `atelier/docs/ROADMAP.md`；常用命令 = `AGENTS.md`。
 
 ## Why：AX（Agentic Experience）是新的第一公民
 
 主流框架在 2026 年把 agent 基建当**外挂**补上（AGENTS.md 生成器、MCP 检视插件、agent 检测 dev server）——已成为及格线。Atelier 的路径不同：把 agent 当**第一类使用者**，从框架第一行开始内建它需要的东西——机器可读契约、可检视状态、双轨可逆、机检门禁。对应的新词汇：**AX**（Agentic Experience，相对 UX）、**agentic engineering**（相对 frontend engineering）。框架本体就是 agent 最佳实践的框架化实现，而不是另一份文档。
+
+## License
+
+MIT（见 LICENSE）。
 
 ## 四无人区（对比 2026-08 全量扫描后仍独占；每条按四段式自检：主张/机制/实测/复现）
 

@@ -70,4 +70,4 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
   （诚实拒绝）。**真实产出**：①抓出 task4 brief 同步/异步歧义（skill 臂合法异步流被 harness 同步
   断言 FAIL）→ brief v2 已消歧；②逐臂管线全链路（attempt+junction+子代理单发+机械评分+盲评）走通；
   D-1/D-4 已拍板（§5）。明细 `results/WAVE6-PILOT-REPORT.md` · `results/runs-wave6-pilot.json`。
-  **下一步**：brief v2 后跑正式波（每臂×每任务×5 runs）。
+  **brief v2 已验证**（skill.task4 r2 重跑 PASS，整改闭环）。**下一步**：正式波（每臂×每任务×5 runs）。
