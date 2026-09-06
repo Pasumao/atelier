@@ -97,6 +97,8 @@ jobs:
         working-directory: ${{ runner.temp }}/smoke-app
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then export ATELIER_EDGE_PATH=/usr/bin/google-chrome; fi
+          ls -1 /usr/bin 2>/dev/null | grep -i chrom || echo NO_CHROME_IN_USR_BIN
+          ls -1 /opt/google/chrome/chrome 2>/dev/null || echo NO_CHROME_IN_OPT
           node "$GITHUB_WORKSPACE/atelier/cli.mjs" snapshot save
           node "$GITHUB_WORKSPACE/atelier/cli.mjs" snapshot check
           echo "dirty" >> smoke.txt
