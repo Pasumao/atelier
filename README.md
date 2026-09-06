@@ -12,10 +12,10 @@
 ## 四无人区（对比 2026-08 全量扫描后仍独占；每条按四段式自检：主张/机制/实测/复现）
 
 **① 扁平 schema 一份三用** —— 同一个 `{reqProps, optProps}` 扁平形态同时充当组件契约（`validateFlat`，错误 ATR-201/204/205 四段式）、MCP 工具参数（`mcp-definitions.json` 单源生成 tools/list）、注册表白名单渲染校验。无 $ref/oneOf，代理不猜。
-实测：框架 93 用例 vitest 全绿（契约/守卫/对拍在内）；24 工具单源接线，check-skills 56/0。
+实测：框架 113 用例 vitest 全绿（契约/守卫/对拍在内）；25 工具单源接线，check-skills 56/0。
 复现：`node atelier/scripts/check-skills.mjs` · `atelier/pnpm test`。
 
-**② 事务状态层 + 双轨回滚** —— 应用状态：命名合并 checkpoint（同名栈顶幂等=轮级回滚）+ 增量事件日志（journal）+ 依赖图查询（`store.graph()`/journal 已接进 MCP）；源码：决策 15 git 源码锚，「未检不锚」双门禁（测试绿 + 快照 MATCH 才许锚定）。破坏性操作过 `agent.confirm` 三档（deny = ATR-402 结构化拒绝）。
+**② 事务状态层 + 双轨回滚** —— 应用状态：命名合并 checkpoint（同名栈顶幂等=轮级回滚）+ 增量事件日志（journal）+ 依赖图查询（`store.graph()`/journal 已接进 MCP）；源码：决策 15 git 源码锚，「未检不锚」三道门禁（测试绿 + 快照 MATCH + API 面无未豁免破坏漂移，才许锚定）。破坏性操作过 `agent.confirm` 三档（deny = ATR-402 结构化拒绝）。
 实测：事务层与 confirm 闸有专项用例；stdio 快乐径 e2e 实证活页面返回依赖图。
 复现：`node atelier/cli.mjs checkpoint save "..."`（看门禁输出）· `atelier/pnpm test`。
 
@@ -27,9 +27,11 @@
 
 ## 与标准对齐（地板，不是卖点）
 
-AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S 检查 100% 过）· MCP（24 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按 face 分组）· W3C DTCG 令牌互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`，UA 分类台账）。
+AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S 检查 100% 过）· MCP（25 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按 face 分组）· W3C DTCG 令牌互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`，UA 分类台账）。
 
 ## 性能基线（SPEC §7，`atelier bench` 实测 2026-08-30 / Windows / Node 24）
+
+> 数字口径：本表 = 当前唯一现状口径；ROADMAP §2 的 6.25KB/2-3ms/51ms/~300ms 为阶段零历史基线留档，勿混引。
 
 | 指标 | 目标 | 实测 | 判定 |
 |---|---|---|---|
@@ -47,11 +49,12 @@ AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S �
 node atelier/cli.mjs init --target my-app --name MyApp   # 三步组装：模板 + runtime vendor + dev vendor
 cd my-app && pnpm install && pnpm dev                     # http://127.0.0.1:5173
 node <repo>/atelier/cli.mjs skills install --target . --name MyApp   # 技能包双落点 + specs 骨架
-node <repo>/atelier/mcp/server.mjs                        # 24 工具 MCP（ATELIER_PROJECT_ROOT=应用目录）
+node <repo>/atelier/mcp/server.mjs                        # 25 工具 MCP（ATELIER_PROJECT_ROOT=应用目录）
 ```
 
 ## 诚实纪律（引用本仓库任何数字前先读这段）
 
 - **正确率主张**：M3 三臂对照实验在简单任务层全平（天花板效应）。在加难任务层落地前，我们不引用任何"首遍正确率"数字——请引用者同样克制。
 - CLI 命令三级诚实标注 FULL / MINI / STUB，STUB 永不伪造成功（exit 4 + spec 指路）。
-- 所有"未确认"结论明确标注，不写成事实；checkpoint 锚定前强制过测试+快照双门禁。
+- 所有"未确认"结论明确标注，不写成事实；checkpoint 锚定前强制过测试+快照+API 面三道门禁。
+- 对外数字单一口径：用例数/工具数/性能以本文为现状源；改动测试面或工具面时必须同步本文（ROADMAP §2 只留历史基线）。

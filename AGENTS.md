@@ -48,3 +48,4 @@
 - MCP 工具/命令/错误码三处同步：CLI 表（cli.mjs HELP）/ `atelier/mcp/mcp-definitions.json` / 对应 skill；改后必跑 `node atelier/scripts/check-skills.mjs`。
 - 框架规格文档唯一源在 `atelier/docs/`；缺口与改进队列 = `atelier/docs/BACKLOG.md`。
 - 所有"未确认"结论必须明确标注，不得写成事实；删除文件前先 `checkpoint save`（git 可恢复）。
+- 对外数字单一口径：用例数/工具数/性能以根 README 为现状源——改测试面或工具面时必须同步 README（2026-09-06 锐评整改：曾出现 README 93 用例/24 工具与实际 113/25 失守）。

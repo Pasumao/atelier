@@ -11,6 +11,7 @@
 | 08-30 | 阶段一收口：P1-1 F-2 一期（静态依赖清单+差分对拍）· P1-2 F-4 两批（else-if/void/ATR-101/对象字面量）· P1-3 F-3 二期（R4/R5 间距字号）· P1-4（sync/review MINI/HMR 泄漏关闭）· P1-5（schema 约束/deny 闸/测试门禁）。阶段二收口：P2-1 graph/journal 接线 · P2-2 标准五件套（S 门禁/structured error/toolsets/a11y/DTCG/equals）· P2-3 specs v2（constitution+EARS）· P2-4 agent 体检 · P2-5 README 定位面（措辞终审待用户）。93 绿 · check-skills 56/0 | `0c3636a`→`464efe7` |
 | 08-31 | P3-1 前置：M3 加难任务层 task4-6 落地（brief+参考解+harness 扩张+protocol/grade 同步）；2026-09-04 六正控复核全 PASS | `d27a34f` |
 | 09-06 | P3-4 全收口：`atelier api-diff snapshot\|check`（框架四面/应用两面，breaking/additive/relaxed/valueDrift+churn，--allow/--strict/--budget）· checkpoint 第三道门（API 漂移拒锚）· CI 接线 · 负例红检实证。F-2 二期·构建期图查询：buildGraph + codegen `--graph`/`--graph-only` + MCP `graph.static`（25 工具，stdio 双径 e2e）。M3 RUNBOOK 逐臂操作卡 | `6b12b99`→`c0bc95d` |
+| 09-06 | **仓库整理**（删 SKILL_DRAFT/.dsh-trash；SKILLS-PLAN/BACKLOG 索引化）+ **独立子代理锐评**（8/10 side-project 坐标 / 3/10 框架坐标；整改=F-5 立项、出数前置增补、README 数字修正、名实对齐候选池、生死判据入 ROADMAP §7） | `83e4a7a`→ |
 
 ## 活跃队列
 
@@ -22,6 +23,16 @@
 | F-2 | 编译器静态依赖图（决策 3） | 🔄 一期 ✅（清单+差分对拍，语法级超集）；二期 1/3 ✅（09-06 构建期图查询：buildGraph/`--graph`/`graph.static`） | **跳过追踪快路径**（逐挂点 exactness：无短路+无函数调用的叶子挂点静态预订阅；核心=`$effectStatic` 内核手术，golden DOM+差分对拍护航）· **prod 剥离** | 
 | F-3 | 样式纪律收紧（决策 16） | ✅ 二期（R1-R5 全链：颜色/间距/字号；recipe 层同责；诚实边界：reset 豁免、border/line-height/阴影不辖、radius 留候选） | radius 纪律候选 |
 | F-4 | codegen 覆盖扩张 | ✅ 两批（08-30）：else-if 链/void 元素/ATR-101/错位闭合拒绝/对象数组字面量/配对花括号 | 属性级指令（on:/bind: 族）= 新方向候选，需先出设计 |
+| **F-5** | **组件模型补强（响应式 props + effect 所有权）** | 🆕 **2026-09-06 锐评立项，优先级高于 F-2 二期剩余**（可用性地基先于性能优化与叙事）。取证：props 挂载期一次性 `evalExpr`（template.ts:607-608，codegen.test.ts:382 测试名自认"不随信号后续变化"）⇒ 跨组件数据流瘫痪；分支切换丢弃 `bindExpr` 的 dispose（template.ts:590-595/662）⇒ 已脱离节点仍被订阅写入。**开工第一步 = 红检复现两项取证**（锐评为二手取证），再出设计（props 信号传导语义 + effect 所有权树，对位 Solid ownership/Vue effectScope） | L |
+
+**锐评后置增补（2026-09-06，出数前置）**：M3 三臂出数前必须补——① **负控 fixture 集**：task4-6 各造 ≥2 个"差一点错"变异样本，断言评分器必须红（当前判别力只有正控六绿，负控为零）；② **react 臂评分去利益冲突**：评分者 ≠ 作者，或双人独立盲评取一致（rubric 主观分与 atelier 臂机械评分不对称）；③ RUNBOOK 增补对应附录。样本量口径诚实化：每格 5 个二值 run 的置信区间宽于 +15pt 判据，结论措辞按此克制。
+
+### 候选池（锐评衍生 + 既有候选，按需触发，未排期）
+
+- **struct check 检出力补强**：当前 ERROR 仅 4 种（config/manifest/existsSync 级）——把 `.atr.spec.ts` 用例与 manifest 组件集不一致、token 引用不存在键等真实违例升 ERROR，或诚实降调"六层结构公理"措辞（名实对齐，与 README 措辞终审合并处理）。
+- **schema 编译期提取**：contract.ts 完整版承诺（TS 类型 AST → schema），替代手写组件元数据。
+- **真实浏览器测试转正**：113 用例全跑在 dom-shim 上；snapshot-smoke 是唯一真实浏览器路径且 continue-on-error——候选 = CI 中把 snapshot-smoke 升正式 gate（需 per-platform baseline）。
+- 属性级指令（on:/bind: 族，归 F-4 剩余）· radius 纪律（F-3 剩余）。
 
 ### 设计备忘（半天级，按需触发）
 
