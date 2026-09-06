@@ -12,3 +12,5 @@ prototype/dist/
 
 # M3 arm-run leftover copies (react-tpl 等 attempt 拷贝，同 .m3-runs/ 纪律)
 DAgentic.m3-runs_react-tpl/
+# 本地工作区状态：checkpoint 时间线 / API 面 snapshot（决策 15 门禁在本地读，不入公共库）
+.atelier/
