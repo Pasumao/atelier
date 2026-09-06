@@ -1,0 +1,20 @@
+{
+  "components": [
+    { "name": "HelloCard", "file": "components/HelloCard.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" } },
+        "optProps": { "start": { "type": "number" } }
+      }
+    },
+    { "name": "ContractProbe", "file": "components/ContractProbe.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" }, "level": { "type": "number" } },
+        "optProps": { "note": { "type": "string" } }
+      }
+    }
+  ],
+  "primitives": [
+    "$state", "$derived", "$effect", "streamValue", "optimisticList", "devFetch",
+    "store.commit", "store.rollback", "store.timeTravel", "validateFlat"
+  ]
+}

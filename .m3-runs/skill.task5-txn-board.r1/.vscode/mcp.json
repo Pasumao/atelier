@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "atelier": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "D:/Agentic/atelier/mcp/server.mjs"
+      ],
+      "env": {
+        "ATELIER_DEV_URL": "http://127.0.0.1:5173"
+      }
+    }
+  }
+}

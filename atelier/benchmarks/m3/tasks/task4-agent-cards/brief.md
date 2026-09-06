@@ -5,7 +5,7 @@
 `src/components/ToolCallPanel.atr.ts`，要求：
 
 1. 模块导出 `runDemo(): StreamValue<string>`：返回一个 `streamValue<string>()`，
-   依次 push 恰好这三行 JSON 后 `finish()`：
+   顺序**同步** push（push 完成即数据可读，不引入定时器/异步延迟）恰好这三行 JSON 后 `finish()`：
    - `{"id":"t1","name":"search","status":"done"}`
    - `{"id":"t2","name":"read","status":"running"}`
    - `{"id":"t3","name":"write","status":"error"}`

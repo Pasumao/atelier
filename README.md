@@ -2,6 +2,7 @@
 
 > **定位一句话**：不参与"更快渲染"的主流竞赛；下注"当编码代理成为前端第一类使用者，框架应内建契约、检视、恢复与结构公理"。
 > 备选 slogan（待定稿）：意图进，界面出 / *Intent in, interface out.*
+> <!-- AUDIT: 2026-09-06 机器核过事实项；措辞终审待用户 -->
 >
 > 本工作区即框架仓库（script-form v0.2）。框架规格见 `atelier/docs/`；缺口与改进队列 = `atelier/docs/BACKLOG.md`；路线计划 = `atelier/docs/ROADMAP.md`；常用命令 = `AGENTS.md`。
 
@@ -11,7 +12,7 @@
 
 ## 四无人区（对比 2026-08 全量扫描后仍独占；每条按四段式自检：主张/机制/实测/复现）
 
-**① 扁平 schema 一份三用** —— 同一个 `{reqProps, optProps}` 扁平形态同时充当组件契约（`validateFlat`，错误 ATR-201/204/205 四段式）、MCP 工具参数（`mcp-definitions.json` 单源生成 tools/list）、注册表白名单渲染校验。无 $ref/oneOf，代理不猜。
+**① 扁平 schema 一份三用** —— 同一个 `{reqProps, optProps}` 扁平形态同时充当组件契约（`validateFlat` + token 校验，错误 ATR-201/204/205 四段式）、MCP 工具参数（`mcp-definitions.json` 单源生成 tools/list）、注册表白名单渲染校验。无 $ref/oneOf，代理不猜。
 实测：框架 <!--@num:tests-->125<!--@/--> 用例 vitest 全绿（契约/守卫/对拍在内）；<!--@num:tools-->25<!--@/--> 工具单源接线，check-skills 56/0。
 复现：`node atelier/scripts/check-skills.mjs` · `atelier/pnpm test`。
 

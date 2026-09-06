@@ -1,0 +1,26 @@
+/* PricingCard — 组件内 scoped 样式（CSS Module = 逃生舱用法，已在 scripts/guard-tokens.mjs 白名单登记）。
+   样式取值只准引用 token：var(--color-*) / var(--space-*) / var(--radius-*)，
+   不出现任何裸颜色字面量。 */
+.pricing {
+  padding: var(--space-5);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.pricing h3 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--space-5);
+  letter-spacing: 0.02em;
+}
+
+.accent-dot {
+  color: var(--color-accent);
+  font-size: var(--space-4);
+  line-height: 1;
+}

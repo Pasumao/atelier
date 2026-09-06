@@ -1,0 +1,28 @@
+/* 全局样式同样只准引用 token（tokens.json → :root CSS 变量，由 main.tsx 注入）。 */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface-muted);
+  color: var(--color-text-primary);
+  font-family: system-ui, sans-serif;
+}
+
+.app-shell {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+}
+
+.app-hint {
+  color: var(--color-text-secondary);
+}
+
+.app-hint code {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-md);
+}

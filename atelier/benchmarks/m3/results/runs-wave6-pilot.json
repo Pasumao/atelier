@@ -1,0 +1,69 @@
+{
+  "wave": "6-pilot",
+  "note": "PILOT: n=1/cell, no statistical claim; executed 2026-09-06 via independent subagent sessions (one session per run); react arm blind-graded by separate reviewer agent",
+  "runs": [
+    {
+      "arm": "noskill",
+      "task": "task4-agent-cards",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task5-txn-board",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task6-token-discipline",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task4-agent-cards",
+      "run": 1,
+      "firstPass": false,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task5-txn-board",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task6-token-discipline",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task4-agent-cards",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task5-txn-board",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task6-token-discipline",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    }
+  ]
+}

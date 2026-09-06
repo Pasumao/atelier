@@ -61,3 +61,13 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 ### 挂起区（等 F 线里程碑后启动）
 
 - 干扰面实验（不给源码只给 CLI/错误输出）——技能包价值（核心竞争力）的决定性检验；执行方式同 M3 三臂（逐臂独立会话，RUNBOOK 同款纪律）。
+
+### M3 实验波次记录
+
+- **Wave-6 先导波（2026-09-06，PILOT n=1/cell，无统计结论）**：task4-6 × 三臂各 1 run = 9 run，
+  经独立子代理会话执行（noskill 仅任务书 / skill 任务书+技能包 / react 同任务书转译；react 臂独立
+  盲评 rubric 9/8.5/9.5 全过）。记分：noskill 3/3 · skill 2/3 · react 3/3；report.mjs 判定 N/A
+  （诚实拒绝）。**真实产出**：①抓出 task4 brief 同步/异步歧义（skill 臂合法异步流被 harness 同步
+  断言 FAIL）→ brief v2 已消歧；②逐臂管线全链路（attempt+junction+子代理单发+机械评分+盲评）走通；
+  D-1/D-4 已拍板（§5）。明细 `results/WAVE6-PILOT-REPORT.md` · `results/runs-wave6-pilot.json`。
+  **下一步**：brief v2 后跑正式波（每臂×每任务×5 runs）。

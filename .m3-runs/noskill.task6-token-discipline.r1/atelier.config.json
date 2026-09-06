@@ -1,0 +1,48 @@
+{
+  "tokens": {
+    "color": {
+      "primary": "#4D6BFE",
+      "primary-soft": "#2B3A7A",
+      "bg": "#0E1117",
+      "surface": "#171C28",
+      "surface-2": "#1F2634",
+      "text": "#E6E9F0",
+      "muted": "#98A2B3",
+      "ok": "#3FB968",
+      "warn": "#F0A93B",
+      "danger": "#E5484D",
+      "accent": "#E05656"
+    },
+    "space": {
+      "xs": "4px",
+      "sm": "8px",
+      "md": "16px",
+      "lg": "24px",
+      "xl": "40px"
+    },
+    "font": {
+      "xs": "0.72rem",
+      "sm": "0.85rem",
+      "md": "0.95rem",
+      "lg": "1.1rem",
+      "xl": "1.65rem"
+    },
+    "radius": {
+      "sm": "6px",
+      "md": "10px",
+      "lg": "16px",
+      "pill": "999px"
+    }
+  },
+  "locked": [],
+  "agent": {
+    "confirm": "auto",
+    "requireToken": true
+  },
+  "snapshot": {
+    "mismatchThreshold": 0.01
+  },
+  "build": {
+    "ssr": "none"
+  }
+}
