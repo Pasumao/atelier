@@ -47,6 +47,8 @@ QUALITY GATES
   atelier test                                                     MINI* forwards to the project's test runner
   atelier snapshot save | check [--update]                         MINI* visual regression via the dev face
                                                                          (byte+pixel tiers; never auto-accepts)
+  atelier api-diff snapshot | check [--root <dir>] [--json]        MINI  public API surface snapshot + drift gate
+                                                    [--strict] [--allow <f>]  (removed/changed = breaking, exit 1)
   atelier checkpoint save <name> [--no-gate] | list | rollback <id>     FULL  decision-15 source checkpoints; save enforces 未检不锚 vs snapshot baseline (P2-2)
 
 COMPILER
@@ -198,6 +200,11 @@ switch (cmd) {
     break;
   case "snapshot":
     runScript("snapshot.mjs", [sub ?? "check", ...rest]);
+    break;
+  case "api-diff":
+    // P3-4: 公共 API 面 snapshot + 漂移门禁（breaking 未豁免 = exit 1）
+    if (!sub) die("usage: atelier api-diff snapshot | check [--root <dir>] [--json] [--strict] [--allow <file>]", 2);
+    runScript("api-diff.mjs", [sub, ...rest]);
     break;
   case "test": {
     if (!fs.existsSync(path.join(process.cwd(), "package.json"))) {

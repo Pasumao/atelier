@@ -120,6 +120,7 @@ ChatMessage.atr.ts
 | `atelier test` | Vitest 单元/组件断言 |
 | `atelier struct [map|check]` | 六层结构地图/门禁（`docs/AI-OPTIMAL-STRUCTURE.md` 公理的机检执行件；OK/WARN/INFO 分级不假红） |
 | `atelier snapshot save \| check [--update]` | 截图基准库管理（`.atr/snapshots/`）：dev-face 无头通道拍摄，字节+像素双档判定（字节差但像素比 ≤ 阈值 = PIXMATCH，字体抗锯齿不算回归），双图人审后 `--update` 才晋升 |
+| `atelier api-diff snapshot \| check` | 公共 API 面漂移门禁（P3-4，`.atelier/api-surface.json` 基线）：框架四面（runtime 导出/CLI 命令/MCP 工具/token 键）+ 应用两面（组件契约/token 键）；removed/changed = breaking（exit 1，`--allow` 豁免，`--strict` 连新增也红），churn 漂移率出数 |
 | `atelier e2e` | 浏览器回环（结构断言 + 截图 diff） |
 | `atelier build [--static]` | 产物 `dist/`（静态、相对路径、零依赖）；`--static` 启用 SSG |
 | `atelier package [--electron]` | 默认 Tauri 2 打包 exe；`--electron` 备选模板 |

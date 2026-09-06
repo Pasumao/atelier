@@ -84,6 +84,23 @@
   real-timer FAIL）保持。**诚实边界**：任务层就绪 ≠ 实验完成——三臂出数仍待 ROADMAP 阶段三窗口执行；
   北极星判据继续以加难层为准（task1-3 全平数据不再引用）。
 
+### 已完成（2026-09-06 · P3-4 API diff 门禁与漂移度量原型，会话归档）
+
+- **P3-4 / AI slop 对策的框架化**（TECH-SCAN §4.7 空白点，ROADMAP 阶段三）：新命令
+  `atelier api-diff snapshot|check [--root <dir>] [--json] [--strict] [--allow <f>]`
+  （`scripts/api-diff.mjs`，档位 **MINI**）。面提取器按 root 布局自动判定——框架仓四面
+  （runtime-exports / cli-commands / mcp-tools / token-keys；本仓实测 42/19/24/23 条）、
+  应用两面（component-contracts 契约 reqProps/optProps 键:类型 + token-keys）。
+  **门禁语义**：removed/changed = breaking（exit 1，`--allow` 清单 `面:id` 豁免）·
+  contract req→opt = relaxed 放行（opt→req = breaking）· token 值变化 = valueDrift 信息性 ·
+  added = additive（`--strict` 冻结场景下也红）· 漂移指标 churn = 变更条目/baseline 总条目。
+  **实证**：16 新用例（提取器边界/diff 分类/allowlist 豁免/框架仓确定性自检）109+8skip 全绿；
+  负例红检（baseline 幽灵条目 = 公共 API 被删）→ 双删除抓出 + 单条豁免 + exit 1；
+  check-skills 56/0。**诚实边界**：提取是语法级（正则+引号/注释感知括号配对），非完整 TS 语义
+  （不解析跨文件类型别名/重导出，`export *` 记 star 面）；baseline 默认 `.atelier/api-surface.json`，
+  本仓已快照；**候选后续**：checkpoint save 门禁挂 api-diff 半边（baseline 存在时）· CI workflow 接线 ·
+  token 值漂移预算。
+
 ## 活跃队列
 
 ### F 线 — 功能债（决策书承诺未兑现，壮大框架的主菜）
