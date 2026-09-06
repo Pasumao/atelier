@@ -365,7 +365,8 @@ if (isMain()) {
           for (const v of result.violations) console.error(`  · ${v.surface}:${v.id} [${v.kind}]`);
         }
       }
-      const passed = result.summary.ok && result.violations.length === 0;
+      // 放行判定只看 violations（allowlist 豁免后 summary.breaking 仍>0 是记账事实，不再卡门）
+      const passed = result.violations.length === 0;
       if (!jsonOut) console.log(`\n[gate] ${passed ? "PASS — 无未豁免破坏性变更" : "FAIL"}`);
       process.exit(passed ? 0 : 1);
     }

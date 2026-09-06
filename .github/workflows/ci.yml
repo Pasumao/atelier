@@ -1,5 +1,6 @@
 # Atelier CI — P2-4 matrix (BACKLOG).
-# Gates: framework vitest · check-skills (single-source discipline) · struct check · init smoke (template → install → app tests).
+# Gates: framework vitest · check-skills (single-source discipline) · struct check ·
+# api-diff (public API surface drift, P3-4) · init smoke (template → install → app tests).
 # The snapshot-smoke job additionally exercises dev-face capture + the P2-2 未检不锚 checkpoint gate,
 # but is continue-on-error: visual capture is environment-sensitive and stays a smoke (not a gate) until
 # per-platform baselines exist. Never auto-promote — see scripts/snapshot.mjs semantics.
@@ -42,6 +43,9 @@ jobs:
 
       - name: structure check (starter template app)
         run: node atelier/scripts/struct.mjs check atelier/templates/app
+
+      - name: api surface drift gate (P3-4 — baseline .atelier/api-surface.json)
+        run: node atelier/scripts/api-diff.mjs check --root .
 
       - name: init smoke — scaffold fresh app and run its tests
         shell: bash

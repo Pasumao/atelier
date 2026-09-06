@@ -298,7 +298,7 @@
    "face": "operation",
    "priority": "P0",
    "status": "implemented",
-   "summary": "Anchor current working tree as a source checkpoint (git commit). Gate (P2-2 未检不锚): when a snapshot baseline exists and the dev face answers, the live render must MATCH it or the anchor is refused; escape hatch (--no-gate) is CLI-only.",
+   "summary": "Anchor current working tree as a source checkpoint (git commit). Gate (P2-2/P3-4 未检不锚): snapshot baseline MISMATCH or unexempted public API drift (api-diff) refuses the anchor; escape hatch (--no-gate) is CLI-only.",
    "params": {
     "type": "object",
     "reqProps": {},

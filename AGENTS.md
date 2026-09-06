@@ -40,7 +40,7 @@
 | API 面漂移门禁 | 仓库根/应用目录下 `node atelier/cli.mjs api-diff snapshot` / `check`（P3-4：公共 API 面 snapshot→diff；removed/changed=breaking exit 1，`--allow` 豁免，`--strict` 连新增也红） |
 | MCP server | `node atelier/mcp/server.mjs`（env：`ATELIER_PROJECT_ROOT`=应用目录，`ATELIER_DEV_URL`=应用 dev 面） |
 | 读中文 UTF-8 文件 | PowerShell 一律 `Get-Content -Encoding UTF8`（默认 ANSI 会把 em dash 显示成乱码，文件未必真坏） |
-| 源码 checkpoint（决策 15） | **仓库根目录下** `node atelier/cli.mjs checkpoint save "<名称>"` / `list` / `rollback <id>`（改代码前先看时间线；save 内建门禁=测试套件绿+快照 MATCH 才许锚定，`--no-gate` 为 wip 锚逃生口。**务必在仓库根运行**——在子目录跑会因找不到 `.git` 误引导嵌套 git 仓，2026-08-30 实证） |
+| 源码 checkpoint（决策 15） | **仓库根目录下** `node atelier/cli.mjs checkpoint save "<名称>"` / `list` / `rollback <id>`（改代码前先看时间线；save 内建门禁=测试套件绿+快照 MATCH+API 面无未豁免破坏漂移（P3-4，`.atelier/api-surface.json` 存在时）才许锚定，`--no-gate` 为 wip 锚逃生口。**务必在仓库根运行**——在子目录跑会因找不到 `.git` 误引导嵌套 git 仓，2026-08-30 实证） |
 
 ## 维护纪律
 

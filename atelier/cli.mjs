@@ -49,7 +49,7 @@ QUALITY GATES
                                                                          (byte+pixel tiers; never auto-accepts)
   atelier api-diff snapshot | check [--root <dir>] [--json]        MINI  public API surface snapshot + drift gate
                                                     [--strict] [--allow <f>]  (removed/changed = breaking, exit 1)
-  atelier checkpoint save <name> [--no-gate] | list | rollback <id>     FULL  decision-15 source checkpoints; save enforces 未检不锚 vs snapshot baseline (P2-2)
+  atelier checkpoint save <name> [--no-gate] | list | rollback <id>     FULL  decision-15 source checkpoints; save enforces 未检不锚 (P2-2 snapshot + P3-4 api-diff)
 
 COMPILER
   atelier compile [--root <dir>] [--out <dir>] [--stdout]          MINI* P0-2 stage ② AST dump: *.atr.ts →

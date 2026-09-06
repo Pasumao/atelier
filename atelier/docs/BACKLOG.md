@@ -98,8 +98,10 @@
   负例红检（baseline 幽灵条目 = 公共 API 被删）→ 双删除抓出 + 单条豁免 + exit 1；
   check-skills 56/0。**诚实边界**：提取是语法级（正则+引号/注释感知括号配对），非完整 TS 语义
   （不解析跨文件类型别名/重导出，`export *` 记 star 面）；baseline 默认 `.atelier/api-surface.json`，
-  本仓已快照；**候选后续**：checkpoint save 门禁挂 api-diff 半边（baseline 存在时）· CI workflow 接线 ·
-  token 值漂移预算。
+  本仓已快照。**候选后续销账（2026-09-06 同日第二批）**：checkpoint save 第三道门已挂接
+  （baseline 存在时未豁免 breaking 拒绝锚定，红检实证；豁免语义 bug 顺带修复——全额豁免不再误红）·
+  CI matrix 已接 api-diff check 步骤 · MCP source_commit summary 同步三处口径（check-skills 56/0）。
+  **剩余候选**：token 值漂移预算。
 
 ## 活跃队列
 

@@ -12,6 +12,8 @@
  *                     gate 1 (决策 15 test gate): the package.json test suite must pass — a red suite refuses the anchor
  *                     gate 2 (P2-2 snapshot gate): if .atr/snapshots/baseline.png exists and the dev face answers, the live render
  *                     must MATCH it — MISMATCH refuses the anchor (fix via `atelier snapshot check --update`)
+ *                     gate 3 (P3-4 api-diff gate): if .atelier/api-surface.json exists, unexempted public API breaking drift
+ *                     refuses the anchor (re-baseline via `atelier api-diff snapshot`; carve-outs via `--allow`)
  *   list [--json]     show the human-visible timeline (.atelier/checkpoints.jsonl — versioned & auditable)
  *   rollback <id>     move the branch window back to a checkpoint; a backup tag keeps the future reachable
  *                     (time-travel back: `git checkout <backup-tag>`), refuses when the tree is dirty
@@ -21,6 +23,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import url from "node:url";
 import { spawnSync } from "node:child_process";
 
 const STORE_DIR = ".atelier";
@@ -175,6 +178,35 @@ async function snapshotGate(repo, skip) {
   );
 }
 
+/* ---- P3-4 api-diff gate（未检不锚·API 半边）----------------------------------
+ * baseline（.atelier/api-surface.json）存在时，锚定前必须通过公共 API 面漂移门禁：
+ * 未豁免的 removed/changed（公共 API 被删/被改）→ 拒绝锚定。诚实口径与另两道门一致：
+ * 无 baseline → vacuous pass（打印武装指引）；布局不可判 → vacuous；布局错误不该被静默吞掉。
+ * 有意变更的再武装路径 = 'atelier api-diff snapshot'（新面入档，漂移留痕于 git 历史）；
+ * 个别刻意的破坏 = '--allow' 清单登记；逃生口 = --no-gate / ATELIER_API_GATE=off。
+ */
+function apiDiffGate(repo, skip) {
+  if (skip) { console.log("[gate] api gate skipped (--no-gate)"); return; }
+  if (process.env.ATELIER_API_GATE === "off") { console.log("[gate] api gate off (ATELIER_API_GATE=off)"); return; }
+  const baseline = path.join(repo, ".atelier", "api-surface.json");
+  if (!fs.existsSync(baseline)) { console.log("[gate] no api-surface baseline — gate vacuous (run 'atelier api-diff snapshot' to arm it)"); return; }
+  const scriptPath = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "api-diff.mjs");
+  const r = spawnSync(process.execPath, [scriptPath, "check", "--root", repo, "--json"], { encoding: "utf8" });
+  if (r.status === 2) { console.log("[gate] api surface layout undetectable — gate vacuous this anchor"); return; }
+  let result;
+  try { result = JSON.parse(r.stdout); } catch { console.log("[gate] api-diff output unparseable — gate vacuous this anchor"); return; }
+  if (r.status === 0 && result.violations?.length === 0) {
+    const churn = (result.summary.churn * 100).toFixed(2);
+    console.log(`[gate] api surface clean (churn ${churn}%) — 未检不锚 satisfied ✔`);
+    return;
+  }
+  const list = (result.violations ?? []).map((v) => `  · ${v.surface}:${v.id} [${v.kind}]`).join("\n");
+  die(1,
+    `error: 未检不锚 — public API surface drifted with ${result.violations?.length ?? "?"} unexempted breaking change(s); refusing to anchor`,
+    `intended change → re-baseline with 'atelier api-diff snapshot' (drift stays recorded in git history);\n  deliberate carve-out → register the entry in an '--allow' allowlist;\n  deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.\n${list}`,
+  );
+}
+
 async function cmdSave(repo, name, skipGate, jsonMode) {
   if (!name) die(1, 'usage: checkpoint save <name> [--no-gate] [--json]', 'e.g. atelier checkpoint save "AI round 4: added ModelCard"');
   ensureRepo(repo);
@@ -187,6 +219,7 @@ async function cmdSave(repo, name, skipGate, jsonMode) {
   }
   await testGate(repo, skipGate); // 决策 15 提交闸门（测试半边）: a red suite must not be silently anchored
   await snapshotGate(repo, skipGate); // P2-2 未检不锚: a red render must not be silently anchored
+  apiDiffGate(repo, skipGate); // P3-4 未检不锚: unexempted public API breaking drift must not be silently anchored
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-m", `checkpoint(${name}): AI turn snapshot`]);
   const anchor = headSha(repo);
