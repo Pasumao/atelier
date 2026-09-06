@@ -1,24 +1,24 @@
 {
   "task": "task2-stream",
   "attempt": "D:/Agentic/atelier/benchmarks/m3/harness/fixtures/grader-real-timer",
-  "at": "2026-08-30T11:36:49.733Z",
+  "at": "2026-09-04T15:51:09.570Z",
   "ok": false,
   "exitCode": 1,
   "summary": {
-    "tests": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m6 passed\u001b[39m\u001b[22m\u001b[90m (7)\u001b[39m"
+    "tests": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m10 passed\u001b[39m\u001b[22m\u001b[90m (11)\u001b[39m"
   },
   "tail": [
-    "\u001b[31m❯\u001b[39m benchmarks/m3/harness/acceptance.spec.ts \u001b[2m(\u001b[22m\u001b[2m7 tests\u001b[22m\u001b[2m | \u001b[22m\u001b[31m1 failed\u001b[39m\u001b[2m)\u001b[22m\u001b[32m 20\u001b[2mms\u001b[22m\u001b[39m",
-    "\u001b[32m✓\u001b[39m task 已选定\u001b[32m 1\u001b[2mms\u001b[22m\u001b[39m",
-    "\u001b[32m✓\u001b[39m task1-counter：契约 + $state + 事件\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
-    "\u001b[31m     \u001b[31m×\u001b[31m task2-stream：streamValue 语义 + 禁手写打字机\u001b[39m\u001b[32m 16\u001b[2mms\u001b[22m\u001b[39m",
     "\u001b[32m✓\u001b[39m task3-rollback：commit→mutate→rollback 回到时点\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
+    "\u001b[32m✓\u001b[39m task4-agent-cards：流式解析 + keyed each + 状态徽标 + 迟到推送\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
+    "\u001b[32m✓\u001b[39m task4-agent-cards：乱序流按键复用（DOM 顺序跟随流序）\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
+    "\u001b[32m✓\u001b[39m task5-txn-board：父子组合 + store 事务 + 子组件无私有状态\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
+    "\u001b[32m✓\u001b[39m task6-token-discipline：token 单源 + ATR-204 + 逃生舱登记\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
     "\u001b[32m✓\u001b[39m 注释里的禁令字样被剥离（wave-4 误伤复现）\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
     "\u001b[32m✓\u001b[39m 字符串/正则/模板串里的构造不误剥为注释\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
     "\u001b[32m✓\u001b[39m 真用定时器的代码必须原样留存（硬禁检查仍然有效）\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m",
     "\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m",
-    "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m6 passed\u001b[39m\u001b[22m\u001b[90m (7)\u001b[39m",
-    "\u001b[2m   Start at \u001b[22m 19:36:49",
-    "\u001b[2m   Duration \u001b[22m 382ms\u001b[2m (transform 72ms, setup 0ms, import 187ms, tests 20ms, environment 0ms)\u001b[22m"
+    "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m10 passed\u001b[39m\u001b[22m\u001b[90m (11)\u001b[39m",
+    "\u001b[2m   Start at \u001b[22m 23:51:09",
+    "\u001b[2m   Duration \u001b[22m 309ms\u001b[2m (transform 70ms, setup 0ms, import 158ms, tests 8ms, environment 0ms)\u001b[22m"
   ]
 }
