@@ -29,16 +29,16 @@
 
 AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S 检查 100% 过）· MCP（<!--@num:tools-->25<!--@/--> 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按 face 分组）· W3C DTCG 令牌互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`，UA 分类台账）。
 
-## 性能基线（SPEC §7，`atelier bench` 实测 2026-08-30 / Windows / Node 24）
+## 性能基线（SPEC §7，`atelier bench` 实测 2026-09-06 / Windows / Node 24 · F-5 内核补强后复测全 PASS）
 
 > 数字口径：本表 = 当前唯一现状口径；ROADMAP §2 的 6.25KB/2-3ms/51ms/~300ms 为阶段零历史基线留档，勿混引。
 
 | 指标 | 目标 | 实测 | 判定 |
 |---|---|---|---|
-| 核心运行时体积 | gzip ≤ 30 KB | **8.54 KB** | PASS |
-| 10³ 节点挂载+首渲染 | ≤ 50 ms | **4.5 ms** | PASS |
-| HMR（保存→可见） | ≤ 100 ms | **62 ms**（保值热交换，$state 不清零） | PASS |
-| 截图回环 | ≤ 500 ms | **421 ms**（常驻无头实例） | PASS |
+| 核心运行时体积 | gzip ≤ 30 KB | **8.84 KB**（F-5 内核补强 +0.3KB） | PASS |
+| 10³ 节点挂载+首渲染 | ≤ 50 ms | **2.8 ms** | PASS |
+| HMR（保存→可见） | ≤ 100 ms | **54 ms**（保值热交换，$state 不清零） | PASS |
+| 截图回环 | ≤ 500 ms | **284 ms**（常驻无头实例） | PASS |
 
 复现：`node atelier/cli.mjs init --target /tmp/app --name App && cd /tmp/app && pnpm install && node <repo>/atelier/cli.mjs bench --app /tmp/app`。
 诚实性：FAIL 不粉饰、不豁免，按 SPEC §7 自动转 P0 工单；数字会随修复移动（HMR 曾 108ms FAIL→保值热交换后 PASS；截图曾 1933ms FAIL→常驻实例后 PASS）。

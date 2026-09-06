@@ -278,7 +278,19 @@ function cmdRollback(repo, id, jsonMode) {
 }
 
 /* ---- dispatch ---- */
-const repo = process.cwd();
+// 仓库发现：cwd 无 .git 时向上找最近祖先（2026-08-30 实证：在 atelier/ 子目录跑会误 init 嵌套仓——
+// AGENTS.md 曾只能靠"务必在仓库根运行"提示兜底；尾巴区候选修法落地）。
+function findRepoRoot(start) {
+  let dir = path.resolve(start);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".git"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return path.resolve(start); // 到盘根仍无 .git → 维持旧行为（ensureRepo 会 init）
+    dir = parent;
+  }
+}
+const repo = findRepoRoot(process.cwd());
+if (repo !== path.resolve(process.cwd())) console.log(`[atelier-checkpoint] repo root discovered upward: ${repo}`);
 const [, , cmd, ...rest] = process.argv;
 const jsonMode = rest.includes("--json");
 if (cmd === "save") {
