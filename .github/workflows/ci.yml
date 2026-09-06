@@ -69,8 +69,29 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: true
-    env:
-      ATELIER_EDGE_PATH: ${{ runner.os == 'Linux' && '/usr/bin/google-chrome' || '' }}
     steps:
       - uses: actions/checkout@v4
       - run: echo smoke placeholder
+      - name: scaffold smoke app
+        shell: bash
+        run: |
+          node atelier/cli.mjs init --target "$RUNNER_TEMP/smoke-app" --name SmokeApp --no-ai
+          cd "$RUNNER_TEMP/smoke-app"
+          pnpm install
+
+      - name: start dev server (background)
+        shell: bash
+        working-directory: ${{ runner.temp }}/smoke-app
+        run: |
+          pnpm dev &
+          node -e "const t0=Date.now();(async()=>{while(Date.now()-t0<60000){try{await fetch('http://127.0.0.1:5173/');console.log('dev server up');return}catch{}await new Promise(r=>setTimeout(r,500))}throw new Error('dev server never came up')})()"
+
+      - name: snapshot save → check → gated checkpoint anchor
+        shell: bash
+        working-directory: ${{ runner.temp }}/smoke-app
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then export ATELIER_EDGE_PATH=/usr/bin/google-chrome; fi
+          node "$GITHUB_WORKSPACE/atelier/cli.mjs" snapshot save
+          node "$GITHUB_WORKSPACE/atelier/cli.mjs" snapshot check
+          echo "dirty" >> smoke.txt
+          node "$GITHUB_WORKSPACE/atelier/cli.mjs" checkpoint save "ci: baseline anchor (gate MATCH expected)"
