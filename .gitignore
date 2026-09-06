@@ -10,6 +10,9 @@ prototype/dist/
 # M3 arm-run scratch (RUNBOOK: attempt dirs are trash, graded facts live in results/)
 .m3-runs/
 
+# M3 grading artifacts (grade.mjs 落盘产物：含本机路径/时间戳，每次评分都刷新，不入库)
+atelier/benchmarks/m3/**/m3-grade.json
+
 # M3 arm-run leftover copies (react-tpl 等 attempt 拷贝，同 .m3-runs/ 纪律)
 DAgentic.m3-runs_react-tpl/
 # 本地工作区状态：checkpoint 时间线不入公共库；api-surface.json 例外——CI api-diff 门禁（0516054）
