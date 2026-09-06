@@ -97,7 +97,9 @@ jobs:
         id: setup-chrome
         uses: browser-actions/setup-chrome@v1
         with:
-          chrome-version: stable
+          chrome-version: stable      - name: install chrome system deps (setup-chrome ships the binary only)
+        if: runner.os == 'Linux'
+        run: npx playwright install-deps chromium
       - name: snapshot save → check → gated checkpoint anchor
         shell: bash
         working-directory: ${{ runner.temp }}/smoke-app
