@@ -10,7 +10,7 @@
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
-import { $effect, store, __creationSink, __effectSink, type Signal } from "./core.ts";
+import { $effect, $state, store, __creationSink, __effectSink, __withTracking, type Signal } from "./core.ts";
 import { evalExpr } from "./expr.ts";
 
 /** —— token 单源（决策 8）：由 main.ts 启动时加载 atelier.config.json 注入 —— */
@@ -337,9 +337,11 @@ function stringify(v: unknown): string {
   return String(v);
 }
 
-/** 表达式 effect 绑定：求值（track 依赖）→ 变化时执行 write；求值失败渲染 ATR 错误卡而非抛穿白屏 */
-function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unknown) => void): void {
-  $effect(() => {
+/** 表达式 effect 绑定：求值（track 依赖）→ 变化时执行 write；求值失败渲染 ATR 错误卡而非抛穿白屏。
+ * F-5：返回 dispose 并登记进当前受控重建的 cleanup 集（分支切换/行移除时随之析构，
+ * 不再对已脱离节点写入——泄漏修复红检见 tests/f5-kernel.test.ts 红检①）。 */
+function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unknown) => void): () => void {
+  const dispose = $effect(() => {
     let v: unknown;
     try {
       v = evalExpr(expr, scope);
@@ -351,6 +353,64 @@ function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unkno
     }
     write(v);
   });
+  captureCleanup(dispose);
+  return dispose;
+}
+
+/* ---- F-5 effect 所有权：分支/行级析构 ----------------------------------------
+ * 每次「受控重建」（{#if} 换支 / {#each} 无 key 全清 / keyed 行移除）期间创建的 effect
+ * 与嵌套组件实例归属本次重建的 cleanup 集；下次重建或上级析构时逐个 dispose。
+ * 与 HMR __effectSink 正交：HMR 管「实例级」交换回收，这里管「亚实例级」分支回收。
+ * 双重 dispose 安全（$effect dispose 幂等：alive 翻转 + 订阅清理各执行一次）。
+ */
+const teardownStack: Array<Array<() => void>> = [];
+function captureCleanup(dispose: () => void): void {
+  const top = teardownStack[teardownStack.length - 1];
+  if (top) top.push(dispose);
+}
+function runCleanup(set: Array<() => void>): void {
+  for (const d of [...set].reverse()) {
+    try {
+      d();
+    } catch {
+      /* 单个 dispose 抛错不阻断整体回收 */
+    }
+  }
+  set.length = 0;
+}
+
+/* ---- F-5 响应式 props（组件组合语义修订，锐评红检②的修复）----
+ * 动态属性 = prop 信号 + getter：子组件 `props.title` 语法不变，
+ * 读属性即读信号（getter 内 .value 触发 track ⇒ 子组件 effect 自动追踪）；
+ * 父侧 effect 求值表达式回写信号（创建即归属实例/分支两级回收）。
+ * 诚实边界：组件函数体内对 props 的直接读取仍是一次性（`$state(props.x)` 初始化语义不变，
+ * 与主流框架 initial-only 一致）；prop 信号是真实信号——进入依赖图/journal/HMR 按序还原。
+ */
+function bindProp(expr: string, scope: Record<string, unknown>, target: Record<string, unknown>, name: string): void {
+  const sig = $state(__withTracking(() => evalExpr(expr, scope)).result);
+  Object.defineProperty(target, name, {
+    enumerable: true,
+    configurable: true,
+    get: () => sig.value,
+    set: () => {
+      /* props 所有权在父：子组件侧写入静默忽略（props 纯数据红线） */
+    },
+  });
+  captureCleanup(
+    $effect(() => {
+      sig.value = evalExpr(expr, scope);
+    }),
+  );
+}
+
+/** 契约校验的免追踪包裹：校验读取 props getter 不得把 prop 信号追进外层重建 effect
+ *（否则任何 prop 变化都会无谓地触发分支重选） */
+function validateProps(
+  schema: unknown,
+  props: Record<string, unknown>,
+  validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: import("./contract.ts").AtrError },
+): { ok: boolean; error?: import("./contract.ts").AtrError } {
+  return __withTracking(() => validate(schema, props)).result;
 }
 
 /** P2-1 全局最近错误暴露（dev 面经由桥上报；工具侧可查） */
@@ -470,7 +530,7 @@ function mountComponentInner(
     __effectSink.fn = prevEffectSink;
     mountDepth--;
   }
-  liveInstances.add({
+  const inst: LiveInstance = {
     defName: def.name,
     container,
     root,
@@ -480,6 +540,13 @@ function mountComponentInner(
     signals: collected,
     effects: collectedEffects,
     nested: mountDepth >= 1, // 记录时外层尚未自减：≥2 即嵌套挂载
+  };
+  liveInstances.add(inst);
+  // F-5：嵌套实例并入当前受控重建的 cleanup 集——分支切换/行移除时整实例随之析构
+  //（实例级 effects dispose + 摘树 + 信号注销），不再等 HMR 的 reap 兜底。
+  captureCleanup(() => {
+    disposeInstance(inst);
+    liveInstances.delete(inst);
   });
   return root;
 }
@@ -605,8 +672,11 @@ function renderNode(
           return fallback;
         }
         const props: Record<string, unknown> = {};
-        for (const a of node.attrs) props[a.name] = a.dynamic ? evalExpr(a.value, scope) : a.value;
-        const v = validate(def.schema, props);
+        for (const a of node.attrs) {
+          if (a.dynamic) bindProp(a.value, scope, props, a.name); // F-5：动态属性=响应式 prop（getter+父侧回写 effect）
+          else props[a.name] = a.value;
+        }
+        const v = validateProps(def.schema, props, validate);
         if (!v.ok) {
           const errBox = document.createElement("div");
           errBox.className = "atr-error-card";
@@ -642,31 +712,43 @@ function renderNode(
       const anchor = document.createElement("span");
       anchor.style.display = "contents";
       let currentBlock = -1;
-      $effect(() => {
-        let chosen = -1;
-        for (let i = 0; i < node.blocks.length; i++) {
-          const b = node.blocks[i];
-          if (b.test === null) {
-            chosen = i; // else：仅当无前置命中时
-            break;
+      let branchCleanup: Array<() => void> | null = null;
+      captureCleanup(
+        $effect(() => {
+          let chosen = -1;
+          for (let i = 0; i < node.blocks.length; i++) {
+            const b = node.blocks[i];
+            if (b.test === null) {
+              chosen = i; // else：仅当无前置命中时
+              break;
+            }
+            if (booly(evalExpr(b.test, scope))) {
+              chosen = i;
+              break;
+            }
           }
-          if (booly(evalExpr(b.test, scope))) {
-            chosen = i;
-            break;
+          if (chosen !== currentBlock) {
+            // F-5：旧分支先整体析构（effects/嵌套实例），再清 DOM——顺序保证析构期间写入无目标
+            if (branchCleanup) runCleanup(branchCleanup);
+            const set: Array<() => void> = [];
+            branchCleanup = set;
+            teardownStack.push(set);
+            try {
+              // 注意：不能对 appendChild 之后的 DocumentFragment 调 remove()——
+              // appendChild 会把 fragment 的子节点搬进 DOM 并清空 fragment，remove 落空导致旧分支残留。
+              // 与 each 分支一致：逐个清空 anchor 子节点再挂新分支。
+              while (anchor.firstChild) anchor.removeChild(anchor.firstChild);
+              if (chosen >= 0) {
+                const frag = renderNodes(node.blocks[chosen].children, scope, registry, validate, file, componentName);
+                anchor.appendChild(frag);
+              }
+            } finally {
+              teardownStack.pop();
+            }
+            currentBlock = chosen;
           }
-        }
-        if (chosen !== currentBlock) {
-          // 注意：不能对 appendChild 之后的 DocumentFragment 调 remove()——
-          // appendChild 会把 fragment 的子节点搬进 DOM 并清空 fragment，remove 落空导致旧分支残留。
-          // 与 each 分支一致：逐个清空 anchor 子节点再挂新分支。
-          while (anchor.firstChild) anchor.removeChild(anchor.firstChild);
-          if (chosen >= 0) {
-            const frag = renderNodes(node.blocks[chosen].children, scope, registry, validate, file, componentName);
-            anchor.appendChild(frag);
-          }
-          currentBlock = chosen;
-        }
-      });
+        }),
+      );
       return anchor;
     }
     case "each": {
@@ -675,47 +757,70 @@ function renderNode(
       if (node.keyExpr) {
         // P1-1 keyed reconcile：按 by-key 复用已渲染子树（移动 = appendChild 重排，活动 effect 不丢）；
         // 语义边界：key 稳定的项其内容更新必须走 $state 信号（H1）——纯非信号数据变化不会触发该项重渲。
+        // F-5：每行自带 cleanup 集——行移除时该行 effect/嵌套实例随之析构。
         const live = new Map<string, HTMLElement>();
-        $effect(() => {
-          const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
-          const nextKeys = new Set<string>();
-          arr.forEach((item, i) => {
-            const childScope: Record<string, unknown> = { ...scope, [node.item]: item, [node.index]: i };
-            let k: string;
-            try {
-              k = stringify(evalExpr(node.keyExpr!, childScope));
-            } catch {
-              k = `${i}`; // key 求值失败退化为位置 key（诚实降级而非白屏）
+        const rowCleanups = new Map<string, Array<() => void>>();
+        captureCleanup(
+          $effect(() => {
+            const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
+            const nextKeys = new Set<string>();
+            arr.forEach((item, i) => {
+              const childScope: Record<string, unknown> = { ...scope, [node.item]: item, [node.index]: i };
+              let k: string;
+              try {
+                k = stringify(evalExpr(node.keyExpr!, childScope));
+              } catch {
+                k = `${i}`; // key 求值失败退化为位置 key（诚实降级而非白屏）
+              }
+              nextKeys.add(k);
+              let el = live.get(k);
+              if (!el) {
+                const box = document.createElement("span");
+                box.style.display = "contents";
+                const set: Array<() => void> = [];
+                teardownStack.push(set);
+                try {
+                  box.appendChild(renderNodes(node.children, { ...scope, [node.item]: item, [node.index]: i }, registry, validate, file, componentName));
+                } finally {
+                  teardownStack.pop();
+                }
+                rowCleanups.set(k, set);
+                el = box;
+                live.set(k, el);
+              }
+              host.appendChild(el); // 相同顺序时为 no-op；乱序时即完成重排
+            });
+            for (const [k, el] of [...live]) {
+              if (!nextKeys.has(k)) {
+                el.remove();
+                const set = rowCleanups.get(k);
+                if (set) runCleanup(set);
+                rowCleanups.delete(k);
+              }
             }
-            nextKeys.add(k);
-            let el = live.get(k);
-            if (!el) {
-              const box = document.createElement("span");
-              box.style.display = "contents";
-              box.appendChild(renderNodes(node.children, { ...scope, [node.item]: item, [node.index]: i }, registry, validate, file, componentName));
-              el = box;
-              live.set(k, el);
-            }
-            host.appendChild(el); // 相同顺序时为 no-op；乱序时即完成重排
-          });
-          for (const [k, el] of [...live]) {
-            if (!nextKeys.has(k)) {
-              el.remove();
-              live.delete(k);
-            }
-          }
-        });
+          }),
+        );
         return host;
       }
-      // 旧语义（无 by）：全清重建
-      $effect(() => {
-        const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
-        while (host.firstChild) host.removeChild(host.firstChild);
-        arr.forEach((item, i) => {
-          const childScope = { ...scope, [node.item]: item, [node.index]: i };
-          host.appendChild(renderNodes(node.children, childScope, registry, validate, file, componentName));
-        });
-      });
+      // 旧语义（无 by）：全清重建。F-5：重建前先析构上一轮全部行的 cleanup。
+      let rowsCleanup: Array<() => void> = [];
+      captureCleanup(
+        $effect(() => {
+          const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
+          runCleanup(rowsCleanup);
+          rowsCleanup = [];
+          teardownStack.push(rowsCleanup);
+          try {
+            while (host.firstChild) host.removeChild(host.firstChild);
+            arr.forEach((item, i) => {
+              const childScope = { ...scope, [node.item]: item, [node.index]: i };
+              host.appendChild(renderNodes(node.children, childScope, registry, validate, file, componentName));
+            });
+          } finally {
+            teardownStack.pop();
+          }
+        }),
+      );
       return host;
     }
   }
@@ -778,4 +883,6 @@ export const __compiledRT = {
   bindExpr,
   recordRuntimeError,
   mountComponent,
+  bindProp, // F-5：动态属性 = 响应式 prop（编译路径与解释器同源同函数）
+  validateProps, // F-5：契约校验免追踪包裹（同上）
 };

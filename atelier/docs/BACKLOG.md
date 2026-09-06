@@ -23,7 +23,7 @@
 | F-2 | 编译器静态依赖图（决策 3） | 🔄 一期 ✅（清单+差分对拍，语法级超集）；二期 1/3 ✅（09-06 构建期图查询：buildGraph/`--graph`/`graph.static`） | **跳过追踪快路径**（逐挂点 exactness：无短路+无函数调用的叶子挂点静态预订阅；核心=`$effectStatic` 内核手术，golden DOM+差分对拍护航）· **prod 剥离** | 
 | F-3 | 样式纪律收紧（决策 16） | ✅ 二期（R1-R5 全链：颜色/间距/字号；recipe 层同责；诚实边界：reset 豁免、border/line-height/阴影不辖、radius 留候选） | radius 纪律候选 |
 | F-4 | codegen 覆盖扩张 | ✅ 两批（08-30）：else-if 链/void 元素/ATR-101/错位闭合拒绝/对象数组字面量/配对花括号 | 属性级指令（on:/bind: 族）= 新方向候选，需先出设计 |
-| **F-5** | **组件模型补强（响应式 props + effect 所有权）** | 🆕 **2026-09-06 锐评立项，优先级高于 F-2 二期剩余**（可用性地基先于性能优化与叙事）。取证：props 挂载期一次性 `evalExpr`（template.ts:607-608，codegen.test.ts:382 测试名自认"不随信号后续变化"）⇒ 跨组件数据流瘫痪；分支切换丢弃 `bindExpr` 的 dispose（template.ts:590-595/662）⇒ 已脱离节点仍被订阅写入。**开工第一步 = 红检复现两项取证**（锐评为二手取证），再出设计（props 信号传导语义 + effect 所有权树，对位 Solid ownership/Vue effectScope） | L |
+| **F-5** | **组件模型补强（响应式 props + effect 所有权）** | ✅ **红检转绿（2026-09-06 同日）**：① 红检复现锐评双取证（`tests/f5-kernel.test.ts` 红检①②，先红后绿）→ ② effect 所有权：teardown 栈（if 换支/each 无 key 全清/keyed 行移除三路 cleanup，嵌套实例级联 dispose，与 HMR `__effectSink` 两级正交）→ ③ 响应式 props：prop 信号+getter（子组件 `props.x` 语法不变），父侧 effect 回写，解释器/codegen 双路同源（`rt.bindProp`/`rt.validateProps`）。回归：115+8skip 绿 · golden DOM parity（含旧一次性语义测试翻转为传导对拍）· M3 六正控 6/6 PASS · starter 应用 18/18。诚实边界：函数体内 props 直读仍 initial-only；prop 信号入依赖图/journal | 性能四指标复测（bench 需浏览器，留 CI/本机窗口） |
 
 **锐评后置增补（2026-09-06，出数前置）**：M3 三臂出数前必须补——① **负控 fixture 集**：task4-6 各造 ≥2 个"差一点错"变异样本，断言评分器必须红（当前判别力只有正控六绿，负控为零）；② **react 臂评分去利益冲突**：评分者 ≠ 作者，或双人独立盲评取一致（rubric 主观分与 atelier 臂机械评分不对称）；③ RUNBOOK 增补对应附录。样本量口径诚实化：每格 5 个二值 run 的置信区间宽于 +15pt 判据，结论措辞按此克制。
 

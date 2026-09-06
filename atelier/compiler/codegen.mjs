@@ -153,14 +153,14 @@ function emitComponent(n, SV, T, out, uid, st) {
   out.push(`  } else {`);
   out.push(`    const props = {};`);
   for (const a of n.attrs ?? []) {
-    if (a.dynamic) collect(st, "mount", a.value); // 挂载期一次性求值（非响应式）
+    if (a.dynamic) collect(st, "mount", a.value); // F-5 响应式 props：表达式归 mount 桶（父侧 effect 求值回写）
     out.push(
       a.dynamic
-        ? `    props[${esc(a.name)}] = rt.evalExpr(${esc(a.value)}, ${SV});`
+        ? `    rt.bindProp(${esc(a.value)}, ${SV}, props, ${esc(a.name)});`
         : `    props[${esc(a.name)}] = ${esc(a.value)};`,
     );
   }
-  out.push(`    const v = validate(${def}.schema, props);`);
+  out.push(`    const v = rt.validateProps(${def}.schema, props, validate);`);
   out.push(`    if (!v.ok) {`);
   out.push(`      const errBox = document.createElement("div");`);
   out.push(`      errBox.className = "atr-error-card";`);

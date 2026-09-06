@@ -379,7 +379,7 @@ describe("F-4 覆盖扩张第二批 golden DOM parity", () => {
     expect(r.frames[1]).toContain('"5"');
   });
 
-  it("对象字面量经组件 props 挂载期一次性求值（F-2 mount 语义：不随信号后续变化）", async () => {
+  it("对象字面量经组件 props 响应式传导（F-5 语义修订：随父信号变化，双路径对拍；原为挂载期一次性求值）", async () => {
     const raw = `<section><Sub dataCfg={{lvl: n.value}} /></section>`;
     const registry = new Map<string, ComponentDef>();
     registry.set("Sub", {
@@ -391,11 +391,12 @@ describe("F-4 覆盖扩张第二批 golden DOM parity", () => {
       raw,
       () => {
         const n = $state(2);
-        return { scope: { n }, steps: [] };
+        return { scope: { n }, steps: [async () => { n.value = 5; }] };
       },
       { registry },
     );
     expect(r.frames[0]).toContain('"2"');
+    expect(r.frames[1]).toContain('"5"'); // F-5：prop 信号传导，解释器/编译双路径一致
   });
 
   it("字面量花括号原样并入文本（配对失败的 { 不再静默丢弃；{ } 空体同为字面量）", async () => {

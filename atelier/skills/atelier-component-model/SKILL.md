@@ -35,6 +35,7 @@ export const ChatMessage = component(function ChatMessage(props: { text: string;
 - Props are **pure data + literal discriminants**: `status: "running" | "done"`, never wide unions (`string`)
 - **No generics / mapped types** in contracts
 - `schema` in component metadata is the single source; runtime validates on render (ATR-201 on mismatch)
+- Dynamic attrs are **reactive props** (F-5): parent signal change propagates into the child; `<b>{props.text}</b>` re-renders on parent update. **Initial-only** reads stay one-shot: `$state(props.start ?? 0)` captures the mount-time value — re-sync via `$effect` if needed. Never write to `props.*` (parent owns them).
 
 ## $state rules
 
