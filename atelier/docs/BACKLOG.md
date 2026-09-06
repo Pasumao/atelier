@@ -25,7 +25,15 @@
 | F-4 | codegen 覆盖扩张 | ✅ 两批（08-30）：else-if 链/void 元素/ATR-101/错位闭合拒绝/对象数组字面量/配对花括号 | 属性级指令（on:/bind: 族）= 新方向候选，需先出设计 |
 | **F-5** | **组件模型补强（响应式 props + effect 所有权）** | ✅ **红检转绿（2026-09-06 同日）**：① 红检复现锐评双取证（`tests/f5-kernel.test.ts` 红检①②，先红后绿）→ ② effect 所有权：teardown 栈（if 换支/each 无 key 全清/keyed 行移除三路 cleanup，嵌套实例级联 dispose，与 HMR `__effectSink` 两级正交）→ ③ 响应式 props：prop 信号+getter（子组件 `props.x` 语法不变），父侧 effect 回写，解释器/codegen 双路同源（`rt.bindProp`/`rt.validateProps`）。回归：115+8skip 绿 · golden DOM parity（含旧一次性语义测试翻转为传导对拍）· M3 六正控 6/6 PASS · starter 应用 18/18。诚实边界：函数体内 props 直读仍 initial-only；prop 信号入依赖图/journal | 性能四指标复测（bench 需浏览器，留 CI/本机窗口） |
 
-**锐评后置增补（2026-09-06，出数前置）**：M3 三臂出数前必须补——① **负控 fixture 集**：task4-6 各造 ≥2 个"差一点错"变异样本，断言评分器必须红（当前判别力只有正控六绿，负控为零）；② **react 臂评分去利益冲突**：评分者 ≠ 作者，或双人独立盲评取一致（rubric 主观分与 atelier 臂机械评分不对称）；③ RUNBOOK 增补对应附录。样本量口径诚实化：每格 5 个二值 run 的置信区间宽于 +15pt 判据，结论措辞按此克制。
+**锐评三件事收口（2026-09-06 当日）**：① 组件模型 = F-5 ✅（见上）；② 负控集 ✅ ——
+`harness/fixtures/negative/` 六枚变异样本（task4 乱序顺序/徽标缺失、task5 私用 $state/计数过期、
+task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + CI 接线；react 臂评分独立性
+与外部第三方执行入 RUNBOOK §5（组织项，出数时执行）；③ 数字生成源 ✅ —— README/AGENTS 数字
+改标记位，`docs-numbers.mjs` sync/check 机检（CI 已接），性能数字人工口径不变。
+**锐评后置增补原文（存档）**：M3 三臂出数前必须补——① 负控 fixture 集 ✅；② **react 臂评分去利益
+冲突**：评分者 ≠ 作者，或双人独立盲评取一致（rubric 主观分与 atelier 臂机械评分不对称）；
+③ RUNBOOK 增补对应附录 ✅。样本量口径诚实化：每格 5 个二值 run 的置信区间宽于 +15pt 判据，
+结论措辞按此克制。
 
 ### 候选池（锐评衍生 + 既有候选，按需触发，未排期）
 

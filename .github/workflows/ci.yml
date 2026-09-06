@@ -38,8 +38,14 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test
 
+      - name: docs numbers gate (README/AGENTS generated counters)
+        run: node atelier/scripts/docs-numbers.mjs check
+
       - name: skills consistency (CLI/MCP/skill single-source)
         run: node atelier/scripts/check-skills.mjs
+
+      - name: M3 grader negative-control (mutations must FAIL)
+        run: node atelier/benchmarks/m3/negative-check.mjs
 
       - name: structure check (starter template app)
         run: node atelier/scripts/struct.mjs check atelier/templates/app

@@ -12,7 +12,7 @@
 ## 四无人区（对比 2026-08 全量扫描后仍独占；每条按四段式自检：主张/机制/实测/复现）
 
 **① 扁平 schema 一份三用** —— 同一个 `{reqProps, optProps}` 扁平形态同时充当组件契约（`validateFlat`，错误 ATR-201/204/205 四段式）、MCP 工具参数（`mcp-definitions.json` 单源生成 tools/list）、注册表白名单渲染校验。无 $ref/oneOf，代理不猜。
-实测：框架 113 用例 vitest 全绿（契约/守卫/对拍在内）；25 工具单源接线，check-skills 56/0。
+实测：框架 <!--@num:tests-->117<!--@/--> 用例 vitest 全绿（契约/守卫/对拍在内）；<!--@num:tools-->25<!--@/--> 工具单源接线，check-skills 56/0。
 复现：`node atelier/scripts/check-skills.mjs` · `atelier/pnpm test`。
 
 **② 事务状态层 + 双轨回滚** —— 应用状态：命名合并 checkpoint（同名栈顶幂等=轮级回滚）+ 增量事件日志（journal）+ 依赖图查询（`store.graph()`/journal 已接进 MCP）；源码：决策 15 git 源码锚，「未检不锚」三道门禁（测试绿 + 快照 MATCH + API 面无未豁免破坏漂移，才许锚定）。破坏性操作过 `agent.confirm` 三档（deny = ATR-402 结构化拒绝）。
@@ -27,7 +27,7 @@
 
 ## 与标准对齐（地板，不是卖点）
 
-AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S 检查 100% 过）· MCP（25 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按 face 分组）· W3C DTCG 令牌互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`，UA 分类台账）。
+AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S 检查 100% 过）· MCP（<!--@num:tools-->25<!--@/--> 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按 face 分组）· W3C DTCG 令牌互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`，UA 分类台账）。
 
 ## 性能基线（SPEC §7，`atelier bench` 实测 2026-08-30 / Windows / Node 24）
 
@@ -49,7 +49,7 @@ AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S �
 node atelier/cli.mjs init --target my-app --name MyApp   # 三步组装：模板 + runtime vendor + dev vendor
 cd my-app && pnpm install && pnpm dev                     # http://127.0.0.1:5173
 node <repo>/atelier/cli.mjs skills install --target . --name MyApp   # 技能包双落点 + specs 骨架
-node <repo>/atelier/mcp/server.mjs                        # 25 工具 MCP（ATELIER_PROJECT_ROOT=应用目录）
+node <repo>/atelier/mcp/server.mjs                        # <!--@num:tools-->25<!--@/--> 工具 MCP（ATELIER_PROJECT_ROOT=应用目录）
 ```
 
 ## 诚实纪律（引用本仓库任何数字前先读这段）

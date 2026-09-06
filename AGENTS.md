@@ -14,9 +14,9 @@
 | `atelier/compiler/` | 编译器（P0-2）：`dump.mjs`（②：.atr.ts → 模板 AST JSON，与解释器同一解析器）+ `codegen.mjs`（③：AST → 零 import 静态 effect 图模块）。产物经 `registerCompiled` 注册后该组件走零 tokenize 快路径（语义与解释器同源，golden DOM diff 在 tests/codegen.test.ts）。 |
 | `atelier/benchmarks/m3/` | M3 三臂对照实验台（P0-3）：protocol.md（noskill/skill/react × 首遍正确率）+ 6 任务书（task1-3 冒烟正控层 + task4-6 加难层：流式 keyed each / 跨组件事务 / token 纪律）+ grade.mjs 评分器（acceptance harness，正控参考解在 reference/）+ report.mjs §7 出数 + RUNBOOK.md 逐臂出数操作卡。改评分器后必跑六正控回归。 |
 | `atelier/dev/` | dev 面框架件：`atelier-dev-plugin.mjs`（Vite 插件，/__atelier/* 查询/桥接/审计/token 门禁/SSE 下行）、`dev-screenshot.mjs`（CDP 无头截图）、`gen-tailwind-theme.mjs`（决策 16 token→@theme AOT）、`probe-mount.mjs`（挂载诊断探针，PROBE_URL 可换目标）。init 时 vendor 进应用 `scripts/`。 |
-| `atelier/tests/` | runtime 单测（vitest，93 用例：内核/契约/表达式 fuzz/codegen golden DOM 对拍/F-2 静态依赖差分对拍/桥接/HMR/token DTCG/mcp-confirm 闸；M3 评分 harness 无 env 时整体 skip）。 |
+| `atelier/tests/` | runtime 单测（vitest，<!--@num:tests-->117<!--@/--> 用例：内核/契约/表达式 fuzz/codegen golden DOM 对拍/F-2 静态依赖差分对拍/桥接/HMR/token DTCG/mcp-confirm 闸；M3 评分 harness 无 env 时整体 skip）。 |
 | `atelier/templates/app/` | 应用 starter 模板：vite.config / index.html / atelier.config.json（token SSOT）/ src/main.ts + HelloCard 与 ContractProbe 三元共置示例（.atr.ts + .atr.md + .atr.spec.ts）/ manifest.json / llms.txt / atelier-ui.css recipe / styling-discipline + state-discipline 守卫测试。`atelier init` 以此组装自包含应用（specs/ 骨架含 guardrails.md 常驻负例）。 |
-| `atelier/mcp/` | stdio MCP Server（25 工具单源生成，live 工具需一个运行中的应用 dev 面）。 |
+| `atelier/mcp/` | stdio MCP Server（<!--@num:tools-->25<!--@/--> 工具单源生成，live 工具需一个运行中的应用 dev 面）。 |
 | `atelier/skills/` | 多工具兼容技能包（8 个 kebab-case 目录包）。 |
 | `atelier/scripts/` + `cli.mjs` | init（三步组装：模板 + runtime vendor + dev vendor）/ dev / struct / checkpoint / snapshot / skills / mcp，三级诚实标注。 |
 | `atelier/docs/` | 框架规格文档：ARCHITECTURE / design-decisions 0-16 / BACKLOG（执行队列唯一源）/ ROADMAP（2026H2→2027H1 路线计划书）/ SKILLS-PLAN / TECH-*。 |
@@ -48,4 +48,4 @@
 - MCP 工具/命令/错误码三处同步：CLI 表（cli.mjs HELP）/ `atelier/mcp/mcp-definitions.json` / 对应 skill；改后必跑 `node atelier/scripts/check-skills.mjs`。
 - 框架规格文档唯一源在 `atelier/docs/`；缺口与改进队列 = `atelier/docs/BACKLOG.md`。
 - 所有"未确认"结论必须明确标注，不得写成事实；删除文件前先 `checkpoint save`（git 可恢复）。
-- 对外数字单一口径：用例数/工具数/性能以根 README 为现状源——改测试面或工具面时必须同步 README（2026-09-06 锐评整改：曾出现 README 93 用例/24 工具与实际 113/25 失守）。
+- 对外数字单一**生成**源：README/AGENTS 的用例数与工具数是标记位（`<!--@num:tests|tools-->N<!--@/-->`），由 `node atelier/scripts/docs-numbers.mjs` sync 重写 / check 校验（CI 已接）——禁止手写这两个数字（2026-09-06 锐评整改：曾出现 README 93 用例/24 工具与实际失守）；性能数字仍以 README 性能表为唯一人工口径。
