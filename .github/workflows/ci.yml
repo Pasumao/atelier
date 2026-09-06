@@ -77,7 +77,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: echo smoke placeholder
       - name: scaffold smoke app
         shell: bash
         run: |
@@ -97,7 +96,8 @@ jobs:
         id: setup-chrome
         uses: browser-actions/setup-chrome@v1
         with:
-          chrome-version: stable      - name: install chrome system deps (setup-chrome ships the binary only)
+          chrome-version: stable
+      - name: install chrome system deps (setup-chrome ships the binary only)
         if: runner.os == 'Linux'
         run: npx playwright install-deps chromium
       - name: snapshot save → check → gated checkpoint anchor
