@@ -99,7 +99,11 @@ jobs:
           chrome-version: stable
       - name: install chrome system deps (setup-chrome ships the binary only)
         if: runner.os == 'Linux'
-        run: npx playwright install-deps chromium
+        run: npx playwright install-deps chromium      - name: chrome launch sanity
+        if: runner.os == 'Linux'
+        run: |
+          ${{ steps.setup-chrome.outputs.chrome-path }} --version
+          ${{ steps.setup-chrome.outputs.chrome-path }} --headless=new --no-sandbox --disable-gpu --dump-dom about:blank | head -2
       - name: snapshot save → check → gated checkpoint anchor
         shell: bash
         working-directory: ${{ runner.temp }}/smoke-app
