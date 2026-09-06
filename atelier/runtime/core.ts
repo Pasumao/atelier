@@ -212,6 +212,41 @@ export function $effect(fn: () => void): () => void {
 }
 
 /**
+ * F-2 二期（决策 3）：静态预订阅 effect——依赖在创建时由调用方精确给出，运行期不再追踪。
+ * 契约（调用方必须保证）：运行时追踪集 ⊆ deps。⊆ 即语义等价：deps 中未被实际读取的信号
+ * 只是良性超订阅（多触发一次重算，输出不变）。fn 全程在**无追踪上下文**求值——
+ * 首跑可能嵌套在外层 effect 的追踪期（分支重建），置 null 保证不污染外层依赖。
+ * 与 $effect 同款 dispose/HMR sink 语义（__effectSink 归属实例）。
+ */
+export function $effectStatic(fn: () => void, deps: Iterable<Signal>): () => void {
+  const record = { id: ++__effectSeq, deps: new Set(deps) };
+  __effects.add(record);
+  let alive = true;
+  const sub: Subscription = {
+    batched: true,
+    run: () => {
+      if (!alive) return;
+      const prev = tracking;
+      tracking = null;
+      try {
+        fn();
+      } finally {
+        tracking = prev;
+      }
+    },
+  };
+  for (const d of record.deps) d._subs.add(sub);
+  sub.run();
+  const dispose = () => {
+    alive = false;
+    for (const d of record.deps) d._subs.delete(sub);
+    __effects.delete(record);
+  };
+  if (__effectSink.fn) __effectSink.fn(dispose);
+  return dispose;
+}
+
+/**
  * 事务层 v0.3（决策 5）：全量快照为正确性锚点 + 增量 patch 事件日志 + 命名合并 + 依赖图可查询。
  *
  * - **命名合并**：同名 commit 且位于栈顶 → 幂等锚定（保留**最早**快照作整轮回滚点）。

@@ -1,7 +1,7 @@
 /**
  * Atelier prototype — 运行时入口（对应未来 packages/core）。
  */
-export { $state, $derived, $effect, store } from "./core.ts";
+export { $state, $derived, $effect, $effectStatic, store } from "./core.ts"; // $effectStatic: F-2 二期静态预订阅（调用方保证 追踪集⊆deps）
 export type { Signal } from "./core.ts";
 export { html, initTokens, tokenState, mountComponent } from "./template.ts";
 export type { HtmlTemplate, ComponentDef, ComponentRegistry } from "./template.ts";

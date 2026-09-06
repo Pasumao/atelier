@@ -10,8 +10,8 @@
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
-import { $effect, $state, store, __creationSink, __effectSink, __withTracking, type Signal } from "./core.ts";
-import { evalExpr } from "./expr.ts";
+import { $effect, $effectStatic, $state, store, __creationSink, __effectSink, __withTracking, type Signal } from "./core.ts";
+import { evalExpr, exprRootIdents } from "./expr.ts";
 
 /** —— token 单源（决策 8）：由 main.ts 启动时加载 atelier.config.json 注入 —— */
 export const tokenState = {
@@ -339,9 +339,11 @@ function stringify(v: unknown): string {
 
 /** 表达式 effect 绑定：求值（track 依赖）→ 变化时执行 write；求值失败渲染 ATR 错误卡而非抛穿白屏。
  * F-5：返回 dispose 并登记进当前受控重建的 cleanup 集（分支切换/行移除时随之析构，
- * 不再对已脱离节点写入——泄漏修复红检见 tests/f5-kernel.test.ts 红检①）。 */
+ * 不再对已脱离节点写入——泄漏修复红检见 tests/f5-kernel.test.ts 红检①）。
+ * F-2 二期：exactness 达标（无函数调用 + 全部根标识符解析为信号）→ $effectStatic 静态预订阅，
+ * 免除每次重跑的追踪簿记；否则回退动态追踪（宁慢勿错——判据见 exactStaticDeps）。 */
 function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unknown) => void): () => void {
-  const dispose = $effect(() => {
+  const run = () => {
     let v: unknown;
     try {
       v = evalExpr(expr, scope);
@@ -352,9 +354,30 @@ function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unkno
       return;
     }
     write(v);
-  });
+  };
+  const staticDeps = exactStaticDeps(expr, scope);
+  const dispose = staticDeps ? $effectStatic(run, staticDeps) : $effect(run);
   captureCleanup(dispose);
   return dispose;
+}
+
+/** F-2 二期 exactness 判定（保守：不确定 = 回退动态追踪，宁慢勿错）：
+ *  ① 无函数调用——函数体内可能隐藏信号读，静态集抓不住（正确性风险，硬拒）；
+ *  ② 全部根标识符在 scope 中解析为信号——根非信号（如 props 对象/普通值）时其属性链深处
+ *     可能藏着信号读（F-5 的 props getter 即此形态），静态订阅会漏（硬拒）；
+ *  ③ 至少一个依赖——零依赖表达式无快路径收益。
+ *  短路（&&/||/?:）不拒：静态集 ⊇ 实读集只会良性超订阅（多触发一次重算，输出不变）。 */
+function exactStaticDeps(expr: string, scope: Record<string, unknown>): Signal[] | null {
+  if (/[\w$]\s*\(/.test(expr)) return null;
+  const deps: Signal[] = [];
+  for (const id of exprRootIdents(expr)) {
+    const v = (scope as Record<string, unknown>)[id];
+    const isSignal =
+      v !== null && typeof v === "object" && typeof (v as { _kind?: unknown })._kind === "string" && (v as { _subs?: unknown })._subs instanceof Set;
+    if (!isSignal) return null;
+    deps.push(v as Signal);
+  }
+  return deps.length > 0 ? deps : null;
 }
 
 /* ---- F-5 effect 所有权：分支/行级析构 ----------------------------------------

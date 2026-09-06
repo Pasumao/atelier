@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-06T00:39:26.007Z",
+  "generatedAt": "2026-09-06T02:03:19.113Z",
   "root": "D:\\Agentic",
   "layout": "framework",
   "surfaces": {
@@ -11,6 +11,10 @@
       },
       {
         "id": "$effect",
+        "kind": "value"
+      },
+      {
+        "id": "$effectStatic",
         "kind": "value"
       },
       {

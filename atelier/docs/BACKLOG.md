@@ -20,7 +20,7 @@
 | # | 项 | 状态 | 剩余 |
 |---|---|---|---|
 | F-1 | 事务层完整版（决策 5） | ✅ 一期+MCP 接线（08-30）：命名合并/journal/store.graph/bridge 下行；诚实边界：恢复走全量快照 | 无（回放恢复/静态化归 F-2） |
-| F-2 | 编译器静态依赖图（决策 3） | 🔄 一期 ✅（清单+差分对拍，语法级超集）；二期 1/3 ✅（09-06 构建期图查询：buildGraph/`--graph`/`graph.static`） | **跳过追踪快路径**（逐挂点 exactness：无短路+无函数调用的叶子挂点静态预订阅；核心=`$effectStatic` 内核手术，golden DOM+差分对拍护航）· **prod 剥离** | 
+| F-2 | 编译器静态依赖图（决策 3） | 🔄 一期 ✅（清单+差分对拍，语法级超集）；二期 2/3 ✅（09-06 构建期图查询 buildGraph/`--graph`/`graph.static` + 跳过追踪快路径 `$effectStatic`：exactness 判据=无函数调用+全根标识符解析为信号，不确定即回退动态追踪宁慢勿错；短路=良性超订阅；模板层 ATR-301 拒括号使 paren 守卫为纵深防御；5 专项用例+122 全绿+六正控 6/6+bench 全 PASS） | **prod 剥离**（dev 校验/追踪簿记的发布面剥离；需构建面设计，阶段四） |
 | F-3 | 样式纪律收紧（决策 16） | ✅ 二期（R1-R5 全链：颜色/间距/字号；recipe 层同责；诚实边界：reset 豁免、border/line-height/阴影不辖、radius 留候选） | radius 纪律候选 |
 | F-4 | codegen 覆盖扩张 | ✅ 两批（08-30）：else-if 链/void 元素/ATR-101/错位闭合拒绝/对象数组字面量/配对花括号 | 属性级指令（on:/bind: 族）= 新方向候选，需先出设计 |
 | **F-5** | **组件模型补强（响应式 props + effect 所有权）** | ✅ **红检转绿（2026-09-06 同日）**：① 红检复现锐评双取证（`tests/f5-kernel.test.ts` 红检①②，先红后绿）→ ② effect 所有权：teardown 栈（if 换支/each 无 key 全清/keyed 行移除三路 cleanup，嵌套实例级联 dispose，与 HMR `__effectSink` 两级正交）→ ③ 响应式 props：prop 信号+getter（子组件 `props.x` 语法不变），父侧 effect 回写，解释器/codegen 双路同源（`rt.bindProp`/`rt.validateProps`）。回归：115+8skip 绿 · golden DOM parity（含旧一次性语义测试翻转为传导对拍）· M3 六正控 6/6 PASS · starter 应用 18/18。诚实边界：函数体内 props 直读仍 initial-only；prop 信号入依赖图/journal | **无**（性能四指标复测 2026-09-06 全 PASS：8.84KB/2.8ms/54ms/284ms，README 口径已更新） |
