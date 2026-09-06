@@ -24,6 +24,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function findBrowser() {
   const candidates = [
     process.env.ATELIER_EDGE_PATH,
+    // Linux CI/桌面候选（GitHub runner 预装 google-chrome-stable；容器常见 chromium 系）
+    ...(process.platform === "linux"
+      ? ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium"]
+      : []),
     "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
     "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
   ].filter(Boolean);
@@ -104,6 +108,8 @@ export async function openTransientBrowser({ debugPort = 9345 } = {}) {
       // 导致 Page.captureScreenshot 永久挂起（2026-08-27 实测事故）。
       // 进程内 GPU 规避该故障域；常驻实例无起杀churn，该 flag 继续保留（自愈兜底仍在）。
       "--in-process-gpu",
+      // Linux CI（root/无 user namespace 容器）沙箱不可用时实例起不来——加 no-sandbox
+      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
       "--window-size=1280,860",
       "about:blank",
     ],
