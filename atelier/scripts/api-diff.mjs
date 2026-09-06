@@ -215,7 +215,8 @@ export function makeSnapshot(root, only = null) {
   return {
     schemaVersion: SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
-    root,
+    // 只留目录名：快照入库作 CI 门禁基线，绝对本地路径不进公共库
+    root: path.basename(root),
     layout,
     surfaces,
   };
