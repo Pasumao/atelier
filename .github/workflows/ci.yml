@@ -69,6 +69,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: true
+    env:
+      ATELIER_EDGE_PATH: ${{ runner.os == 'Linux' && '/usr/bin/google-chrome' || '' }}
     steps:
       - uses: actions/checkout@v4
       - run: echo smoke placeholder
