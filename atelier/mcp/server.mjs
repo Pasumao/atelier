@@ -184,6 +184,30 @@ async function callTool(name, args) {
     return checkpointCli(["rollback", String(args.id), "--json"], PROJECT_ROOT);
   }
 
+  /* ---- F-2 二期：构建期静态依赖图查询（read-only，不跑应用、不需要 dev face）----
+   * thin spawn over compiler/codegen.mjs --graph-only（单源 = 同一收集器），读 stage ② dump
+   * 出组件级 deps 清单；无 dump 时结构化报错指路 compile。 */
+  if (name === "graph.static") {
+    const root = path.resolve(String(args?.root ?? PROJECT_ROOT));
+    const astDir = path.join(root, ".atr", "ast");
+    if (!fs.existsSync(path.join(astDir, "index.json"))) {
+      throw toolError(
+        `ATR-401: no stage-② dump at ${astDir}`,
+        "run 'node <repo>/atelier/cli.mjs compile --root <appDir>' first, then retry graph.static",
+      );
+    }
+    const codegen = path.join(HERE, "..", "compiler", "codegen.mjs");
+    const r = spawnSync(process.execPath, [codegen, "--ast", astDir, "--graph-only", "--quiet"], { encoding: "utf8", timeout: 60000 });
+    if (r.status !== 0) {
+      throw toolError("ATR-500: static graph build failed", (r.stderr ?? "").trim().split("\n").slice(-3).join(" | ") || "inspect .atr/ast dump integrity");
+    }
+    try {
+      return JSON.parse(r.stdout);
+    } catch {
+      throw toolError("ATR-500: graph payload unparseable", "rerun graph.static; if it persists, check codegen.mjs --graph-only output");
+    }
+  }
+
   /* ---- P0 backlog 批次转绿（2026-08-29）：state.get / test.run / diff.report / feedback.read / docs.search ---- */
   if (name === "state.get") {
     const p = String(args?.path ?? "").trim();

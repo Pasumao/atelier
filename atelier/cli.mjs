@@ -48,13 +48,14 @@ QUALITY GATES
   atelier snapshot save | check [--update]                         MINI* visual regression via the dev face
                                                                          (byte+pixel tiers; never auto-accepts)
   atelier api-diff snapshot | check [--root <dir>] [--json]        MINI  public API surface snapshot + drift gate
-                                                    [--strict] [--allow <f>]  (removed/changed = breaking, exit 1)
+                                            [--strict] [--allow <f>] [--budget <0..1>]  (removed/changed = breaking, exit 1)
   atelier checkpoint save <name> [--no-gate] | list | rollback <id>     FULL  decision-15 source checkpoints; save enforces 未检不锚 (P2-2 snapshot + P3-4 api-diff)
 
 COMPILER
   atelier compile [--root <dir>] [--out <dir>] [--stdout]          MINI* P0-2 stage ② AST dump: *.atr.ts →
                                                                           .atr/ast/*.json via the runtime parser
-                                                                          (stage ③ codegen: pending)
+                                                                          (stage ③ codegen: node atelier/compiler/codegen.mjs
+                                                                          --ast <dir> [--graph]; --graph-only = 依赖图查询 stdout)
 
 BENCHMARK
   atelier bench --app <dir> [--port N] [--json] [--keep]           MINI* P0-4 SPEC §7 four-metric baseline

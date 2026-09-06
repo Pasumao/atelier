@@ -60,6 +60,14 @@
   的表达式上成立。两条不变式有差分对拍实证（运行时追踪集 ⊆ 静态集 200 样本；无短路表达式等号
   100 样本），钩子为 `core.ts __withTracking`。用途：构建期依赖图（不跑应用即可查询）+ 未来
   "跳过追踪"快路径的可靠性依据（不在清单中的信号不可能被该 effect 依赖）。
+- **静态依赖图第二期·构建期图查询（2026-09-06，F-2）**：清单从惰性元数据转正为查询工件——
+  `buildGraph`（单源 = programWithDeps 同一收集器，组件级 = 各模板并集）+ codegen CLI `--graph`
+  （落盘 `.atr/graph/<Component>.json`，schema atelier-graph/0.1）/ `--graph-only`（零落盘，
+  合并图 JSON → stdout）+ MCP 查询工具 **`graph.static`**（thin spawn 同源路径；无 stage ② dump
+  时 ATR-401 指路 `atelier compile`；stdio 快乐径 + 错误径 e2e）。与 `state.graph` 分工：静态图=
+  改代码前影响面速查（无需运行应用），活图=运行时真实依赖。**剩余二期**：跳过追踪快路径
+  （逐挂点 exactness 判据：无短路 + 无函数调用的叶子挂点才可静态预订阅，核心=$effectStatic）、
+  prod 剥离。
 
 ## 决策 4：渲染输出与 SSR
 - **定论**：**纯客户端细粒度渲染为主轨（决策 0 与 2 的直接延伸）+ 可选静态预渲染（SSG + 部分水合，`--static` 开关默认关）；SSR 流式服务器降为后期可选插件（`atelier-server`）；服务器驱动 UI 不进路线图。**

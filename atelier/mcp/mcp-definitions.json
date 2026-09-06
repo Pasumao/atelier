@@ -227,6 +227,23 @@
    "errors": []
   },
   {
+   "name": "graph.static",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Build-time static dependency graph per component (F-2, decision 3): reactive/mount/events identifier buckets from the stage-② dump — no running app needed. Syntax-level superset of runtime tracking (includes non-executed branches).",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "root": {
+      "type": "string"
+     }
+    }
+   },
+   "errors": ["ATR-401 no stage-② dump — run atelier compile --root <appDir> first"]
+  },
+  {
    "name": "checkpoint.list",
    "face": "operation",
    "priority": "P0",

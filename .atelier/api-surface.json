@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-06T00:12:36.747Z",
+  "generatedAt": "2026-09-06T00:39:26.007Z",
   "root": "D:\\Agentic",
   "layout": "framework",
   "surfaces": {
@@ -263,6 +263,9 @@
       },
       {
         "id": "feedback.read"
+      },
+      {
+        "id": "graph.static"
       },
       {
         "id": "registry.get_component"

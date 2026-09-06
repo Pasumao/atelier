@@ -95,3 +95,65 @@ describe("stage ② dump ↔ runtime parser identity", () => {
     expect(c.templates[0].ast).toEqual(JSON.parse(JSON.stringify(ast)));
   });
 });
+
+/* ---- F-2 二期：构建期静态依赖图（决策 3「不跑应用即可查询」） ---- */
+describe("buildGraph + codegen --graph-only (F-2 phase 2)", () => {
+  const RAW = `
+    <section>
+      <h2>{props.title}</h2>
+      {#if count.value > 0}<b>{count.value}</b>{/if}
+      <button on:click={inc}>+1</button>
+    </section>
+  `;
+
+  it("buildGraph：组件级桶与 compileFunction 单模板清单一致（单源不二）", async () => {
+    const { buildGraph, compileFunction } = await import("../compiler/codegen.mjs");
+    const g = buildGraph("Widget", [RAW]);
+    expect(g).toMatchObject({ component: "Widget", schema: "atelier-graph/0.1" });
+    const single = compileFunction("Widget", RAW).deps;
+    expect(g.deps).toEqual(single);
+    expect(g.deps.reactive).toContain("props");
+    expect(g.deps.reactive).toContain("count");
+    expect(g.deps.events).toContain("inc");
+  });
+
+  it("buildGraph：多模板取并集；空桶保留", async () => {
+    const { buildGraph } = await import("../compiler/codegen.mjs");
+    const g = buildGraph("Pair", ["<i>{a.value}</i>", "<b on:click={go}>{props.x}</b>"]);
+    expect(g.deps.reactive.sort()).toEqual(["a", "props"]);
+    expect(g.deps.events).toEqual(["go"]);
+  });
+
+  it("end-to-end: dump → codegen --graph-only 零落盘出合并图", (ctx) => {
+    if (!NODE_OK) return ctx.skip();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atr-graph-"));
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "src", "Widget.atr.ts"),
+      [
+        'import { component, html } from "atelier/runtime";',
+        "export const Widget = component(function Widget(props: { title: string }) {",
+        "  return html`<section><h2>{props.title}</h2></section>`;",
+        '}, { name: "Widget", schema: { type: "object", reqProps: { title: { type: "string" } }, optProps: {} } });',
+      ].join("\n"),
+    );
+    try {
+      const dump = spawnSync(process.execPath, [DUMP, "--root", dir], { encoding: "utf8" });
+      if (dump.status !== 0) throw new Error(`dump failed: ${dump.stderr}`);
+      const codegen = path.resolve(__dirname, "..", "compiler", "codegen.mjs");
+      const r = spawnSync(process.execPath, [codegen, "--ast", path.join(dir, ".atr", "ast"), "--graph-only", "--quiet"], {
+        encoding: "utf8",
+      });
+      if (r.status !== 0) throw new Error(`codegen failed: ${r.stderr}`);
+      const out = JSON.parse(r.stdout);
+      expect(out.schema).toBe("atelier-graph/0.1");
+      expect(out.components).toHaveLength(1);
+      expect(out.components[0].deps.reactive).toContain("props");
+      // 零落盘承诺：不产生 compiled/ 或 graph/ 目录
+      expect(fs.existsSync(path.join(dir, ".atr", "compiled"))).toBe(false);
+      expect(fs.existsSync(path.join(dir, ".atr", "graph"))).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

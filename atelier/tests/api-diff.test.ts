@@ -170,6 +170,19 @@ describe("diff 分类与门禁语义", () => {
     expect(d.surfaces["token-keys"].valueDrift[0]).toEqual({ id: "color.primary", from: "#111", to: "#4D6BFE" });
   });
 
+  it("--budget：值漂移比例超预算 = 红；未超 = 绿（信息性语义不被预算误伤）", () => {
+    const before = base({ "token-keys": [{ id: "a", value: "1" }, { id: "b", value: "2" }, { id: "c", value: "3" }, { id: "d", value: "4" }] });
+    const after = base({ "token-keys": [{ id: "a", value: "1" }, { id: "b", value: "2" }, { id: "c", value: "3" }, { id: "d", value: "9" }] });
+    const over = diffSurfaces(before, after, { budget: 0.1 });
+    expect(over.summary.valueBudgetExceeded).toEqual({ count: 1, total: 4, budget: 0.1 });
+    expect(judge(over).violations.some((v) => v.kind === "value-budget")).toBe(true);
+    const under = diffSurfaces(before, after, { budget: 0.5 });
+    expect(under.summary.ok).toBe(true);
+    expect(judge(under).violations).toEqual([]);
+    // budget 0 = 冻结：任何值漂移都红
+    expect(diffSurfaces(before, after, { budget: 0 }).summary.ok).toBe(false);
+  });
+
   it("churn 漂移率 = 变更条目 / baseline 总条目", () => {
     const d = diffSurfaces(
       base({ "mcp-tools": [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }] }),

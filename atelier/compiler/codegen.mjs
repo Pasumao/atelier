@@ -17,9 +17,12 @@
  *     的 __compiledRT，解释器同函数）⇒ 产物与 runtime 路径/打包布局零耦合，语义同源。
  *
  * Usage:
- *   node atelier/compiler/codegen.mjs --ast <dir> [--out <dir>] [--quiet]
+ *   node atelier/compiler/codegen.mjs --ast <dir> [--out <dir>] [--quiet] [--graph]
  *     --ast   stage ② dump 目录（含 index.json；默认 <root>/.atr/ast）
  *     --out   产物目录（默认 <ast-dir>/../compiled）
+ *     --graph 同时落盘构建期静态依赖图 <ast-dir>/../graph/<Component>.json（F-2 二期）
+ *   node atelier/compiler/codegen.mjs --ast <dir> --graph-only [--quiet]
+ *     查询模式：零落盘，把合并的组件依赖图 JSON 打到 stdout（MCP graph.static 单源）
  *
  * Zero npm dependencies. Requires Node ≥ 22.18（直载 runtime TS，与 dump.mjs 同约束）。
  */
@@ -329,6 +332,26 @@ export function programSource(ast) {
   return programWithDeps(ast).body;
 }
 
+/** F-2 二期：raws → 构建期静态依赖图（决策 3「不跑应用即可查询」的查询工件）。
+ * 单源 = programWithDeps 同一收集器；组件级 = 各模板清单的并集。
+ * 语义边界沿用一期诚实标注：语法级引用集 ⊇ 运行时追踪集（含未执行分支）。 */
+export function buildGraph(name, raws) {
+  const acc = { reactive: new Set(), mount: new Set(), events: new Set() };
+  for (const raw of raws) {
+    const { deps } = programWithDeps(parseTemplate(raw));
+    for (const k of Object.keys(acc)) for (const id of deps[k]) acc[k].add(id);
+  }
+  return {
+    component: name,
+    schema: "atelier-graph/0.1",
+    deps: {
+      reactive: [...acc.reactive].sort(),
+      mount: [...acc.mount].sort(),
+      events: [...acc.events].sort(),
+    },
+  };
+}
+
 function indentLines(text, pad) {
   return text.split("\n").map((l) => pad + l).join("\n");
 }
@@ -349,24 +372,41 @@ function main() {
   const AST_DIR = path.resolve(argOf("--ast") ?? path.join(process.cwd(), ".atr", "ast"));
   const OUT_DIR = path.resolve(argOf("--out") ?? path.join(AST_DIR, "..", "compiled"));
   const QUIET = argv.includes("--quiet");
+  const GRAPH = argv.includes("--graph"); // F-2 二期：同时落盘 .atr/graph/<Component>.json
+  const GRAPH_ONLY = argv.includes("--graph-only"); // 查询模式：不落盘任何产物，合并图 JSON → stdout（MCP graph.static 单源）
   if (!fs.existsSync(path.join(AST_DIR, "index.json"))) {
     die(`no stage ② dump at ${AST_DIR}`, "run 'node atelier/compiler/dump.mjs --root <appDir>' first");
   }
-  fs.mkdirSync(OUT_DIR, { recursive: true });
+  const GRAPH_DIR = path.resolve(argOf("--graph-dir") ?? path.join(AST_DIR, "..", "graph"));
+  if (!GRAPH_ONLY) fs.mkdirSync(OUT_DIR, { recursive: true });
   let components = 0;
   let templates = 0;
+  const graphs = [];
   for (const f of findJson(AST_DIR)) {
     const dump = JSON.parse(fs.readFileSync(f, "utf8"));
     const name = dump.component;
     if (!name || name === "(module)" || !Array.isArray(dump.templates)) continue;
-    const src = compileModuleSource(name, dump.templates.map((t) => t.raw));
-    fs.writeFileSync(path.join(OUT_DIR, `${name}.mjs`), src, "utf8");
+    const raws = dump.templates.map((t) => t.raw);
+    if (GRAPH || GRAPH_ONLY) graphs.push(buildGraph(name, raws));
+    if (!GRAPH_ONLY) {
+      const src = compileModuleSource(name, raws);
+      fs.writeFileSync(path.join(OUT_DIR, `${name}.mjs`), src, "utf8");
+      if (GRAPH) {
+        fs.mkdirSync(GRAPH_DIR, { recursive: true });
+        fs.writeFileSync(path.join(GRAPH_DIR, `${name}.json`), JSON.stringify(graphs[graphs.length - 1], null, 2) + "\n", "utf8");
+      }
+    }
     components += 1;
     templates += dump.templates.length;
+  }
+  if (GRAPH_ONLY) {
+    process.stdout.write(JSON.stringify({ schema: "atelier-graph/0.1", components: graphs }) + "\n");
+    return;
   }
   if (!QUIET) {
     console.log(`[atelier-compiler] stage ③ codegen: ${components} component(s), ${templates} template(s)`);
     console.log(`  → ${path.relative(process.cwd(), OUT_DIR)}${path.sep}<Component>.mjs（应用侧 import + registerCompiled 即接入零 tokenize 快路径）`);
+    if (GRAPH) console.log(`  → ${path.relative(process.cwd(), GRAPH_DIR)}${path.sep}<Component>.json（F-2 构建期依赖图）`);
   }
 }
 

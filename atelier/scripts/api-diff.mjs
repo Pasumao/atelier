@@ -221,8 +221,9 @@ export function makeSnapshot(root, only = null) {
   };
 }
 
-/** diff：removed/changed = breaking；added = additive；contract req→opt = relaxed。 */
-export function diffSurfaces(baseline, current, { strict = false } = {}) {
+/** diff：removed/changed = breaking；added = additive；contract req→opt = relaxed。
+ * budget（0..1）：token 值漂移条目占 baseline token 条目的比例上限，超限 = 门禁红（冻结令牌场景）。 */
+export function diffSurfaces(baseline, current, { strict = false, budget = null } = {}) {
   const surfaces = {};
   const totals = { added: 0, removed: 0, changed: 0, relaxed: 0, valueDrift: 0, breaking: 0, baselineEntries: 0 };
   const allNames = [...new Set([...Object.keys(baseline.surfaces ?? {}), ...Object.keys(current.surfaces ?? {})])].sort();
@@ -277,6 +278,16 @@ export function diffSurfaces(baseline, current, { strict = false } = {}) {
     churn: Number(drift.toFixed(4)),
     ok: strict ? totals.breaking === 0 && totals.added === 0 : totals.breaking === 0,
   };
+  if (budget !== null) {
+    const tokenBefore = baseline.surfaces?.["token-keys"]?.length ?? 0;
+    const ratio = tokenBefore ? totals.valueDrift / tokenBefore : 0;
+    summary.valueBudget = budget;
+    summary.valueDriftRatio = Number(ratio.toFixed(4));
+    if (ratio > budget) {
+      summary.ok = false;
+      summary.valueBudgetExceeded = { count: totals.valueDrift, total: tokenBefore, budget };
+    }
+  }
   return { schemaVersion: SCHEMA_VERSION, comparedAt: new Date().toISOString(), summary, surfaces };
 }
 
@@ -294,6 +305,8 @@ export function judge(diffResult, allowIds = []) {
       for (const id of s.added) violations.push({ surface: name, kind: "added(strict)", id });
     }
   }
+  const b = diffResult.summary.valueBudgetExceeded;
+  if (b) violations.push({ surface: "token-keys", kind: "value-budget", id: `valueDrift ${b.count}/${b.total} > budget ${b.budget}` });
   return { ...diffResult, violations };
 }
 
@@ -343,13 +356,19 @@ if (isMain()) {
       const current = makeSnapshot(root, flag("--surfaces"));
       const allowFile = flag("--allow");
       const allowIds = allowFile ? readJson(path.resolve(allowFile))?.accepted ?? [] : [];
-      const result = judge(diffSurfaces(baseline, current, { strict: has("--strict") }), allowIds);
+      let budget = null;
+      if (has("--budget")) {
+        budget = Number(flag("--budget"));
+        if (!Number.isFinite(budget) || budget < 0 || budget > 1) die("--budget 需为 0..1 的比例（如 0.02 = 值漂移 ≤2%）", 2);
+      }
+      const result = judge(diffSurfaces(baseline, current, { strict: has("--strict"), budget }), allowIds);
       if (jsonOut) {
         console.log(JSON.stringify(result, null, 2));
       } else {
         const s = result.summary;
         console.log(`[atelier api-diff] check vs ${path.basename(baselinePath)}`);
         console.log(`  entries(baseline): ${s.baselineEntries} · churn ${(s.churn * 100).toFixed(2)}%`);
+        if (s.valueBudget !== undefined) console.log(`  value budget: ${(s.valueDriftRatio * 100).toFixed(2)}% / ${(s.valueBudget * 100).toFixed(2)}%`);
         for (const [name, surf] of Object.entries(result.surfaces)) {
           const n = surf.added.length + surf.removed.length + surf.changed.length + surf.relaxed.length + surf.valueDrift.length;
           if (!n) continue;
@@ -371,7 +390,7 @@ if (isMain()) {
       process.exit(passed ? 0 : 1);
     }
 
-    die("usage: api-diff.mjs snapshot|check [--root <dir>] [--json] [--strict] [--allow <file>]", 2);
+    die("usage: api-diff.mjs snapshot|check [--root <dir>] [--json] [--strict] [--allow <file>] [--budget <0..1>]", 2);
   } catch (e) {
     die(`error: ${e.message}`, 2);
   }

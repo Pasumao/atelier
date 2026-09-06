@@ -9,7 +9,7 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 
 | Face | Tools | Power |
 |---|---|---|
-| **Query (read-only)** | `structure.map` · `structure.check` · `registry.list_components` · `registry.get_component` · `tokens.list` · `state.snapshot` · `state.get` · `state.graph` · `state.journal` · `ui.screenshot` · `ui.a11y` · `docs.search` | inspect only — `structure.*` computed server-locally, no dev server needed |
+| **Query (read-only)** | `structure.map` · `structure.check` · `graph.static` · `registry.list_components` · `registry.get_component` · `tokens.list` · `state.snapshot` · `state.get` · `state.graph` · `state.journal` · `ui.screenshot` · `ui.a11y` · `docs.search` | inspect only — `structure.*`/`graph.static` computed server-locally, no dev server needed |
 | **Operation** | `checkpoint.list` · `checkpoint.rollback` · `checkpoint.source_list` · `checkpoint.source_commit` · `checkpoint.source_rollback` · `state.time_travel` · `test.run` · `snapshot.diff` · `snapshot.review_diff` · `diff.report` | changes state; **audit-logged**, confirm tier applies |
 | **Audit** | `audit.log` · `feedback.read` | read side effects + human feedback |
 
@@ -34,10 +34,11 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 
 Tools accept **flat** schemas (no `$ref`/`oneOf`) — identical to component contracts. If a tool's `fix`/schema is unfamiliar, query `docs.search` instead of guessing.
 
-## Wire notes (v0.2 — 全部 24 工具已接线)
+## Wire notes (v0.2 — 全部 25 工具已接线)
 
 - `state.get`：path = `sig-<n>[.子路径]`（信号按安装序编号，无 debugName——bridge 已知边界）；拿不准先 `state.snapshot` 看全貌。
 - `state.graph`：活依赖图——signals（sig-N 键+kind）与每条 effect 依赖边；sig-N 与 `state.snapshot.signals` 同一键空间；适合改代码前判断"动哪个信号会影响哪些 effect"。
+- `graph.static`：构建期静态依赖图（F-2/决策 3）——每组件 reactive/mount/events 标识符桶，读 stage ② dump 即得（**不跑应用、不需要 dev face**；前置 `atelier compile --root <appDir>` 生成 .atr/ast）；与 `state.graph` 互补：静态图=改代码前的影响面速查，活图=运行时真实依赖。诚实边界：语法级引用集 ⊇ 运行时追踪集（含未执行分支）。
 - `state.journal`：$state 变更事件日志（时间升序，sig/from/to）——`state.snapshot` 推送只带最近 50 条，本工具可 `lines` 取更深（≤500）；"谁改了 sig-2"从这里查。
 - `ui.a11y`：无障碍树缩进文本（role/name/value）——检视界面语义优先于像素（Playwright MCP 同款结论）；`ATELIER_TOOLSETS=query` 可按 face 只暴露子集工具。
 - `agent-health` 端点（`/__atelier/agent-health`，token 门内）：连接 UA 分类台账（human/headless/tooling）+ 最近错误——"页面上是谁在操作"从这里看；UA 启发式面向检视不面向鉴权。
