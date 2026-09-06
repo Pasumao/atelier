@@ -1,17 +1,40 @@
 # Atelier — 为 AI 编程代理设计的前端框架
 
-> **定位一句话**：不参与"更快渲染"的主流竞赛；下注"当编码代理成为前端第一类使用者，框架应内建契约、检视、恢复与结构公理"。
 > Slogan（措辞终审 2026-09-06，用户全权委托拍板）：**意图进，界面出 / *Intent in, interface out.***
+> 定位一句话：不参与"更快渲染"的主流竞赛；下注"当编码代理成为前端第一类使用者，框架应内建契约、检视、恢复与结构公理"。
 >
-> 本工作区即框架仓库（script-form v0.2）。框架规格见 `atelier/docs/`；缺口与改进队列 = `atelier/docs/BACKLOG.md`；路线计划 = `atelier/docs/ROADMAP.md`；常用命令 = `AGENTS.md`。
+> 本工作区即框架仓库（script-form v0.2）。系统是什么 → `atelier/docs/ARCHITECTURE.md`；代理怎么用 → `atelier/docs/SPEC-Agentic-DX-v0.1.md`；完整文档地图见文末。
 
 ## Why：AX（Agentic Experience）是新的第一公民
 
 主流框架在 2026 年把 agent 基建当**外挂**补上（AGENTS.md 生成器、MCP 检视插件、agent 检测 dev server）——已成为及格线。Atelier 的路径不同：把 agent 当**第一类使用者**，从框架第一行开始内建它需要的东西——机器可读契约、可检视状态、双轨可逆、机检门禁。对应的新词汇：**AX**（Agentic Experience，相对 UX）、**agentic engineering**（相对 frontend engineering）。框架本体就是 agent 最佳实践的框架化实现，而不是另一份文档。
 
-## License
+## 架构：五层（详见 ARCHITECTURE.md）
 
-MIT（见 LICENSE）。
+```
+L5 人对界面    atelier review —— 预览 / checkpoint 时间轴 / 批准-驳回-点踩
+L4 反馈通道    atelier dev —— 亚秒 HMR · 截图回环 · 审计日志
+L3 代理层      stdio MCP Server —— 查询 / 操作 / 审计三面工具（token 鉴权）
+L2 契约层      扁平 schema 单一真相 —— 组件契约 / MCP 工具定义 / 注册表白名单一份三用
+L1 内核        零依赖运行时 —— 信号引擎 · 事务状态层 · 三态原语 · 模板渲染
+```
+
+工具链与前端运行时**零代码耦合**：runtime 不 import 任何工具链模块，工具链仅经 HTTP dev 面 / git / 文件系统与应用交互。新应用 = `atelier init` 三步组装（模板 + runtime vendor + dev vendor），自包含可跑。
+
+## 仓库结构
+
+| 目录 / 文件 | 说明 |
+|---|---|
+| `atelier/runtime/` | 零依赖运行时内核（真相源）：信号引擎 / 模板解释器 / 表达式求值 / 契约校验 / 组件注册表 / 三态原语 / dev 状态桥 |
+| `atelier/compiler/` | 模板编译器：.atr.ts → 模板 AST（②）→ 零 import 静态 effect 图模块（③），golden DOM 对拍守门 |
+| `atelier/dev/` | dev 面框架件：Vite 插件（/__atelier/* 面）、无头截图、token→@theme 生成、挂载探针 |
+| `atelier/mcp/` | 零依赖 stdio MCP Server（<!--@num:tools-->25<!--@/--> 工具，`mcp-definitions.json` 单源生成） |
+| `atelier/skills/` | 多工具兼容技能包（8 个 kebab-case 目录包） |
+| `atelier/scripts/` + `cli.mjs` | init / dev / struct / checkpoint / snapshot / skills / mcp 等统一入口，三级诚实标注 |
+| `atelier/templates/app/` | 应用 starter 模板（.atr.ts + .atr.md + .atr.spec.ts 三元共置示例 / token SSOT / 守卫测试） |
+| `atelier/tests/` | runtime 单测（vitest，<!--@num:tests-->125<!--@/--> 用例） |
+| `atelier/benchmarks/m3/` | M3 三臂对照实验台（noskill/skill/react × 首遍正确率） |
+| `atelier/docs/` | 框架规格文档（地图见文末） |
 
 ## 四无人区（对比 2026-08 全量扫描后仍独占；每条按四段式自检：主张/机制/实测/复现）
 
@@ -33,6 +56,15 @@ MIT（见 LICENSE）。
 
 AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S 检查 100% 过）· MCP（<!--@num:tools-->25<!--@/--> 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按 face 分组）· W3C DTCG 令牌互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`，UA 分类台账）。
 
+## Quick start
+
+```bash
+node atelier/cli.mjs init --target my-app --name MyApp   # 三步组装：模板 + runtime vendor + dev vendor
+cd my-app && pnpm install && pnpm dev                     # http://127.0.0.1:5173
+node <repo>/atelier/cli.mjs skills install --target . --name MyApp   # 技能包双落点 + specs 骨架
+node <repo>/atelier/mcp/server.mjs                        # <!--@num:tools-->25<!--@/--> 工具 MCP（ATELIER_PROJECT_ROOT=应用目录）
+```
+
 ## 性能基线（SPEC §7，`atelier bench` 实测 2026-09-06 / Windows / Node 24 · F-5 内核补强 + F-2 快路径后复测全 PASS）
 
 > 数字口径：本表 = 当前唯一现状口径；ROADMAP §2 的 6.25KB/2-3ms/51ms/~300ms 为阶段零历史基线留档，勿混引。
@@ -47,14 +79,24 @@ AGENTS.md（6 万+ 项目）· Agent Skills（agentskills.io 格式门禁，S �
 复现：`node atelier/cli.mjs init --target /tmp/app --name App && cd /tmp/app && pnpm install && node <repo>/atelier/cli.mjs bench --app /tmp/app`。
 诚实性：FAIL 不粉饰、不豁免，按 SPEC §7 自动转 P0 工单；数字会随修复移动（HMR 曾 108ms FAIL→保值热交换后 PASS；截图曾 1933ms FAIL→常驻实例后 PASS）。
 
-## Quick start
+## 路线与现状（详见 ROADMAP.md）
 
-```bash
-node atelier/cli.mjs init --target my-app --name MyApp   # 三步组装：模板 + runtime vendor + dev vendor
-cd my-app && pnpm install && pnpm dev                     # http://127.0.0.1:5173
-node <repo>/atelier/cli.mjs skills install --target . --name MyApp   # 技能包双落点 + specs 骨架
-node <repo>/atelier/mcp/server.mjs                        # <!--@num:tools-->25<!--@/--> 工具 MCP（ATELIER_PROJECT_ROOT=应用目录）
-```
+- **三条主轴**：壮大框架本体（编译期静态化）· 深挖 agent 纵深（契约联动/依赖图/双轨可逆）· 标准对齐与受控验证。
+- **北极星指标**（可证伪）：加难任务层上的 agent 首遍正确率（≥ +15pt 或绝对值 ≥ 60%）。在它落地前，我们不引用任何"首遍正确率"数字（见下「诚实纪律」）。
+- **执行队列唯一源**：`atelier/docs/BACKLOG.md`；路线里程碑只管方向。
+
+## 文档地图
+
+| 文档 | 回答的问题 |
+|---|---|
+| `atelier/docs/ARCHITECTURE.md` | 系统是什么（五层架构、模块边界） |
+| `atelier/docs/SPEC-Agentic-DX-v0.1.md` | 代理怎么用（硬约定 / 错误四段式 / DoD / 性能基线闸门） |
+| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-16 + 未决项） |
+| `atelier/docs/AI-OPTIMAL-STRUCTURE.md` | 六层 AI 友好结构公理与机检规则集 |
+| `atelier/docs/ROADMAP.md` | 2026H2→2027H1 路线计划（方向与里程碑） |
+| `atelier/docs/BACKLOG.md` | 缺口与改进执行队列（唯一源） |
+| `atelier/docs/TECH-*` / `SKILLS-PLAN.md` | 调研底稿与技能包设计依据 |
+| `AGENTS.md` | 本仓库的常用命令与维护纪律 |
 
 ## 诚实纪律（引用本仓库任何数字前先读这段）
 
@@ -62,3 +104,7 @@ node <repo>/atelier/mcp/server.mjs                        # <!--@num:tools-->25<
 - CLI 命令三级诚实标注 FULL / MINI / STUB，STUB 永不伪造成功（exit 4 + spec 指路）。
 - 所有"未确认"结论明确标注，不写成事实；checkpoint 锚定前强制过测试+快照+API 面三道门禁。
 - 对外数字单一口径：用例数/工具数/性能以本文为现状源；改动测试面或工具面时必须同步本文（ROADMAP §2 只留历史基线）。
+
+## License
+
+MIT（见 LICENSE）。
