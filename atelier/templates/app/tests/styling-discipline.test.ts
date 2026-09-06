@@ -12,11 +12,13 @@
  *       calc(var(--space-*)·无单位系数) / 0 / auto——recipe 层与组件 scoped 同责
  *   R5  字号：CSS font-size 只准 var(--font-*)；模板 text-* 字号类只准 config
  *       font 组键名（text-md/text-lg…=token 派生；原生刻度 base/2xl… 未定义即禁）
+ *   R6  圆角（第三期 2026-09-06）：CSS border-radius 只准 var(--radius-*) / 0；
+ *       模板 rounded-* 圆角类只准 config radius 组键名（rounded-sm/md/lg = token 派生）
  *
  * 扫描对象：src/components/*.atr.ts（模板类名 + scoped CSS 同文件同责）
  *          + src/atelier-ui.css（recipe 层——间距/字号/颜色取值同责）。
  * 诚实边界：index.html 基线 reset 豁免（决策 16：不引入 preflight）；border 宽度 /
- *   line-height / letter-spacing / 阴影与 transform 内的长度不属间距纪律管辖；radius 纪律留第三期。
+ *   line-height / letter-spacing / 阴影与 transform 内的长度不属间距纪律管辖。
  */
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
@@ -27,6 +29,7 @@ const FILES = fs.readdirSync(DIR).filter((f) => f.endsWith(".atr.ts"));
 const RECIPE = path.resolve(__dirname, "../src/atelier-ui.css");
 const CONFIG = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../atelier.config.json"), "utf8"));
 const FONT_KEYS: Set<string> = new Set(Object.keys(CONFIG.tokens?.font ?? {}));
+const RADIUS_KEYS: Set<string> = new Set(Object.keys(CONFIG.tokens?.radius ?? {}));
 
 /** 混合制逃生舱白名单：伪元素 / keyframes / 异形渐变（component-library 层）。新项目默认为空——需要时在此登记并写明理由 */
 const SCOPED_ALLOWLIST = new Set<string>();
@@ -139,5 +142,27 @@ describe("styling discipline (decision 16 — token-derived utilities only)", ()
       }
     }
     expect(FONT_KEYS.size, "config tokens.font 未定义——字号纪律（R5）以 font 组为前提").toBeGreaterThan(0);
+  });
+
+  /** R6 CSS 主体：border-radius 只准 var(--radius-*) / 0 */
+  function checkRadius(css: string, where: string): void {
+    for (const m of css.matchAll(/border-radius\s*:\s*([^;{}]+)/g)) {
+      const v = m[1].trim();
+      expect(
+        v === "0" || /^var\(--radius-[\w-]+\)(\s+var\(--radius-[\w-]+\))*$/.test(v),
+        `${where} border-radius: ${v} —— 只准 var(--radius-<key>)（键见 atelier.config.json tokens.radius）或 0`,
+      ).toBe(true);
+    }
+  }
+
+  it("R6: 圆角纪律——CSS border-radius 只准 var(--radius-*) / 0；rounded-* 类只准 config radius 键", () => {
+    for (const { file, text } of atrFiles()) checkRadius(stripCssComments(scopedCss(text)), file);
+    checkRadius(stripCssComments(fs.readFileSync(RECIPE, "utf8")), "atelier-ui.css");
+    for (const { file, text } of atrFiles()) {
+      for (const m of text.matchAll(/\brounded-([a-z0-9]+)\b/g)) {
+        expect(RADIUS_KEYS.has(m[1]), `${file} 使用圆角类 rounded-${m[1]} —— 不在 config tokens.radius 键内（${[...RADIUS_KEYS].join("/")}）；原生刻度已由 token 覆盖，请改用 radius 组键`).toBe(true);
+      }
+    }
+    expect(RADIUS_KEYS.size, "config tokens.radius 未定义——圆角纪律（R6）以 radius 组为前提").toBeGreaterThan(0);
   });
 });

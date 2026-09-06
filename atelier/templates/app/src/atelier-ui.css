@@ -19,7 +19,7 @@
   .btn-mini { padding: var(--space-xs) var(--space-sm); font-size: var(--font-xs); font-weight: 400; background: transparent; border: 1px solid var(--color-surface-2); color: var(--color-muted); }
   .btn-mini:hover { color: var(--color-text); border-color: var(--color-primary); }
 
-  .tab { background: transparent; border: 1px solid var(--color-surface-2); color: var(--color-muted); padding: var(--space-sm) var(--space-md); border-radius: 999px; cursor: pointer; font-size: var(--font-sm); transition: all .18s; }
+  .tab { background: transparent; border: 1px solid var(--color-surface-2); color: var(--color-muted); padding: var(--space-sm) var(--space-md); border-radius: var(--radius-pill); cursor: pointer; font-size: var(--font-sm); transition: all .18s; }
   .tab:hover { color: var(--color-text); border-color: var(--color-primary); }
   .tab-on { background: linear-gradient(120deg, var(--color-primary), var(--color-primary-soft)); color: var(--color-bg); border-color: transparent; font-weight: 600; box-shadow: 0 8px 22px -10px color-mix(in srgb, var(--color-primary) 78%, transparent); }
 

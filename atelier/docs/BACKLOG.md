@@ -42,7 +42,9 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
   红检/绿检双实证）。名实对齐：六层现在有真实代码级 ERROR 检查三种（幽灵组件/manifest 解析/token 对账）。
 - **schema 编译期提取**：contract.ts 完整版承诺（TS 类型 AST → schema），替代手写组件元数据。
 - **真实浏览器测试转正**：113 用例全跑在 dom-shim 上；snapshot-smoke 是唯一真实浏览器路径且 continue-on-error——候选 = CI 中把 snapshot-smoke 升正式 gate（需 per-platform baseline）。
-- 属性级指令（on:/bind: 族，归 F-4 剩余）· radius 纪律（F-3 剩余）。
+- **属性级指令设计备忘（F-4 剩余，未立项）**：`bind:value={sig}` 双向绑定——糖化=动态 attr effect（已有 bindExpr）+ 元素事件监听回写 `sig.value`；仅限表单元素（input.value/checked/select）；只接受可写 $state（对 $derived 写 → 沿用 ATR-305）；codegen emit 与解释器同构；护栏=双向环检测（同信号同元素同 attr 只订一次）。事件修饰族（.prevent/.stop）候选后置。先出设计评审再立项。
+- **schema 编译期提取设计备忘（候选池，未立项）**：dump.mjs 扫描器扩 `(props: {...})` 类型注解提取——花括号配对（复用 matchBrace）取属性名+类型文本，映射 string/number/boolean/array（=Array<T>）/枚举（字面量联合）；产物随 stage ② dump 落 `.atr/ast`，component() 未显式传 schema 时从 dump 工件取（显式 schema 仍优先=向后兼容）；边界：泛型/交叉类型/工具类型显式拒绝（ATR-1xx 四段式），复杂类型手写 schema 不变。
+- ~~radius 纪律（F-3 剩余）~~ → **已落地（2026-09-06，R6）**：border-radius 只准 var(--radius-*)/0、rounded-* 类只准 config radius 键；starter 真违例抓到并迁移（.tab 999px → 新增 token radius.pill）；红检 6px 实证被抓 + 冒烟应用 19/19。
 
 ### 设计备忘（半天级，按需触发）
 

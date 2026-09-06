@@ -116,6 +116,10 @@
   - 同一份 schema 三用：运行时校验 / MCP 工具定义 / 注册表元数据；
   - 契约类型规范：纯数据 + 可判别结构，泛型/映射类型不进契约；
   - D 子集的 schema 渲染组件与契约层共用同一份"扁平 schema 规范"。
+- **prod 剥离 MINI 落地（2026-09-06，F-2 二期）**：`globalThis.__ATELIER_PROD__ === true` 时剥离
+  dev 专属可视化——契约校验（ATR-201）跳过、token 校验（ATR-204）跳过（var() 回退）、未注册组件
+  与渲染期错误不再生成错误卡（console 仍记，不静默、不白屏）。诚实边界：运行时旗分支，校验代码
+  仍在包内；build define/tree-shake 全量剥离归打包面（atelier build）。3 专项用例（旗开/旗关双向）。
 - 取舍弃 zod（双源+不扁平+API 变动致 LLM 知识过时）、TypeBox（运行时构造+带 ref+运行时依赖）、valibot（版本迭代极快）。
 
 ## 决策 7：代理层

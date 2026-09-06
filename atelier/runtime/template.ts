@@ -350,7 +350,8 @@ function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unkno
     } catch (e) {
       const err = e as { code?: string; message?: string; fix?: string };
       recordRuntimeError(err);
-      write(`⚠ ${err.code ?? "ATR"} ${err.message ?? String(e)}${err.fix ? ` — fix: ${err.fix}` : ""}`);
+      // prod 剥离：无错误卡——空文本占位（console 已记，不静默）
+      write(isProd() ? "" : `⚠ ${err.code ?? "ATR"} ${err.message ?? String(e)}${err.fix ? ` — fix: ${err.fix}` : ""}`);
       return;
     }
     write(v);
@@ -426,13 +427,24 @@ function bindProp(expr: string, scope: Record<string, unknown>, target: Record<s
   );
 }
 
+/* ---- F-2 二期 prod 剥离（MINI，决策 6「dev 强制 / prod 剥离」的运行时旗版）----
+ * globalThis.__ATELIER_PROD__ === true 时：跳过契约校验（ATR-201）与 token 校验（ATR-204），
+ * 渲染期错误不再生成可视化错误卡（改记 console，不静默）。诚实边界：这是运行时旗分支——
+ * 校验代码仍在包内，build define/tree-shake 全量剥离归打包面（atelier build，STUB→打包面时落地）。
+ * 契约语义：prod 放行 = 信任「dev 已强制过」的单源契约（H1），错误卡本就是 dev 专属可视化。
+ */
+function isProd(): boolean {
+  return (globalThis as { __ATELIER_PROD__?: boolean }).__ATELIER_PROD__ === true;
+}
+
 /** 契约校验的免追踪包裹：校验读取 props getter 不得把 prop 信号追进外层重建 effect
- *（否则任何 prop 变化都会无谓地触发分支重选） */
+ *（否则任何 prop 变化都会无谓地触发分支重选）；prod 下直接放行（剥离点） */
 function validateProps(
   schema: unknown,
   props: Record<string, unknown>,
   validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: import("./contract.ts").AtrError },
 ): { ok: boolean; error?: import("./contract.ts").AtrError } {
+  if (isProd()) return { ok: true };
   return __withTracking(() => validate(schema, props)).result;
 }
 
@@ -456,22 +468,6 @@ function injectScopedStyle(componentName: string, css: string, file: string): vo
   const key = `${file}:${css.length}`;
   if (scopedStyles.has(key)) return;
   scopedStyles.add(key);
-  // H3/ATR-204：样式只能引用语义 token
-  const re = /var\(\s*(--[\w-]+)\s*\)/g;
-  let m: RegExpExecArray | null;
-  const missing = new Set<string>();
-  while ((m = re.exec(css))) {
-    if (!tokenState.vars.has(m[1])) missing.add(m[1]);
-  }
-  if (missing.size > 0) {
-    const hints = [...tokenState.vars].sort();
-    throw {
-      code: "ATR-204",
-      message: `样式引用了不存在的 token：${[...missing].join("、")}`,
-      context: { component: componentName, file, hints },
-      fix: `将 ${[...missing].map((v) => `var(${v})`).join("、")} 改为 atelier.config.json 中已定义的语义 token（可用：${hints.slice(0, 8).join("、")}）`,
-    } as AtrError;
-  }
   const scopeClass = `atr-scope-${scopeSeq++}`;
   // 作用域前缀跳过 @规则头与 @keyframes 的内部选择器（0% / 50% / from / to），
   // 修复：此前 keyframes 百分比帧被误加前缀导致动画静默失效
@@ -481,6 +477,26 @@ function injectScopedStyle(componentName: string, css: string, file: string): vo
     if (!s || s.startsWith("@") || kfSel.test(s)) return all;
     return `.${scopeClass} ${s} {`;
   });
+  // F-2 二期 prod 剥离（MINI）：prod 下跳过 ATR-204 校验——未定义 token 交由 var() 回退，
+  // 不再抛错误卡（dev 已强制过；校验代码仍在包内，tree-shake 全量剥离归打包面）。
+  if (!isProd()) {
+    // H3/ATR-204：样式只能引用语义 token
+    const re = /var\(\s*(--[\w-]+)\s*\)/g;
+    let m: RegExpExecArray | null;
+    const missing = new Set<string>();
+    while ((m = re.exec(css))) {
+      if (!tokenState.vars.has(m[1])) missing.add(m[1]);
+    }
+    if (missing.size > 0) {
+      const hints = [...tokenState.vars].sort();
+      throw {
+        code: "ATR-204",
+        message: `样式引用了不存在的 token：${[...missing].join("、")}`,
+        context: { component: componentName, file, hints },
+        fix: `将 ${[...missing].map((v) => `var(${v})`).join("、")} 改为 atelier.config.json 中已定义的语义 token（可用：${hints.slice(0, 8).join("、")}）`,
+      } as AtrError;
+    }
+  }
   const el = document.createElement("style");
   el.textContent = prefixed;
   document.head.appendChild(el);
@@ -499,14 +515,19 @@ export function mountComponent(
   try {
     return mountComponentInner(def, props, container, registry, validate);
   } catch (e) {
-    // P2-1 组件级错误边界：契约/style/渲染抛出的 ATR 错误渲染为可行动卡片，绝不白屏
+    // P2-1 组件级错误边界：契约/style/渲染抛出的 ATR 错误渲染为可行动卡片，绝不白屏；
+    // prod 剥离：无卡片，空 root + console（不静默，也不白屏）
     const err = e as { code?: string; message?: string; fix?: string };
     recordRuntimeError(e);
-    const card = document.createElement("div");
-    card.className = "atr-error-card";
-    card.textContent = `${err.code ?? "ATR-ERR"} ${err.message ?? String(e)} — fix: ${err.fix ?? ""}`;
-    container.appendChild(card);
-    return card as unknown as HTMLElement;
+    const fallback: HTMLElement = document.createElement("div");
+    if (isProd()) {
+      container.appendChild(fallback);
+      return fallback;
+    }
+    fallback.className = "atr-error-card";
+    fallback.textContent = `${err.code ?? "ATR-ERR"} ${err.message ?? String(e)} — fix: ${err.fix ?? ""}`;
+    container.appendChild(fallback);
+    return fallback as unknown as HTMLElement;
   }
 }
 
@@ -689,6 +710,11 @@ function renderNode(
       if (node.component) {
         const def = registry.get(node.tag);
         if (!def) {
+          // prod 剥离：无错误卡，空占位 + console（不静默）
+          if (isProd()) {
+            recordRuntimeError({ code: "ATR-401", message: `组件未注册：${node.tag}` });
+            return document.createElement("span");
+          }
           const fallback = document.createElement("div");
           fallback.className = "atr-error-card";
           fallback.textContent = `ATR-4xx: 组件未注册：${node.tag}（检查 import 是否只注册于组件文件）`;
