@@ -28,7 +28,7 @@
 |---|---|
 | 脚手架新应用 | `node atelier/cli.mjs init --target <dir> --name <Name>`（cd && pnpm install && pnpm dev 即跑） |
 | 启动应用 dev server | 应用目录下 `pnpm dev`（或 `atelier dev`；http://127.0.0.1:5173，strictPort） |
-| 框架 runtime 测试 | `atelier/` 目录下 `pnpm test`（vitest，93 用例） |
+| 框架 runtime 测试 | `atelier/` 目录下 `pnpm test`（vitest；用例数见根 README 标记位） |
 | 编译应用组件（②→③） | `node atelier/compiler/dump.mjs --root <appDir>` 然后 `node atelier/compiler/codegen.mjs --ast <appDir>/.atr/ast`（产物 .atr/compiled/<Component>.mjs，应用侧 registerCompiled 接入） |
 | 应用测试（契约/样式守卫） | 应用目录下 `pnpm test` |
 | 技能包一致性校验 | `node atelier/scripts/check-skills.mjs`（exit code 可接 CI；改动 skills/mcp-definitions 后必跑） |
