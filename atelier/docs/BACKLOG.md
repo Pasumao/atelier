@@ -1,151 +1,40 @@
-# Atelier 技术缺口与改进 Backlog（2026-08-30 精简版）
+# Atelier 技术缺口与改进 Backlog（2026-09-06 整理版）
 
-> 本文件是缺口与改进队列唯一源。原始逐项规格与验收明细（P0-1~P0-8 / P1-1~9 / P2-1~6）已按
-> 「完成即合并」原则归档，需要回溯时看 git 历史（精简前版本锚点：checkpoint `ff35100` 之前的提交）。
+> 本文件是缺口与改进队列唯一源。**已完成项一律压缩为索引**——逐项规格与验收明细按「完成即合并」
+> 原则归档于 git 历史（checkpoint 锚点见 `.atelier/checkpoints.jsonl` 与 `git log`），此处只留结论与出处。
 
-## 已完成（合并归档 · 2026-08-27 ~ 08-30 backlog-blitz 全清）
+## 已完成归档（索引；明细溯 git）
 
-- **内核与编译器**：信号内核（deliver 双策略调度，修同步失效缺陷）· keyed each · Template AST 缓存 ·
-  编译器三分期（dump→codegen，golden DOM 对拍，未知节点显式拒绝）· expr fuzz 差分对拍（抓出 ‖/&& 值语义
-  bug）· 43 项 vitest。
-- **dev 面**：SSE 命令下行 + ack · HMR 保态（51ms，$state 不清零）· 截图常驻实例（~300ms）·
-  像素对比三档（MATCH / PIXMATCH / MISMATCH）· token 门禁 · audit JSONL。
-- **M3 实验台**：三臂对照 45/45 收官（noskill 100% / skill 93.3% / react 100%；skill 的 −6.7pt 是注释正则
-  误伤，修订评分器后三臂 15/15 全平）→ `results/WAVES-1-5-REPORT.md`。定论：天花板效应，核心假设待
-  加难任务层；基础设施事件与 prompt 污染处置均如实入档。
-- **工具链**：MCP 21/21 接线（stdio E2E）· review UI 最小版（timeline + 双图并排 + 判定写回）· CI 矩阵
-  workflow · 结构六层检查 · checkpoint「未检不锚」门禁 · 决策 14 卫生化。
-- **P0-8 评分器与 footgun 修复**：硬禁检查剥注释（双向 fixture，注释提及 PASS / 真用 FAIL）·
-  expr 三路 ATR-301 前置报错（顺带修掉函数调用静默丢尾）· store 快照按引用语义三层护栏
-  （runtime JSDoc + 应用模板守卫测试 + 技能包同步）。
-- **性能四指标**：gzip 6.25KB / 10³ 节点挂载 2–3ms / HMR 51ms / 截图回环 ~300ms——全达标。
-- **路线决策（2026-08-30，用户定论）**：技能包是核心竞争力、保留；先壮大框架功能（F 线），与 React 的
-  对照对决后置。
-
-### 已完成（2026-08-30 · ROADMAP 阶段一推进，会话归档）
-
-- **P1-2 / F-4 覆盖扩张第一批**：`{:else if}` 链（解析期多分支，发射器泛型零改自动双路径覆盖）·
-  HTML void 元素 13 种（修复 `<img>` 吞后续兄弟节点缺陷）· 未闭合结构解析期显式拒绝（**ATR-101** 四段式：
-  编译路径构建期抛 / 解释器路径错误卡 / dump CLI 可行动报错）· `{:else}` 消费长度缺陷修复（`}` 漏进分支文本，
-  parity 同源抓不到、快照回归补位）。dump/codegen CLI 端到端 smoke 通过。
-- **P1-3 / F-3 样式纪律第二期（决策 16）**：token 新增 `font` 组（runtime `--font-*`，Tailwind `--text-*`
-  定义即覆盖原生刻度=字号单源）+ `space.xs`；守卫 R4（间距只准 `var(--space-*)`/calc·无单位系数/0/auto）+
-  R5（font-size 只准 `var(--font-*)`；text-* 刻度类只准 font 键）；扫描面扩到 recipe 层并全量迁移；
-  starter 脚手架端到端 18/18 + R4 负例红检实证。
-- **P1-5 设计备忘三项**：schema 扩 min/max/pattern（扁平红线不动，+6 用例）· confirm `deny` 闸
-  （`mcp/confirm.mjs` 单点执行，破坏性回滚族 deny=ATR-402 结构化拒绝，stdio e2e 实证；ask 档暂同 auto 诚实标注；
-  负例规格 `specs/guardrails.md` init 常驻生成）· `checkpoint save` 测试门禁（未检不锚测试半边闭环，
-  首次保存即自验证生效）。
-- **P1-4 尾巴清理（同日第二批）**：`atelier review` STUB→MINI（dev 面 review UI 指路 + token 探活 + `--open`，
-  三路径实测）· `atelier sync` 新命令（vendor 同步，覆盖/补种/依赖漂移提示三效应实证）· HMR 第三边界关闭
-  （`__effectSink` + `disposeInstance`，依赖图不翻倍实证；shim 补 isConnected）· CI snapshot-smoke 本地等价
-  全流程通过（真实浏览器 baseline → MATCH → test+snapshot 双门禁锚定 `0ba332e`；真实 CI 首跑待 push 远端）。
-- **P1-2 / F-4 第二批（同日第三批工作）**：表达式**对象/数组字面量**纵向打通（`{{a: x.value}}` / `[a, b]` /
-  `{a}` 简写 / `({...}).x` 后缀链）· 配对花括号解析（引号感知，属性值 `attr={{a:1}}` 同步支持）·
-  **错位/游离闭合标签显式拒绝**（此前静默吞掉甚至截断余下模板）· 字面量花括号并入文本（此前静默丢弃）·
-  对象键不进静态依赖清单。P0-8 前置报错语义保持。10 新用例，84/84 绿；CLI + 脚手架 sync 后回归通过。
-- **P2-1 / F-1 收尾（同日第四批工作）**：graph/journal 接线进 MCP——`store.graph(keyOf)` 键映射注入 ·
-  bridge 推送载荷增强（graph + 最近 50 条 journal，sig-N 键与 signals 对齐）· 下行新 op 两枚 ·
-  MCP 新查询工具 `state.graph`/`state.journal`（23 工具）· `state.snapshot` 同步增强。
-  stdio 快乐径 e2e（截图唤起常驻页面 → 活依赖图返回）；4 新用例 88/88 绿；check-skills 31/0。
-- **P2-2 / 标准对齐五件套（同日第五批工作）**：① check-skills 新增 **S 门禁**（agentskills.io：name ≤64
-  kebab-case / description ≤1024 / 未知 frontmatter 字段拒绝 / 包结构仅 SKILL.md+scripts+references+assets；
-  负例 fixture 实证会红）· ② MCP **structured error**（isError + structuredContent{code,message,fix}，文本形态
-  不变）+ **ATELIER_TOOLSETS** 按 face 分组按需暴露（23→11 实证）· ③ dev 面 **/​__atelier/a11y** 端点 +
-  MCP `ui.a11y`（无障碍树文本化，42 节点 e2e 实证；与截图共用常驻实例与导航/就绪单一来源）·
-  ④ **DTCG 互导**（`atelier tokens export|import`，roundtrip 实证）· ⑤ `$state` **equals 选项**（TC39
-  Signal.State 对齐出口，Signal.Computed/Watcher 诚实标注未对齐）。5 新用例，93/93 绿。
-- **P2-3 / specs v2（同日第六批）**：`specs/constitution.md`（Spec Kit 同款概念：H1-H6 + token 单源/
-  事务纪律/快照纪律项目化，修宪=单独 spec+人批准）· spec 模板验收改 **EARS** 记法（WHEN/IF/WHILE/WHERE
-  … THE SYSTEM SHALL …，每条落点=.atr.spec.ts 命名用例）· testing 技能补 spec discipline 段 ·
-  llms.txt 模板同步今日运行时真值（graph/log/对象字面量/else-if/void/ATR-101）。
-- **P2-4 / dev 面 agent 体检（同日第六批）**：UA 启发式分类（human/headless/tooling，诚实标注面向检视
-  不面向鉴权）· 页面桥 SSE 连接自报 UA 入账 · `page-connect`/`access` 结构化审计带 agent 字段 ·
-  `/__atelier/agent-health` 端点（连接台账 + 最近错误 + bridge 状态时点）。e2e 实证：截图唤起 headless
-  页面 → `connections.headless=1` 入账。
-- **P2-5 / 对外叙事件（同日第七批）**：根 README 重写为定位面——AX（Agentic Experience）叙事 +
-  四无人区按**四段式自检**呈现（主张/机制/实测/复现命令，凡 claim 必有实测支撑）+ 标准对齐地板段 +
-  诚实纪律前置（正确率主张克制条款、FULL/MINI/STUB、双门禁）。**措辞终审待用户**（对外发布前）。
-- **度量**：框架 vitest 53 → 93 · check-skills 56/0 · checkpoint 锚点 `0c3636a`(F-2一期) → `80a6005`(F-4一批)
-  → `bcca740`(F-3) → `16b8858`/`94db6cb`(P1-5) → `6538ee1`(文档整理) → `69a1a5d`(P1-4) → `cac2d04`(F-4二批)
-  → `60a5d4d`(P2-1) → `dba9827`(P2-2) → `464efe7`(P2-3/4)。
-- **附带发现**：checkpoint.mjs 仓库发现只认 cwd 下 `.git`，子目录运行会误建嵌套仓（已记入尾巴区；
-  AGENTS.md 命令行已加"仓库根运行"提示）。
-
-### 已完成（2026-08-31 · P3-1 M3 加难任务层落地，会话归档）
-
-- **P3-1 前置 / M3 加难任务层 task4-6**（挂起区转正，候选源自 WAVES-1-5-REPORT §4）：
-  `task4-agent-cards`（流式输入 + $derived 解析 + keyed each 按 id 复用 + {:else if} 徽标；断言含乱序流
-  顺序与迟到推送响应性）· `task5-txn-board`（父子组合 registry 接线 + 对象字面量 props + store
-  commit/add/rollback；子组件禁 $state 静态检查）· `task6-token-discipline`（config 增补语义 token +
-  SCOPED_ALLOWLIST 逃生舱登记 + ATR-204 运行时校验；harness 以 attempt 配置 initTokens 后挂载，多文件产出）。
-  protocol.md / grade.mjs / acceptance.spec.ts 同步扩张；dom-shim 补 style.setProperty 最小面。
-  六正控回归全 PASS（2026-09-04 复核）+ 框架 93/93 绿 + grader fixtures（comment-only PASS /
-  real-timer FAIL）保持。**诚实边界**：任务层就绪 ≠ 实验完成——三臂出数仍待 ROADMAP 阶段三窗口执行；
-  北极星判据继续以加难层为准（task1-3 全平数据不再引用）。**出数前置（2026-09-06）**：
-  逐臂执行操作卡已就绪 = `benchmarks/m3/RUNBOOK.md`（attempt 布局/prompt 纪律/污染处置/入册格式，
-  ≥90 run 矩阵），执行仍需逐臂独立会话（诚实边界不变）。
-
-### 已完成（2026-09-06 · P3-4 API diff 门禁与漂移度量原型，会话归档）
-
-- **P3-4 / AI slop 对策的框架化**（TECH-SCAN §4.7 空白点，ROADMAP 阶段三）：新命令
-  `atelier api-diff snapshot|check [--root <dir>] [--json] [--strict] [--allow <f>]`
-  （`scripts/api-diff.mjs`，档位 **MINI**）。面提取器按 root 布局自动判定——框架仓四面
-  （runtime-exports / cli-commands / mcp-tools / token-keys；本仓实测 42/19/24/23 条）、
-  应用两面（component-contracts 契约 reqProps/optProps 键:类型 + token-keys）。
-  **门禁语义**：removed/changed = breaking（exit 1，`--allow` 清单 `面:id` 豁免）·
-  contract req→opt = relaxed 放行（opt→req = breaking）· token 值变化 = valueDrift 信息性 ·
-  added = additive（`--strict` 冻结场景下也红）· 漂移指标 churn = 变更条目/baseline 总条目。
-  **实证**：16 新用例（提取器边界/diff 分类/allowlist 豁免/框架仓确定性自检）109+8skip 全绿；
-  负例红检（baseline 幽灵条目 = 公共 API 被删）→ 双删除抓出 + 单条豁免 + exit 1；
-  check-skills 56/0。**诚实边界**：提取是语法级（正则+引号/注释感知括号配对），非完整 TS 语义
-  （不解析跨文件类型别名/重导出，`export *` 记 star 面）；baseline 默认 `.atelier/api-surface.json`，
-  本仓已快照。**候选后续销账（2026-09-06 同日第二批）**：checkpoint save 第三道门已挂接
-  （baseline 存在时未豁免 breaking 拒绝锚定，红检实证；豁免语义 bug 顺带修复——全额豁免不再误红）·
-  CI matrix 已接 api-diff check 步骤 · MCP source_commit summary 同步三处口径（check-skills 56/0）。
-  **剩余候选**：token 值漂移预算。—— **已销账（同日第三批）**：`--budget <0..1>`（值漂移条目占
-  baseline token 条目比例上限，超限红；budget 0 = 冻结令牌；信息性语义不被预算误伤，2 向红绿用例）。
-  P3-4 至此全收口。
+| 时段 | 交付 | 锚点 |
+|---|---|---|
+| 08-27~30 | backlog-blitz 全清：信号内核（keyed each/AST 缓存/deliver 调度）· dev 面（SSE 下行/HMR 保态 51ms/截图 ~300ms/像素三档/token 门禁/audit）· M3 三臂 45 run（天花板效应定论）· 工具链（MCP 全接线/review UI/CI 矩阵/struct/checkpoint 未检不锚）· P0-8 评分器 footgun · 性能四指标全达标 | git log 08 月段 |
+| 08-30 | 阶段一收口：P1-1 F-2 一期（静态依赖清单+差分对拍）· P1-2 F-4 两批（else-if/void/ATR-101/对象字面量）· P1-3 F-3 二期（R4/R5 间距字号）· P1-4（sync/review MINI/HMR 泄漏关闭）· P1-5（schema 约束/deny 闸/测试门禁）。阶段二收口：P2-1 graph/journal 接线 · P2-2 标准五件套（S 门禁/structured error/toolsets/a11y/DTCG/equals）· P2-3 specs v2（constitution+EARS）· P2-4 agent 体检 · P2-5 README 定位面（措辞终审待用户）。93 绿 · check-skills 56/0 | `0c3636a`→`464efe7` |
+| 08-31 | P3-1 前置：M3 加难任务层 task4-6 落地（brief+参考解+harness 扩张+protocol/grade 同步）；2026-09-04 六正控复核全 PASS | `d27a34f` |
+| 09-06 | P3-4 全收口：`atelier api-diff snapshot\|check`（框架四面/应用两面，breaking/additive/relaxed/valueDrift+churn，--allow/--strict/--budget）· checkpoint 第三道门（API 漂移拒锚）· CI 接线 · 负例红检实证。F-2 二期·构建期图查询：buildGraph + codegen `--graph`/`--graph-only` + MCP `graph.static`（25 工具，stdio 双径 e2e）。M3 RUNBOOK 逐臂操作卡 | `6b12b99`→`c0bc95d` |
 
 ## 活跃队列
 
-### F 线 — 功能债（决策书承诺未兑现，壮大框架的主菜）
+### F 线 — 功能债（壮大框架的主菜）
 
-> ROADMAP 阶段一抄送（2026-08-30 计划书批准）：R-1=P1-1（F-2 一期 ✅）· R-2=P1-2（F-4）· R-3=P1-3（F-3）；
-> 设计备忘区=P1-5（R-5）；尾巴区=P1-4（R-4）。执行状态以本文件为准。
-
-| # | 项 | 内容 | 估量 |
+| # | 项 | 状态 | 剩余 |
 |---|---|---|---|
-| F-1 | **事务层完整版（决策 5）** | ✅ **第一期落地（2026-08-30）+ MCP 接线完成（P2-1，2026-08-30）**：命名合并（同名栈顶幂等锚定，rollback 回到本轮前）+ 增量 patch 事件日志（journal，有界环形可关）+ 依赖图可查询（`store.graph()`，dispose 即注销；`graph(keyOf)` 支持注入键映射）。**接线**：bridge 推送载荷增强 graph+journal（sig-N 键与 snapshot.signals 对齐）· 下行新 op `state.graph`/`state.journal` · MCP 新查询工具两枚（23 工具）· `state.snapshot` 载荷同步增强。stdio 快乐径 e2e 实证（活页面返回真实依赖图）。6 用例实证（含 limit 调小裁剪、跨名不合并、derived 出现在依赖边）。诚实边界：恢复仍走全量快照（正确性锚点）。**剩余**：无；后续增强=回放恢复/编译期静态化归 F-2 | ✅ |
-| F-2 | **编译器静态依赖图（决策 3）** | 🔄 **第一期落地（2026-08-30）**：`exprRootIdents`（与求值器同 tokenizer）+ codegen 收集器发射 `deps: {reactive, mount, events}` 清单（compileFunction/compileModuleSource/CLI 产物三处生效）；差分对拍实证两条不变式（追踪集⊆静态集 200 样本；无短路等号 100 样本，钩子 `__withTracking`）。**语义边界**：清单=语法级超集（含未执行分支，{:else if} 链各分支 test 同样入集）。**二期·构建期图查询已落地（2026-09-06）**：`buildGraph`（单源=programWithDeps 同一收集器，组件级并集）+ codegen CLI `--graph`（落盘 .atr/graph/<Component>.json）/`--graph-only`（零落盘 stdout 查询）+ MCP 新查询工具 **`graph.static`**（25 工具；thin spawn 同源，无 dump 时 ATR-401 指路 compile；stdio 快乐径+错误径 e2e 实证）；3 新用例。**剩余**：二期=利用清单做跳过追踪快路径（逐挂点 exactness：无短路+无函数调用的叶子挂点才可静态预订阅）/ prod 剥离 | 二期 L |
-| F-3 | **样式纪律收紧（决策 16）** | ✅ **落地（2026-08-30）**：一期颜色纪律 R1/R2/R2b/R3（既有）；**二期间距/字号**——token 新增 `font` 组（runtime `--font-*`，Tailwind `--text-*` 覆盖原生刻度=字号单源）+ `space.xs`；护栏 **R4**（间距只准 var(--space-*) 组合 / calc·无单位系数 / 0 / auto）+ **R5**（font-size 只准 var(--font-*)；text-* 刻度类只准 font 键），扫描面扩到 recipe 层并全量迁移 token。诚实边界：index.html reset 豁免、border/line-height/letter-spacing/阴影变换内长度不辖、radius 纪律留候选。starter 脚手架端到端 18/18 + R4 负例红检实证 + check-skills 31/0 | ✅ |
-| F-4 | **codegen 覆盖扩张** | ✅ **两批落地（2026-08-30）**：**第一批**——`{:else if}` 链（解析期多分支，发射器泛型零改双路径覆盖）；HTML void 元素 13 种（修复 `<img>` 吞后续兄弟缺陷）；未闭合结构解析期显式拒绝（**ATR-101**：编译构建期抛/解释器错误卡/dump CLI 可行动报错）；`{:else}` 消费长度缺陷修复。**第二批**——表达式**对象/数组字面量**（`{{a: x.value}}`/`[a, b]`/`{a}` 简写/`({...}).x` 后缀链，expr.ts 求值器同步扩充）；配对花括号解析（引号感知 matchBrace，属性值同步支持 `attr={{a:1}}`）；**错位/游离闭合标签显式拒绝**（此前静默吞掉甚至截断余下模板）；字面量花括号原样并入文本（此前静默丢弃）；对象键不进静态依赖清单（exprRootIdents 上下文判别）。P0-8 前置报错语义保持（配对即表达式，非法内容 bind 期响亮 ATR-301）。golden parity 18 新用例，84/84 绿。**剩余**：属性级指令（on:/bind: 族）= 新方向候选，需先出设计 | ✅ |
+| F-1 | 事务层完整版（决策 5） | ✅ 一期+MCP 接线（08-30）：命名合并/journal/store.graph/bridge 下行；诚实边界：恢复走全量快照 | 无（回放恢复/静态化归 F-2） |
+| F-2 | 编译器静态依赖图（决策 3） | 🔄 一期 ✅（清单+差分对拍，语法级超集）；二期 1/3 ✅（09-06 构建期图查询：buildGraph/`--graph`/`graph.static`） | **跳过追踪快路径**（逐挂点 exactness：无短路+无函数调用的叶子挂点静态预订阅；核心=`$effectStatic` 内核手术，golden DOM+差分对拍护航）· **prod 剥离** | 
+| F-3 | 样式纪律收紧（决策 16） | ✅ 二期（R1-R5 全链：颜色/间距/字号；recipe 层同责；诚实边界：reset 豁免、border/line-height/阴影不辖、radius 留候选） | radius 纪律候选 |
+| F-4 | codegen 覆盖扩张 | ✅ 两批（08-30）：else-if 链/void 元素/ATR-101/错位闭合拒绝/对象数组字面量/配对花括号 | 属性级指令（on:/bind: 族）= 新方向候选，需先出设计 |
 
 ### 设计备忘（半天级，按需触发）
 
-- ✅ **三项全清（2026-08-30，P1-5）**：
-  - schema 扩 min/max/pattern（`runtime/contract.ts`：number 数值界 / string 长度界+pattern（JSON Schema 非锚定语义）/ array 长度界；无效 pattern 显式报错；**扁平红线不动**）+ 6 用例；
-  - confirm 三档 `deny` 执行点落地：`mcp/confirm.mjs`（单一执行点，破坏性=回滚族三工具）→ MCP stdio e2e 实证 deny=ATR-402 结构化拒绝、auto/缺省放行；**诚实边界：ask 档暂同 auto**（stdio 无人工审批通道）；负例规格进 `specs/guardrails.md`（init 常驻生成）+ 框架测试 mcp-confirm.test.ts；
-  - 决策 15 gate 接线：`checkpoint save` 新增**测试门禁**（定位 package.json test 脚本：应用根/框架仓两布局，pnpm 退 npm；红=拒绝锚定；`--no-gate`/`ATELIER_TEST_GATE=off` 逃生）——MCP source_commit 同路径生效，「未检不锚」测试半边闭环（快照半边仍待 baseline 武装）。
+- ✅ 三项全清（P1-5，08-30）：schema min/max/pattern · confirm deny 闸（ask 档暂同 auto，stdio 无人工通道）· checkpoint 测试门禁。
 
 ### 尾巴（诚实标注的已知项）
 
-- ~~已存在应用需重新 vendor 同步~~ ✅ **已处置（2026-08-30，P1-4）**：新增 `atelier sync [--target <dir>]`
-  （scripts/sync-project.mjs）——runtime 全量覆盖 + dev 面三件覆盖 + specs 模板补种（skip-if-exists）+ 依赖漂移提示；
-  实证：覆盖污染的 vendored core.ts 恢复框架真相、补种 guardrails.md。
-- HMR 三边界（P1-4 处置）：①~~旧 effects 不逐个 dispose~~ ✅ **已关闭**（`__effectSink` 收集 + `disposeInstance`
-  逐个注销，依赖图不翻倍 2 用例实证；dom-shim 补 isConnected 语义）；②模板结构大改时按序还原可能错位——
-  **保留为已文档化启发式**（无信号身份可比对，正确修复需编译器闭包捕获，归 F-2 二期后再评估）；
-  ③跨交换 checkpoint 不回落新信号——**保留为已文档化边界**（信号引用随换实例失效）。
-- CI snapshot-smoke：**本地等价验证通过（2026-08-30）**——scaffold→install→dev→snapshot save→check(MATCH)→
-  dirty 文件→gated checkpoint save 锚定成功（test gate + snapshot gate 双门禁首跑）；真实 CI 首跑仍待 push
-  远端（本仓尚无 git remote）。`atelier review` CLI ✅ **已从 STUB 转 MINI**（指路 dev 面 review UI + token
-  探活 + `--open` 开页，三路径实测）。
-- P1-9 baseline.png 视觉复核留待用户（`.dsh-trash/smoke-app/.atr/snapshots/`）；
-- checkpoint.mjs 仓库发现只认 cwd 下的 `.git`（不做向上查找）：在 `atelier/` 子目录跑会误引导嵌套 git 仓
-  （2026-08-30 实证，已手动清理；AGENTS.md 已加"仓库根运行"提示），候选修法=cwd 无 `.git` 时向上 `rev-parse` 找根；
+- HMR 边界②：模板结构大改按序还原可能错位——已文档化启发式（正修复需编译器闭包捕获，归 F-2 二期后评估）；边界③：跨交换 checkpoint 不回落新信号——已文档化边界。
+- CI snapshot-smoke：本地等价验证通过（08-30）；真实 CI 首跑待 push 远端（本仓尚无 remote）。
+- 本仓 snapshot 基线未武装：`checkpoint save` 快照门一直 vacuous——`atelier snapshot save` 一次即武装。
+- checkpoint.mjs 仓库发现只认 cwd 下 `.git`：候选修法 = cwd 无 `.git` 时向上 `rev-parse` 找根（AGENTS.md 已加"仓库根运行"提示兜底）。
+- ~~P1-9 baseline.png 视觉复核留待用户~~ → **已处置（09-06 整理）**：`.dsh-trash/` 全区清除（含 wave-1~5 原始 attempt 产物与 smoke-app；评分事实保留在 `benchmarks/m3/results/` 与 WAVES 报告；视觉基线可随时 `atelier snapshot save` 重生成）。
 
 ### 挂起区（等 F 线里程碑后启动）
 
-- ~~M3 加难任务层 task4-6~~ ✅ **已转正落地（2026-08-31，见上方归档区）**；
-- 干扰面实验（不给源码只给 CLI/错误输出）——技能包价值（核心竞争力）的决定性检验。
+- 干扰面实验（不给源码只给 CLI/错误输出）——技能包价值（核心竞争力）的决定性检验；执行方式同 M3 三臂（逐臂独立会话，RUNBOOK 同款纪律）。
