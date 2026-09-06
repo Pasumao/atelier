@@ -124,8 +124,7 @@ describe("P0-2③ codegen golden DOM parity", () => {
     expect(r.frames.at(-1)).not.toContain('"a"');
   });
 
-  it("{#each by key}（reorder 复用子树）", async () => {
-    const raw = `<div>{#each rows.value as r by r.id}<b data-id={r.id}>{r.name}</b>{/each}</div>`;
+  it("{#each by key}（reorder 复用子树）", async () => {    const raw = `<div>{#each rows.value as r by r.id}<b data-id={r.id}>{r.name}</b>{/each}</div>`;
     const r = await parity("ParityKeyed", raw, () => {
       const rows = $state([
         { id: "a", name: "A" },
@@ -558,3 +557,71 @@ describe("F-4 解析期显式拒绝（ATR-101）", () => {
   });
 });
 
+
+/* ---- F-5 teardown parity：两条路径的 effect 生命周期对拍（订阅数差分） ----
+ * golden DOM diff 只对拍 DOM 形状，抓不住僵尸 effect（写入已脱离节点、订阅持续累积）。
+ * 本节直接对拍上游信号的 _subs.size：修复前编译路径的 {#if} 换支 / {#each} 行移除只清 DOM
+ * 不析构 effect，订阅数单调上涨（解释器正确回落）——红检先行，teardown 发射后转绿。 */
+describe("F-5 teardown parity（effect 生命周期，编译 ≡ 解释器）", () => {
+  /** 单路径挂载 → 跑变更步 → 返回上游信号 n 的订阅数 */
+  async function subCount(name: string, raw: string, compiled: boolean, steps: Array<(s: { items: any; open: any; n: any }) => Promise<void> | void>): Promise<number> {
+    const container = makeContainer();
+    const items = $state<string[]>(["a", "b", "c"]);
+    const open = $state(true);
+    const n = $state(0);
+    if (compiled) registerCompiled(compileFunction(name, raw));
+    const def: ComponentDef = { name, render: () => ({ raw, scope: { items, open, n } }) as never };
+    mountComponent(def, { name: "Atelier" }, container, new Map(), okValidate as never);
+    await flush();
+    for (const step of steps) {
+      await step({ items, open, n });
+      await flush();
+    }
+    return n._subs.size;
+  }
+
+  it("keyed each 行移除：上游订阅数回落到剩余行数（僵尸 effect 回归）", async () => {
+    const raw = `<ul>{#each items.value as t, i by t}<li>{n.value}-{t}</li>{/each}</ul>`;
+    const steps = [async ({ items }: any) => { items.value = ["a", "c"]; }]; // 删中间行
+    const a = await subCount("TeardownKeyed", raw, false, steps);
+    const b = await subCount("TeardownKeyed", raw, true, steps);
+    expect(a).toBe(2); // 剩余两行各 1 个订阅（解释器基准）
+    expect(b).toBe(a); // 修复前编译路径残留 3（被删行的 bindExpr effect 永不析构）
+  });
+
+  it("{#if} 换支：旧分支 effect 随支析构，上游订阅数不随切换次数上涨", async () => {
+    const raw = `{#if open.value}<span>{n.value}</span>{:else}<b>{n.value}</b>{/if}`;
+    const steps = [
+      async ({ open }: any) => { open.value = false; },
+      async ({ open }: any) => { open.value = true; },
+      async ({ open }: any) => { open.value = false; },
+    ];
+    const a = await subCount("TeardownIf", raw, false, steps);
+    const b = await subCount("TeardownIf", raw, true, steps);
+    expect(a).toBe(1); // 当前分支 1 个订阅
+    expect(b).toBe(a); // 修复前编译路径 4（3 次换支残留 3 个死订阅）
+  });
+
+  it("{#each} 无 key 全清重建：重建前析构上一轮全部行 effect", async () => {
+    const raw = `<ul>{#each items.value as t, i}<li>{n.value}-{t}</li>{/each}</ul>`;
+    const steps = [
+      async ({ items }: any) => { items.value = ["x", "y"]; },
+      async ({ items }: any) => { items.value = ["z"]; },
+    ];
+    const a = await subCount("TeardownRebuild", raw, false, steps);
+    const b = await subCount("TeardownRebuild", raw, true, steps);
+    expect(a).toBe(1);
+    expect(b).toBe(a);
+  });
+
+  it("嵌套：if 在 keyed each 行内，行移除连内层分支 effect 一起析构", async () => {
+    const raw = `<ul>{#each items.value as t, i by t}<li>{#if open.value}{n.value}{:else}-{/if}</li>{/each}</ul>`;
+    const steps = [
+      async ({ items }: any) => { items.value = ["a"]; },
+    ];
+    const a = await subCount("TeardownNested", raw, false, steps);
+    const b = await subCount("TeardownNested", raw, true, steps);
+    expect(a).toBe(1);
+    expect(b).toBe(a);
+  });
+});

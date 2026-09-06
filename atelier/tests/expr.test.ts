@@ -18,11 +18,41 @@ describe("evalExpr — supported subset matrix", () => {
 
   it("ternary / nullish / logical with JS short-circuit value semantics", () => {
     expect(evalExpr("a > 5 ? 'big' : 'small'", scope)).toBe("big");
-    expect(evalExpr("undefinedVarHere ?? 'fallback'", scope)).toBeUndefined ?? undefined;
+    // 回归：此行曾写成 `.toBeUndefined ?? undefined`（属性访问未调用，断言执行量为零的假断言）；
+    // 语义修正后断言真实期望——`??` 左操作数 undefined → 取右操作数
+    expect(evalExpr("undefinedVarHere ?? 'fallback'", scope)).toBe("fallback");
     expect(evalExpr("empty || 'or-value'", scope)).toBe("or-value"); // '' is falsy
     expect(evalExpr("a && 'has-a'", scope)).toBe("has-a");
     expect(evalExpr("!flag", scope)).toBe(true);
     expect(evalExpr("flag && a", scope)).toBe(false);
+  });
+
+  it("undefined / null 语义（回归：undefined 曾被求值为 null，=== 误判相等）", () => {
+    expect(evalExpr("undefined === null", scope)).toBe(false);
+    expect(evalExpr("undefined == null", scope)).toBe(true); // JS nullish 宽松相等仍成立
+    expect(evalExpr("undefined ?? 'fallback'", scope)).toBe("fallback");
+    expect(evalExpr("null ?? 'fallback'", scope)).toBe("fallback");
+    expect(evalExpr("name ?? 'fallback'", scope)).toBe("deepseek");
+  });
+
+  it("真值语义单一源：表达式与 {#if} 同为 JS Boolean（空数组 truthy）", () => {
+    // 修复前 ternary 走 Python 式 truthiness（空数组 falsy），与 {#if} 的 Boolean 对同一值结论相反
+    expect(evalExpr("list ? 'truthy' : 'falsy'", scope)).toBe("truthy");
+    expect(evalExpr("empty ? 'truthy' : 'falsy'", scope)).toBe("falsy");
+    expect(evalExpr("list.length ? 'has' : 'none'", scope)).toBe("has");
+  });
+
+  it("ATR-301 tokenizer 收紧：未闭合字符串 / 悬空转义 / 多中小数点", () => {
+    expect(() => evalExpr("'never closed", scope)).toThrowError(/ATR-301/);
+    expect(() => evalExpr("'bad \\", scope)).toThrowError(/ATR-301/);
+    expect(() => evalExpr("1.2.3 + 1", scope)).toThrowError(/ATR-301/);
+    expect(evalExpr("'line\\nbreak'", scope)).toBe("line\nbreak"); // 常见转义还原
+    expect(evalExpr("'it\\'s'", scope)).toBe("it's");
+  });
+
+  it("解析 memoize：同一源文本两次求值结果一致且不重新解析（缓存命中）", () => {
+    expect(evalExpr("a + b", scope)).toBe(7);
+    expect(evalExpr("a + b", scope)).toBe(7); // 第二次走 parseCache
   });
 
   it("property & index access", () => {

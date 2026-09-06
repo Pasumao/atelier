@@ -13,8 +13,12 @@
  * 生成代码的形态（验收：BACKLOG P0-2③）：
  *   · 结构构建是直线 createElement/appendChild——运行时无字符串解析、无 AST 分派
  *   · 每处 {expr} / 动态 attr / {#if} / {#each} 的 effect 接线在编译期定点生成（静态 effect 图）
+ *   · F-5 effect 所有权：{#if} 换支 / {#each} 行移除/全清重建的 teardown 经 rt.withTeardown/
+ *     rt.runCleanup 发射，与解释器共用同一 teardownStack（僵尸 effect 红检见 tests/codegen.test.ts）
  *   · 运行时能力（$effect/evalExpr/bindExpr/mountComponent…）经 ctx.rt 注入（runtime/template.ts
  *     的 __compiledRT，解释器同函数）⇒ 产物与 runtime 路径/打包布局零耦合，语义同源。
+ *   · 表达式仍走 rt.evalExpr（解析结果已按源文本 memoize，见 runtime/expr.ts）——
+ *     「零解析」仅对模板结构成立，对本发射器生成的直线接线成立，对表达式求值不成立（诚实边界）。
  *
  * Usage:
  *   node atelier/compiler/codegen.mjs --ast <dir> [--out <dir>] [--quiet] [--graph]
@@ -174,10 +178,13 @@ function emitComponent(n, SV, T, out, uid, st) {
   out.push(`}`);
 }
 
-/** {#if}/{:else}：test 链顺序求值、首个命中即停（未命中的分支不求值 ⇒ 依赖追踪行为与解释器一致） */
+/** {#if}/{:else}：test 链顺序求值、首个命中即停（未命中的分支不求值 ⇒ 依赖追踪行为与解释器一致）。
+ * F-5 teardown：换支时旧分支 cleanup 先整体析构（rt.runCleanup），新分支构建包在 rt.withTeardown
+ * 里——期间 bindExpr/bindProp/嵌套实例全部落入分支 cleanup 集，与解释器同栈同源（僵尸 effect 红检）。 */
 function emitIf(n, SV, T, out, uid, st) {
   const anchor = uid("anchor");
   const cur = uid("cur");
+  const cln = uid("cln");
   const builders = (n.blocks ?? []).map((b) => {
     const fn = uid("b");
     const c = uid("c");
@@ -196,7 +203,8 @@ function emitIf(n, SV, T, out, uid, st) {
   out.push(`  const ${anchor} = document.createElement("span");`);
   out.push(`  ${anchor}.style.display = "contents";`);
   out.push(`  let ${cur} = -1;`);
-  out.push(`  rt.$effect(() => {`);
+  out.push(`  let ${cln} = [];`);
+  out.push(`  const d${cln} = rt.$effect(() => {`);
   out.push(`    let chosen = -1;`);
   (n.blocks ?? []).forEach((b, i) => {
     if (b.test === null) {
@@ -206,17 +214,25 @@ function emitIf(n, SV, T, out, uid, st) {
     }
   });
   out.push(`    if (chosen !== ${cur}) {`);
-  out.push(`      while (${anchor}.firstChild) ${anchor}.removeChild(${anchor}.firstChild);`);
-  out.push(`      if (chosen >= 0) ${anchor}.appendChild([${builders.map((b) => b.fn).join(", ")}][chosen]());`);
+  out.push(`      rt.runCleanup(${cln});`);
+  out.push(`      ${cln} = [];`);
+  out.push(`      rt.withTeardown(${cln}, () => {`);
+  out.push(`        while (${anchor}.firstChild) ${anchor}.removeChild(${anchor}.firstChild);`);
+  out.push(`        if (chosen >= 0) ${anchor}.appendChild([${builders.map((b) => b.fn).join(", ")}][chosen]());`);
+  out.push(`      });`);
   out.push(`      ${cur} = chosen;`);
   out.push(`    }`);
   out.push(`  });`);
+  // 节点级收尾：if 节点整体被上级析构时当前分支 cleanup 一并析构（解释器同款补口）
+  out.push(`  rt.captureCleanup(() => { rt.runCleanup(${cln}); d${cln}(); });`);
   out.push(`  ${T}.appendChild(${anchor});`);
   out.push(`}`);
 }
 
 /** {#each}：keyed 走同款 reconcile（Map 复用 + appendChild 重排）；无 by 全清重建。
- * 子作用域变量经 uid 唯一化——嵌套 each 的内层展开 { ...外层scope } 不会自引用。 */
+ * 子作用域变量经 uid 唯一化——嵌套 each 的内层展开 { ...外层scope } 不会自引用。
+ * F-5 teardown：行构建包 rt.withTeardown（行内 effect/嵌套实例落入行 cleanup 集），
+ * 行移除 rt.runCleanup 整行析构；无 key 全清重建前先析构上一轮全部行——与解释器同栈同源。 */
 function emitEach(n, SV, T, out, uid, st) {
   const host = uid("host");
   const scv = uid("scope"); // 本层 each 的子作用域变量名（每 item 一个，childScope 语义）
@@ -227,8 +243,10 @@ function emitEach(n, SV, T, out, uid, st) {
   out.push(`  ${host}.style.display = "contents";`);
   if (n.keyExpr) {
     const live = uid("live");
+    const rows = uid("rows");
     out.push(`  const ${live} = new Map();`);
-    out.push(`  rt.$effect(() => {`);
+    out.push(`  const ${rows} = new Map();`);
+    out.push(`  const d${rows} = rt.$effect(() => {`);
     out.push(`    const arr = (rt.evalExpr(${esc(n.expr)}, ${SV}) ?? []);`);
     out.push(`    const nextKeys = new Set();`);
     out.push(`    arr.forEach((item, i) => {`);
@@ -240,29 +258,50 @@ function emitEach(n, SV, T, out, uid, st) {
     out.push(`      if (!el) {`);
     out.push(`        const box = document.createElement("span");`);
     out.push(`        box.style.display = "contents";`);
-    out.push(`        const c = document.createDocumentFragment();`);
+    out.push(`        const rowSet = [];`);
+    out.push(`        rt.withTeardown(rowSet, () => {`);
+    out.push(`          const c = document.createDocumentFragment();`);
     emitNodes(n.children ?? [], scv, "c", out, uid, st2);
-    out.push(`        box.appendChild(c);`);
+    out.push(`          box.appendChild(c);`);
+    out.push(`        });`);
+    out.push(`        ${rows}.set(k, rowSet);`);
     out.push(`        el = box;`);
     out.push(`        ${live}.set(k, el);`);
     out.push(`      }`);
     out.push(`      ${host}.appendChild(el); // 同序 no-op；乱序即重排`);
     out.push(`    });`);
     out.push(`    for (const [k, el] of [...${live}]) {`);
-    out.push(`      if (!nextKeys.has(k)) { el.remove(); ${live}.delete(k); }`);
+    out.push(`      if (!nextKeys.has(k)) {`);
+    out.push(`        el.remove();`);
+    out.push(`        rt.runCleanup(${rows}.get(k) ?? []);`);
+    out.push(`        ${rows}.delete(k);`);
+    out.push(`      }`);
     out.push(`    }`);
     out.push(`  });`);
+    // 节点级收尾：each 节点整体被上级析构时全部行的 cleanup 一并析构（解释器同款补口）
+    out.push(`  rt.captureCleanup(() => {`);
+    out.push(`    for (const s of ${rows}.values()) rt.runCleanup(s);`);
+    out.push(`    ${rows}.clear();`);
+    out.push(`    d${rows}();`);
+    out.push(`  });`);
   } else {
-    out.push(`  rt.$effect(() => {`);
+    const rows = uid("rows");
+    out.push(`  let ${rows} = [];`);
+    out.push(`  const d${rows} = rt.$effect(() => {`);
     out.push(`    const arr = (rt.evalExpr(${esc(n.expr)}, ${SV}) ?? []);`);
-    out.push(`    while (${host}.firstChild) ${host}.removeChild(${host}.firstChild);`);
-    out.push(`    arr.forEach((item, i) => {`);
-    out.push(`      const ${scv} = { ...${SV}, [${esc(n.item)}]: item, [${esc(n.index)}]: i };`);
-    out.push(`      const c = document.createDocumentFragment();`);
+    out.push(`    rt.runCleanup(${rows});`);
+    out.push(`    ${rows} = [];`);
+    out.push(`    rt.withTeardown(${rows}, () => {`);
+    out.push(`      while (${host}.firstChild) ${host}.removeChild(${host}.firstChild);`);
+    out.push(`      arr.forEach((item, i) => {`);
+    out.push(`        const ${scv} = { ...${SV}, [${esc(n.item)}]: item, [${esc(n.index)}]: i };`);
+    out.push(`        const c = document.createDocumentFragment();`);
     emitNodes(n.children ?? [], scv, "c", out, uid, st2);
-    out.push(`      ${host}.appendChild(c);`);
+    out.push(`        ${host}.appendChild(c);`);
+    out.push(`      });`);
     out.push(`    });`);
     out.push(`  });`);
+    out.push(`  rt.captureCleanup(() => { rt.runCleanup(${rows}); d${rows}(); });`);
   }
   out.push(`  ${T}.appendChild(${host});`);
   out.push(`}`);

@@ -11,7 +11,7 @@
  */
 
 import { $effect, $effectStatic, $state, store, __creationSink, __effectSink, __withTracking, type Signal } from "./core.ts";
-import { evalExpr, exprRootIdents } from "./expr.ts";
+import { booly, evalExpr, exprRootIdents } from "./expr.ts";
 
 /** —— token 单源（决策 8）：由 main.ts 启动时加载 atelier.config.json 注入 —— */
 export const tokenState = {
@@ -402,6 +402,16 @@ function runCleanup(set: Array<() => void>): void {
   }
   set.length = 0;
 }
+/** 受控重建期包住一段构建：期间 bindExpr/bindProp/嵌套实例的 captureCleanup 落入 set。
+ * codegen（__compiledRT.withTeardown）与解释器（if/each 分支重建）共用同一 teardownStack。 */
+function withTeardown<T>(set: Array<() => void>, build: () => T): T {
+  teardownStack.push(set);
+  try {
+    return build();
+  } finally {
+    teardownStack.pop();
+  }
+}
 
 /* ---- F-5 响应式 props（组件组合语义修订，锐评红检②的修复）----
  * 动态属性 = prop 信号 + getter：子组件 `props.title` 语法不变，
@@ -464,8 +474,14 @@ export type ComponentDef<P = Record<string, unknown>> = {
 export type ComponentRegistry = Map<string, ComponentDef>;
 
 const scopedStyles = new Set<string>();
+/** djb2（dev-only 去重键）：修复前 key 只含 css.length，同文件两个等长不同内容样式会碰撞丢失 */
+function hashStr(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
 function injectScopedStyle(componentName: string, css: string, file: string): void {
-  const key = `${file}:${css.length}`;
+  const key = `${file}:${css.length}:${hashStr(css)}`;
   if (scopedStyles.has(key)) return;
   scopedStyles.add(key);
   const scopeClass = `atr-scope-${scopeSeq++}`;
@@ -762,8 +778,9 @@ function renderNode(
       anchor.style.display = "contents";
       let currentBlock = -1;
       let branchCleanup: Array<() => void> | null = null;
-      captureCleanup(
-        $effect(() => {
+      // 节点级收尾（F-5 补口）：if 节点整体被上级析构（行移除/上级分支丢弃）时，
+      // 当前分支 cleanup 集无人会再跑（branch switch 才会跑）——先析构分支，再 dispose 外层 effect。
+      const disposeIf = $effect(() => {
           let chosen = -1;
           for (let i = 0; i < node.blocks.length; i++) {
             const b = node.blocks[i];
@@ -796,8 +813,11 @@ function renderNode(
             }
             currentBlock = chosen;
           }
-        }),
-      );
+        });
+      captureCleanup(() => {
+        if (branchCleanup) runCleanup(branchCleanup);
+        disposeIf();
+      });
       return anchor;
     }
     case "each": {
@@ -809,8 +829,7 @@ function renderNode(
         // F-5：每行自带 cleanup 集——行移除时该行 effect/嵌套实例随之析构。
         const live = new Map<string, HTMLElement>();
         const rowCleanups = new Map<string, Array<() => void>>();
-        captureCleanup(
-          $effect(() => {
+        const disposeEach = $effect(() => {
             const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
             const nextKeys = new Set<string>();
             arr.forEach((item, i) => {
@@ -847,14 +866,18 @@ function renderNode(
                 rowCleanups.delete(k);
               }
             }
-          }),
-        );
+        });
+        // 节点级收尾（F-5 补口）：each 节点整体被上级析构时，全部行的 cleanup 集随之外析构
+        captureCleanup(() => {
+          for (const set of rowCleanups.values()) runCleanup(set);
+          rowCleanups.clear();
+          disposeEach();
+        });
         return host;
       }
       // 旧语义（无 by）：全清重建。F-5：重建前先析构上一轮全部行的 cleanup。
       let rowsCleanup: Array<() => void> = [];
-      captureCleanup(
-        $effect(() => {
+      const disposeRows = $effect(() => {
           const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
           runCleanup(rowsCleanup);
           rowsCleanup = [];
@@ -868,16 +891,18 @@ function renderNode(
           } finally {
             teardownStack.pop();
           }
-        }),
-      );
+      });
+      // 节点级收尾（F-5 补口）：整体析构时上一轮（及当前轮）行的 cleanup 一并析构
+      captureCleanup(() => {
+        runCleanup(rowsCleanup);
+        disposeRows();
+      });
       return host;
     }
   }
 }
 
-function booly(v: unknown): boolean {
-  return Boolean(v);
-}
+/* booly 已统一从 expr.ts 导入（真值判定单一源，两处曾并存已废除） */
 
 /* ---- P0-2③ 编译产物（compiler/codegen.mjs stage ③ 输出）注册与运行时依赖面 ---- */
 
@@ -934,4 +959,9 @@ export const __compiledRT = {
   mountComponent,
   bindProp, // F-5：动态属性 = 响应式 prop（编译路径与解释器同源同函数）
   validateProps, // F-5：契约校验免追踪包裹（同上）
+  // F-5 teardown 面给 codegen：编译路径的分支/行级析构与解释器共用同一 teardownStack。
+  // 修复前 codegen 的 {#if} 换支 / {#each} 行移除只清 DOM 不析构 effect（僵尸 effect 红检见 tests/codegen.test.ts）。
+  captureCleanup,
+  runCleanup,
+  withTeardown,
 };

@@ -23,15 +23,24 @@ function tokenize(src: string): Tok[] {
       const q = c;
       let j = i + 1;
       let out = "";
-      while (j < src.length && src[j] !== q) {
+      let closed = false;
+      while (j < src.length) {
+        if (src[j] === q) {
+          closed = true;
+          break;
+        }
         if (src[j] === "\\") {
-          out += src[j + 1];
+          if (j + 1 >= src.length) throw new Error("ATR-301: 字符串转义符 \\ 后缺少字符（字符串未闭合？）");
+          const e = src[j + 1];
+          // 常见转义还原为真实字符；未知转义保留原字符（\n → 换行，\q → q）
+          out += e === "n" ? "\n" : e === "t" ? "\t" : e === "r" ? "\r" : e;
           j += 2;
         } else {
           out += src[j];
           j++;
         }
       }
+      if (!closed) throw new Error(`ATR-301: 字符串字面量未闭合（缺少收尾 ${q}）`);
       toks.push({ t: "str", v: out });
       i = j + 1;
       continue;
@@ -39,7 +48,12 @@ function tokenize(src: string): Tok[] {
     if (/[0-9]/.test(c)) {
       let j = i;
       while (j < src.length && /[0-9.]/.test(src[j])) j++;
-      toks.push({ t: "num", v: src.slice(i, j) });
+      const raw = src.slice(i, j);
+      const n = Number(raw);
+      if (!Number.isFinite(n)) {
+        throw new Error(`ATR-301: 非法数字字面量 "${raw}"（多中小数点？）`);
+      }
+      toks.push({ t: "num", v: raw });
       i = j;
       continue;
     }
@@ -232,7 +246,8 @@ class Parser {
     if (t.t === "kwd") {
       if (t.v === "true") return () => true;
       if (t.v === "false") return () => false;
-      if (t.v === "null" || t.v === "undefined") return () => null;
+      if (t.v === "null") return () => null;
+      if (t.v === "undefined") return () => undefined;
       throw new Error(`ATR-301: 不支持关键字 ${t.v}`);
     }
     if (t.t === "op" && t.v === "(") {
@@ -328,16 +343,28 @@ class Parser {
   }
 }
 
-function booly(v: unknown): boolean {
-  if (v == null) return false;
-  if (typeof v === "string") return v.length > 0;
-  if (Array.isArray(v)) return v.length > 0;
+/** 真值判定（单一源）：JS 语义 Boolean(v)，与 {#if}（template.ts）同一套——
+ * 修复前这里曾用 Python 式 truthiness（空数组 falsy），同一空数组在 `{{ arr ? a : b }}`
+ * 与 `{#if arr}` 里结论相反（两套真值语义并存已废除）。导出供 template.ts 复用。 */
+export function booly(v: unknown): boolean {
   return Boolean(v);
 }
 
-/** 求值表达式文本。scope 中的信号为普通 JS 对象（读 .value 即触发 track）。 */
+/** 求值表达式文本。scope 中的信号为普通 JS 对象（读 .value 即触发 track）。
+ * 解析结果按源文本 memoize（上限 500 条，与 template.ts 的模板缓存同策略）——
+ * bindExpr 每次重跑、on:click 每次点击都不再重新 tokenize+parse。 */
+const parseCache = new Map<string, (scope: Record<string, unknown>) => unknown>();
+
 export function evalExpr(src: string, scope: Record<string, unknown>): unknown {
-  const ast = new Parser(src).parse();
+  let ast = parseCache.get(src);
+  if (!ast) {
+    ast = new Parser(src).parse();
+    if (parseCache.size >= 500) {
+      const oldest = parseCache.keys().next().value;
+      if (oldest !== undefined) parseCache.delete(oldest);
+    }
+    parseCache.set(src, ast);
+  }
   return ast(scope);
 }
 

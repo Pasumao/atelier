@@ -50,6 +50,35 @@ describe("signal core", () => {
     expect(d.value).toBe(21);
   });
 
+  it("缓存毒化回归：$derived 计算抛错后重试，绝不静默返回过期缓存", () => {
+    // 修复前：compute 先置 dirty=false 再跑 fn，抛错后 cached 保留旧值——
+    // 一次抛错，之后每次读取都静默返回上一次成功值（比抛穿更危险）
+    const s = $state(1);
+    let boom = false;
+    const d = $derived(() => {
+      if (boom) throw new Error("boom");
+      return s.value * 2;
+    });
+    expect(d.value).toBe(2);
+    s.value = 5; // 让派生的真实值变为 10，但下一次计算会抛错
+    boom = true;
+    expect(() => d.value).toThrowError(/boom/);
+    boom = false; // 恢复后重算可得新值——期间从未返回过旧缓存 2
+    expect(d.value).toBe(10);
+  });
+
+  it("$derived dispose 退订上游（慢性泄漏回归：死 derived 不再挂在上游 _subs）", () => {
+    const s = $state(1);
+    const d = $derived(() => s.value * 2);
+    expect(d.value).toBe(2);
+    expect(s._subs.size).toBe(1);
+    d.dispose!();
+    expect(s._subs.size).toBe(0);
+    // dispose 后再读：重算重订（与 $state dispose 后仍可读语义一致）
+    expect(d.value).toBe(2);
+    expect(s._subs.size).toBe(1);
+  });
+
   it("$effect cleanup stops tracking", async () => {
     const n = $state(0);
     let seen = 0;

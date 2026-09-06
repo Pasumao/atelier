@@ -27,6 +27,8 @@ export type Signal<T = unknown> = {
   _subs: Set<Subscription>;
   /** @internal 依赖图节点种类（store.graph() 查询用） */
   _kind: "state" | "derived";
+  /** 仅 $derived：退订上游并置脏（泄漏修复——死派生不再驻留上游 _subs；再读时重算重订） */
+  dispose?: () => void;
 };
 
 let tracking: Set<Signal> | null = null;
@@ -148,8 +150,17 @@ export function $derived<T>(fn: () => T): Signal<T> {
     if (!dirty) return cached;
     for (const [s, e] of upSubs) s._subs.delete(e);
     upSubs.clear();
+    let result: T;
+    let deps: Set<Signal>;
+    try {
+      ({ result, deps } = withTrack(fn));
+    } catch (e) {
+      // 缓存毒化修复（红检见 tests/core.test.ts）：计算失败保持脏——下次读取重算并重抛，
+      // 绝不把「上一次成功值」当新值静默返回（修复前 dirty 已置 false，抛错后永远返回旧缓存）。
+      dirty = true;
+      throw e;
+    }
     dirty = false;
-    const { result, deps } = withTrack(fn);
     cached = result;
     for (const s of deps) {
       const entry: Subscription = { batched: false, run: onUpstreamChange };
@@ -176,7 +187,16 @@ export function $derived<T>(fn: () => T): Signal<T> {
       throw new Error("ATR-305: 派生信号只读（$derived 由依赖计算）");
     },
   };
-  return sig;
+  // 慢性泄漏修复：派生信号的上游订阅此前无任何注销途径（组件拆卸后死 derived 的 upSubs
+  // 永远挂在上游 _subs 上）。dispose = 退订上游 + 置脏（再读时重算重订，与 $state 被
+  // dispose 后仍可读的语义一致）。同时经 __effectSink 归属 mount 实例，随 disposeInstance 注销。
+  const disposeDerived = () => {
+    for (const [s, e] of upSubs) s._subs.delete(e);
+    upSubs.clear();
+    dirty = true;
+  };
+  if (__effectSink.fn) __effectSink.fn(disposeDerived);
+  return Object.assign(sig, { dispose: disposeDerived });
 }
 
 export function $effect(fn: () => void): () => void {

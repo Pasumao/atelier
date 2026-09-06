@@ -72,7 +72,7 @@ node <atelier仓库路径>/atelier/mcp/server.mjs   # MCP 工具面（ATELIER_PR
 以下四点是 Atelier 与现有框架的实质差异，每条附实测与复现命令：
 
 **① 扁平 schema 一份三用** —— 同一个 `{reqProps, optProps}` 扁平形态同时充当组件契约（运行时校验 + token 校验，错误带错误码与 fix 行动指令）、MCP 工具参数（`mcp-definitions.json` 单源生成 tools/list）、注册表白名单渲染校验。无 $ref/oneOf，代理不猜。
-实测：框架 <!--@num:tests-->125<!--@/--> 用例 vitest 通过（另有 8 例实验台用例按环境跳过）；<!--@num:tools-->25<!--@/--> 工具单源接线，一致性校验全绿。
+实测：框架 <!--@num:tests-->135<!--@/--> 用例 vitest 通过（另有 8 例实验台用例按环境跳过）；<!--@num:tools-->25<!--@/--> 工具单源接线，一致性校验全绿。
 复现：`node atelier/scripts/check-skills.mjs` · `atelier/pnpm test`。
 
 **② 事务状态层 + 双轨回滚** —— 应用状态：命名合并 checkpoint（同名栈顶幂等，即轮级回滚）+ 增量事件日志（journal）+ 依赖图查询（`store.graph()` 与 journal 已接进 MCP，代理可直接问"现在哪些状态依赖什么"）；源码：git 源码锚，锚定前强制过三道门禁（测试绿 + 截图快照无漂移 + API 面无破坏性变更）。危险操作走 `agent.confirm` 确认闸，拒绝时返回结构化错误而非静默失败。

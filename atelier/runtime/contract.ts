@@ -51,6 +51,8 @@ export function validateFlat(
         for (const it of v) {
           if (f.items.type === "string" && typeof it !== "string") errors.push(`${k}[]: 期望 string 元素`);
           else if (f.items.type === "number" && typeof it !== "number") errors.push(`${k}[]: 期望 number 元素`);
+          else if (f.items.type === "boolean" && typeof it !== "boolean") errors.push(`${k}[]: 期望 boolean 元素`);
+          else if (f.items.type === "array") errors.push(`${k}[][]: 嵌套数组元素不支持（扁平 schema 红线——约束只挂叶子）`);
         }
       }
     }
