@@ -1,3 +1,0 @@
-allowBuilds:
-  "@parcel/watcher": false # @tailwindcss/cli 的可选 watch 依赖；本仓只用一次性 AOT 编译，无需原生构建
-  esbuild: true

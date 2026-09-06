@@ -6,3 +6,6 @@ node_modules/
 .edge-debug*
 *.log
 prototype/dist/
+
+# M3 arm-run scratch (RUNBOOK: attempt dirs are trash, graded facts live in results/)
+.m3-runs/

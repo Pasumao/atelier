@@ -1,9 +1,0 @@
-node_modules/
-dist/
-.atelier/dev-token
-.atelier/audit.jsonl
-.atr/snapshots/current.png
-src/tailwind.input.css
-src/atelier-tailwind.css
-*.log
-.debug*
