@@ -60,3 +60,11 @@ jobs:
           cd "$RUNNER_TEMP/smoke-app"
           pnpm install
           pnpm test
+  # Dev-face visual smoke (environment-sensitive; continue-on-error smoke, not a gate)
+  snapshot-smoke:
+    name: snapshot smoke
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo smoke placeholder
