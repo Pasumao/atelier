@@ -60,7 +60,7 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 
 ### 挂起区（等 F 线里程碑后启动）
 
-- 干扰面实验（不给源码只给 CLI/错误输出）——技能包价值（核心竞争力）的决定性检验；执行方式同 M3 三臂（逐臂独立会话，RUNBOOK 同款纪律）。
+- 干扰面实验（不给源码只给 CLI/错误输出）——技能包价值（核心竞争力）的决定性检验；执行方式同 M3 三臂（逐臂独立会话，RUNBOOK 同款纪律）。**启动条件已满足（2026-09-06）**：M3 加难层正式波（Wave-7，45 run）出数完成，三臂全平，技能包价值悬念移交本实验 + 混合实验回答。
 
 ### M3 实验波次记录
 
@@ -71,3 +71,11 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
   断言 FAIL）→ brief v2 已消歧；②逐臂管线全链路（attempt+junction+子代理单发+机械评分+盲评）走通；
   D-1/D-4 已拍板（§5）。明细 `results/WAVE6-PILOT-REPORT.md` · `results/runs-wave6-pilot.json`。
   **brief v2 已验证**（skill.task4 r2 重跑 PASS，整改闭环）。**下一步**：正式波（每臂×每任务×5 runs）。
+- **Wave-7 正式波（2026-09-06，FORMAL n=5/cell，共 45 run）**：task4-6 × 三臂 × 5 runs，独立子代理
+  会话逐 run 执行（RUNBOOK 偏差已记录：授权改最多 3 路并发批处理，评分/盲评/入账串行）；出数前置
+  负控 6/6 + 六正控 6/6 先行通过；react 臂独立评审代理盲评（评分者≠编排者）。记分：**三臂全
+  15/15（100%），全部 attempts=1 零返工**；report.mjs §7 判定 PASS（绝对口径 100% ≥ 60%），
+  相对口径 skill−react = 0pt 不成立。**诚实解读**：天花板在加难层复现——本任务层对基线模型已无
+  区分力，技能包价值悬念按既定安排移交 P3-2 干扰面实验 + P3-3 混合实验（两者启动条件均已满足），
+  生死判据 1 走向"定论破产"侧；所有引用须带 "FORMAL n=5/cell、Wilson 区间宽于判据" 限定语。
+  明细 `results/WAVE7-FORMAL-REPORT.md` · `results/runs-wave7-formal.json`。

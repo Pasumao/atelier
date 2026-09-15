@@ -1,0 +1,336 @@
+{
+  "wave": "7-formal",
+  "note": "正式波：每臂×每任务×5 runs（task4-6 加难层）；独立子代理会话逐 run 串行执行；react 臂独立评审代理盲评 rubric（评分者≠编排者）。runs 只追加不改写。",
+  "runs": [
+    {
+      "arm": "noskill",
+      "task": "task4-agent-cards",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task4-agent-cards",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task4-agent-cards",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task4-agent-cards",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task4-agent-cards",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task5-txn-board",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task5-txn-board",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task5-txn-board",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task5-txn-board",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task5-txn-board",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task6-token-discipline",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task6-token-discipline",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task6-token-discipline",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task6-token-discipline",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "noskill",
+      "task": "task6-token-discipline",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task4-agent-cards",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task4-agent-cards",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task4-agent-cards",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task4-agent-cards",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task4-agent-cards",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task5-txn-board",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task5-txn-board",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task5-txn-board",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task5-txn-board",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task5-txn-board",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task6-token-discipline",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task6-token-discipline",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task6-token-discipline",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task6-token-discipline",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "skill",
+      "task": "task6-token-discipline",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1
+    },
+    {
+      "arm": "react",
+      "task": "task4-agent-cards",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task4-agent-cards",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task4-agent-cards",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task4-agent-cards",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task4-agent-cards",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task5-txn-board",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task5-txn-board",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task5-txn-board",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task5-txn-board",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task5-txn-board",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task6-token-discipline",
+      "run": 1,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task6-token-discipline",
+      "run": 2,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 9
+    },
+    {
+      "arm": "react",
+      "task": "task6-token-discipline",
+      "run": 3,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 9
+    },
+    {
+      "arm": "react",
+      "task": "task6-token-discipline",
+      "run": 4,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 10
+    },
+    {
+      "arm": "react",
+      "task": "task6-token-discipline",
+      "run": 5,
+      "firstPass": true,
+      "attempts": 1,
+      "rubricScore": 9
+    }
+  ]
+}
