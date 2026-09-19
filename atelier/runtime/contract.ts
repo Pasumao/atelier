@@ -120,6 +120,42 @@ function typeName(v: unknown): string {
   return typeof v;
 }
 
+/* ---------- FlatOf：FlatSchema → TS 对象类型的类型级投影（FS-M2，§2.3/§7.2） ----------
+ * 用途：gen endpoint 生成物（src/generated/api.ts）的类型共享助手——生成物 import 契约单源
+ * 的 schema 常量 + 本类型，`FlatOf<typeof chatInput>` 即得输入/输出对象类型，避免生成物内联
+ * 重复类型（§8.1 双源 = ERROR 机检）。
+ * 投影规则（与 FlatField 对齐）：string→string、number→number、boolean→boolean、
+ * array→items 投影数组、enum→字面量联合。（数据契约 §5.1 的列类型 integer/real→number、
+ * text/blob→string 是同一投影思想在 table() 域的对应物，归 FS 线 M2-b。）
+ * 精度前提：契约常量用 `satisfies FlatSchema` 声明（保留字段字面量类型，逐字段可判别）；
+ * 若用 `: FlatSchema` 注解，字段 type 被加宽为联合，投影退化为宽联合（诚实降级，不报错）。
+ * 红线：本导出必须保持零运行时代码（纯 type）——runtime 不增负（§8.2）。 */
+export type FlatLeaf<F> = F extends { enum: readonly (infer E)[] }
+  ? E extends string
+    ? E
+    : never
+  : F extends { type: infer T; items: infer I }
+    ? T extends "array"
+      ? I extends FlatField
+        ? FlatLeaf<I>[]
+        : unknown[]
+      : FlatLeafOf<T>
+    : F extends { type: infer T }
+      ? FlatLeafOf<T>
+      : unknown;
+type FlatLeafOf<T> = T extends "string"
+  ? string
+  : T extends "number"
+    ? number
+    : T extends "boolean"
+      ? boolean
+      : T extends "array"
+        ? unknown[]
+        : unknown;
+type FlatReq<S> = S extends { reqProps: infer R } ? { [K in keyof R]-?: FlatLeaf<R[K]> } : unknown;
+type FlatOpt<S> = S extends { optProps: infer O } ? { [K in keyof O]?: FlatLeaf<O[K]> } : {};
+export type FlatOf<S extends FlatSchema> = FlatReq<S> & FlatOpt<S>;
+
 /** 演示用：把任意 JS 数据按 schema 校验（契约演示面板） */
 export function validateUnknown(schema: unknown, data: unknown, component = "ContractDemo"): { ok: boolean; error?: AtrError } {
   if (typeof data !== "object" || data === null) {

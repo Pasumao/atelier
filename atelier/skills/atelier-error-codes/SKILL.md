@@ -22,6 +22,8 @@ description: Atelier error code reference. ATR-1xx compile / 2xx contract / 3xx 
 | ATR-201 | Props missing/wrong type vs flat schema | `ModelCard` got no `name` | `fix` lists available keys — fill per schema (`name`, `badge`, `tagline`, `highlights`) |
 | ATR-204 | Style references undefined token | `var(--color-1)` (not in config) | `fix` lists valid tokens; use an existing semantic token or add one to `atelier.config.json` |
 | ATR-205 | Input not a JSON object | contract demo got `"string"` | Return an object with string keys |
+| ATR-215 | Endpoint output violates `output` contract (server developer error, NOT client) | handler returns `{id:"x"}` but output schema wants number | Fix the handler return to match the `output` flat schema; dev-only check (stripped in prod, JSON-safe stays) |
+| ATR-216 | Endpoint returned non-JSON-safe value (function/Symbol/BigInt/Promise/circular) | handler returns `{ fn: () => 1 }` | Map rich objects to pure data before return; message locates the path (e.g. `$.fn`); enforced in dev AND prod |
 
 ## ATR-3xx — Runtime
 
@@ -29,6 +31,8 @@ description: Atelier error code reference. ATR-1xx compile / 2xx contract / 3xx 
 |---|---|---|---|
 | ATR-301 | Template expression parse failure | `=>` arrow, `=` assignment, or function call (`.map(...)`) left in a `{...}` expression — leftover tokens are rejected, never silently dropped | Use named handler (`.locals({ bump })` + `on:click={bump}`); precompute with `$derived`; keep expressions simple |
 | ATR-305 | Writing to a `$derived` signal | `double.value = 4` | Derive-only: change upstream `$state` instead |
+| ATR-314 | `live.invalidate` / `emits` key syntax illegal | `invalidate: ["messages"]` (missing `table:`) | Key syntax: `table:<name>` (`[A-Za-z0-9_]`) or `key:<business key>`; fix the declaration at registration time |
+| ATR-322 | Endpoint exceeded its `timeoutMs` budget | handler hangs longer than the declared 10s | Raise `timeoutMs`, or unblock the handler: observe `ctx.signal` and exit early (abort stops the dispatch wait, it cannot kill the handler) |
 
 ## ATR-4xx — MCP / tooling
 
