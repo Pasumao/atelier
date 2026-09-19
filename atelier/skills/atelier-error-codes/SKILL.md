@@ -29,6 +29,10 @@ description: Atelier error code reference. ATR-1xx compile / 2xx contract / 3xx 
 |---|---|---|---|
 | ATR-301 | Template expression parse failure | `=>` arrow, `=` assignment, or function call (`.map(...)`) left in a `{...}` expression — leftover tokens are rejected, never silently dropped | Use named handler (`.locals({ bump })` + `on:click={bump}`); precompute with `$derived`; keep expressions simple |
 | ATR-305 | Writing to a `$derived` signal | `double.value = 4` | Derive-only: change upstream `$state` instead |
+| ATR-331 | Migration missing its `.down.sql` pair (reversibility is a hard gate) | `001_create_chats.up.sql` with no `001_create_chats.down.sql` | Write the missing down file (`gen db` scaffolds pairs; `migrate up` refuses to apply unpaired migrations) |
+| ATR-332 | Applied migration file changed/missing (sha256 checksum mismatch vs `atelier_migrations`) | edited `002_add_messages.up.sql` after `migrate up` | Applied migrations are never rewritten — revert the edit (restore from git/checkpoint) or write a new numbered migration instead |
+| ATR-333 | Down missing/failed, or down carries an irreversible marker (`-- 不可逆：`) without `force: true` | `migrateDown` hit a down file with `-- 不可逆：数据可弃` and no force | Read the 不可逆 note in the down file to confirm what is dropped and why it is safe, then re-run with `force: true` (irreversible ops need explicit consent, never silent defaults) |
+| ATR-334 | Migration up failed inside its transaction (already rolled back) | bad SQL in `003_*.up.sql` → `CREATE TABEL` syntax error | Fix the up SQL and re-run `migrate up` — the failed step rolled back entirely, db is untouched; never put BEGIN/COMMIT inside migration files (migrator wraps each) |
 
 ## ATR-4xx — MCP / tooling
 

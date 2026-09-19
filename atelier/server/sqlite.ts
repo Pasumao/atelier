@@ -20,9 +20,34 @@ export interface SqliteStatement {
 export interface SqliteDb {
   prepare(sql: string): SqliteStatement;
   exec(sql: string): void;
+  /**
+   * 事务包裹（FS-DESIGN §5.5，FS-M2(m2b) 加法扩展——既有四原语不动）：
+   * BEGIN IMMEDIATE / COMMIT / ROLLBACK；fn 同步或 async 均支持（异常回滚后原样 rethrow），
+   * fn 收到的 tx 视图即同一 SqliteDb（四原语直用）。诚实边界：不支持嵌套（SQLite 无嵌套
+   * 事务——fn 内再 tx 直接 SQLITE 报错，显式失败优于隐式合并）；async fn 挂起期间同句柄
+   * 被并发使用会破坏原子性（单进程串行使用约定——command handler 是事务边界建议位）。
+   */
+  tx<T>(fn: (tx: SqliteDb) => T | Promise<T>): Promise<T>;
   close(): void;
   /** 宿主标识（bun/node），诊断与测试用 */
   readonly host: "bun" | "node";
+}
+
+/** tx 共享实现（bun/node 同形状——宿主差异只在 prepare/exec 的底层来源，此处锁零差异） */
+async function runTx<T>(view: SqliteDb, exec: (sql: string) => void, fn: (tx: SqliteDb) => T | Promise<T>): Promise<T> {
+  exec("BEGIN IMMEDIATE");
+  try {
+    const out = await fn(view);
+    exec("COMMIT");
+    return out;
+  } catch (e) {
+    try {
+      exec("ROLLBACK");
+    } catch {
+      /* ROLLBACK 本身失败（连接已坏）——不掩盖原始错误 */
+    }
+    throw e;
+  }
 }
 
 /** 无可用 SQLite 宿主（决策 9 四段式；HTTP 面映射 500 由分发层负责） */
@@ -47,12 +72,14 @@ export async function openSqlite(path: string): Promise<SqliteDb> {
     const spec = "bun:sqlite"; // 变量间接 + 动态 import：非 Bun 宿主加载本模块不炸（vite 静态分析跳过）
     const mod = (await import(/* @vite-ignore */ spec)) as { Database: new (path: string) => { prepare(sql: string): RawStatement; exec(sql: string): void; close(): void } };
     const db = new mod.Database(path);
-    return {
+    const handle: SqliteDb = {
       host: "bun",
       prepare: (sql: string) => wrapStatement(db.prepare(sql)),
       exec: (sql: string) => db.exec(sql),
       close: () => db.close(),
+      tx: <T,>(fn: (tx: SqliteDb) => T | Promise<T>) => runTx(handle, (sql: string) => db.exec(sql), fn),
     };
+    return handle;
   }
   let nodeDb: { prepare(sql: string): RawStatement; exec(sql: string): void; close(): void };
   try {
@@ -61,12 +88,14 @@ export async function openSqlite(path: string): Promise<SqliteDb> {
   } catch (e) {
     throw new SqliteUnavailableError(`node:sqlite 加载失败：${(e as Error)?.message ?? String(e)}`);
   }
-  return {
+  const handle: SqliteDb = {
     host: "node",
     prepare: (sql: string) => wrapStatement(nodeDb.prepare(sql)),
     exec: (sql: string) => nodeDb.exec(sql),
     close: () => nodeDb.close(),
+    tx: <T,>(fn: (tx: SqliteDb) => T | Promise<T>) => runTx(handle, (sql: string) => nodeDb.exec(sql), fn),
   };
+  return handle;
 }
 
 function wrapStatement(raw: RawStatement): SqliteStatement {
