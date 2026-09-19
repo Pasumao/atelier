@@ -3,6 +3,7 @@
  * 替代 new Function/eval（决策 12：产物零 eval 精神）；
  * 支持子集：属性访问 / 索引 / 字符串数字布尔字面量 / 数组与对象字面量（F-4 第二期，含 {a} 简写
  * 与 ({...}).x 成员链）/ === == != !== > < >= <= && || ! ?: + - * /
+ * FS-11（§8.4，方向=显式拒绝）：求值结果为 Promise → ATR-323 四段式拒绝（异步不进响应式图）。
  * 完整版：编译器将表达式转换为直接闭包调用（本原型为解释求值）。
  */
 
@@ -350,6 +351,24 @@ export function booly(v: unknown): boolean {
   return Boolean(v);
 }
 
+/** FS-11：跨 realm 安全的 Promise 判定——duck-typing then（不 instanceof，异 realm Promise
+ * 与自造 thenable 一网打尽；null/undefined 短路）。 */
+function isPromiseLike(v: unknown): boolean {
+  return v != null && typeof (v as { then?: unknown }).then === "function";
+}
+
+/** FS-11 / ATR-323 四段式：模板表达式求值出 Promise = 异步泄漏进响应式图，显式拒绝。
+ * fix 指路两条合法异步通道（§8.4 原文口径）：三态原语 streamValue/optimisticList 边界消费 +
+ * live 端点订阅。 */
+function atrAsyncLeak(src: string): never {
+  throw {
+    code: "ATR-323",
+    message: `模板表达式返回 Promise（异步泄漏进响应式图）：${src}`,
+    context: { expr: src },
+    fix: "模板表达式必须同步求值：异步结果经三态原语 streamValue/optimisticList 消费（原语边界解析后写 $state），或订阅 live 端点让推送写入信号；事件处理器传函数引用（on:click={handler}），在处理器内部收敛异步",
+  };
+}
+
 /** 求值表达式文本。scope 中的信号为普通 JS 对象（读 .value 即触发 track）。
  * 解析结果按源文本 memoize（上限 500 条，与 template.ts 的模板缓存同策略）——
  * bindExpr 每次重跑、on:click 每次点击都不再重新 tokenize+parse。 */
@@ -365,7 +384,21 @@ export function evalExpr(src: string, scope: Record<string, unknown>): unknown {
     }
     parseCache.set(src, ast);
   }
-  return ast(scope);
+  const v = ast(scope);
+  /* FS-11 守卫位置论证（§8.4 "rt.bindExpr 求值出口统一检测"的落地形态）：
+   * bindExpr 只覆盖文本插值/动态 attr 两个挂点，而 {#if} test、{#each} 源与 key、组件动态 prop
+   * （bindProp）、on: 表达式都直接调 evalExpr；codegen 生成代码亦然——rt.bindExpr/rt.bindProp
+   * 内部汇入本函数，rt.evalExpr 直调（见 compiler/codegen.mjs 发射器）。evalExpr 是解释器与
+   * codegen 两条路径全部模板表达式求值的唯一汇聚点：在此单点检测 = 双路径天然同源（同码/同
+   * message/同 fix，错误渲染 golden 一致，tests/fs11-async.test.ts），无生成代码内联复制、
+   * 无两套语义，产物零 import 红线不破（能力本就经 ctx.rt 注入）。
+   * 分层：调用语法 { fn() } 已被 ATR-301 解析期拒绝（迷你求值器不支持调用，遗留 token 显式报错），
+   * 本守卫收口值形态——信号/作用域里存了 Promise（如 $state(fetchUser()) 笔误）经非调用表达式
+   * 流入渲染图。守卫前反例（红检留痕，tests/fs11-async.test.ts 头注释）：文本插值渲染 "{}" 且
+   * 零上报、{#if} 恒真静默取首支、{#each} 裸 TypeError 无 fix、bindProp 把 Promise 写进信号
+   * journal、on: 静默丢弃。 */
+  if (isPromiseLike(v)) atrAsyncLeak(src);
+  return v;
 }
 
 /**
