@@ -70,6 +70,8 @@ GENERATE / DATA (FS-M2 全站化)
                                                                           幂等重跑，库缺失不静默建库）
   atelier impact <contractKey> [--root <dir>]                      MINI* 契约 → 端点 → 前端调用点 两跳影响面导航
                                                                           （导航不是门禁——exit 恒 0）
+  atelier export openapi [--root <dir>] [--out openapi.json]       MINI* 端点面 → openapi-3.0.3 文档（FS-9：§2.4
+                                       [--mount /api] [--name <T>]        投影器单管线；restful GET 映射 §3.4）
 
 BENCHMARK
   atelier bench --app <dir> [--port N] [--json] [--keep]           MINI* P0-4 SPEC §7 four-metric baseline
@@ -222,6 +224,11 @@ switch (cmd) {
     // §2.5 契约影响面两跳导航（导航不是门禁，exit 恒 0）
     if (!sub) die("usage: atelier impact <contractKey> [--root <dir>]", 2);
     runFile(path.join(PKG, "gen", "impact.mjs"), [sub, ...rest]);
+    break;
+  case "export":
+    // FS-9：端点面 → openapi-3.0.3（schema 走 §2.4 扁平投影器单管线；范围克制 §13 只导出端点面）
+    if (sub !== "openapi") die("usage: atelier export openapi [--root <dir>] [--out openapi.json] [--mount /api] [--name <Title>]", 2);
+    runFile(path.join(PKG, "gen", "export-openapi.mjs"), rest);
     break;
   case "bench": {
     // P0-4: SPEC §7 four-metric baseline bench (needs an init'd app with deps installed)

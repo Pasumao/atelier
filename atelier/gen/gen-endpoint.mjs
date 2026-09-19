@@ -94,8 +94,8 @@ export function matchDelim(src, openPos) {
   return -1;
 }
 
-/** 去注释（保留字符串原样）——供值文本再解析 */
-function stripComments(src) {
+/** 去注释（保留字符串原样）——供值文本再解析（export-openapi.mjs 复用同一原语，FS-9） */
+export function stripComments(src) {
   let out = "";
   let i = 0;
   while (i < src.length) {
@@ -157,8 +157,9 @@ function topLevelChunks(body) {
   return chunks.map((s) => s.trim()).filter(Boolean);
 }
 
-/** 对象字面量体 → 直接属性表 { key: 值文本 }；简写属性/展开不识别（诚实边界，见文件头） */
-function parseProps(body) {
+/** 对象字面量体 → 直接属性表 { key: 值文本 }；简写属性/展开不识别（诚实边界，见文件头）。
+ *  export-openapi.mjs 复用同一原语（FS-9 单一扫描器真相——只加导出不改行为） */
+export function parseProps(body) {
   const props = {};
   for (const chunk of topLevelChunks(body)) {
     const m = /^([A-Za-z_$][\w$]*)\s*:\s*([\s\S]+)$/.exec(chunk);
@@ -168,14 +169,14 @@ function parseProps(body) {
 }
 
 /** 值文本的起始标识符（契约单源纪律 = 引用常量；行内字面量不识别 → null + 由调用方记 note） */
-function identOf(valueText) {
+export function identOf(valueText) {
   if (valueText == null) return null;
   const m = /^\s*(?:as\s+const\s+)?([A-Za-z_$][\w$]*)/.exec(stripComments(valueText));
   return m ? m[1] : null;
 }
 
-/** [ "a", "b" ] 值文本 → 字符串数组；非数组形态 → null */
-function stringArrayOf(valueText) {
+/** [ "a", "b" ] 值文本 → 字符串数组；非数组形态 → null（export-openapi.mjs 复用） */
+export function stringArrayOf(valueText) {
   if (valueText == null) return null;
   const stripped = stripComments(valueText).trim();
   if (!stripped.startsWith("[")) return null;
@@ -190,7 +191,8 @@ function stringArrayOf(valueText) {
 
 /* ---------- ① 端点文件扫描 ---------- */
 
-function* walkTsFiles(dir, depth = 0) {
+/** 递归 .ts 文件枚举（跳 node_modules/dist/点目录；export-openapi.mjs 复用同一枚举原语） */
+export function* walkTsFiles(dir, depth = 0) {
   if (depth > 8 || !fs.existsSync(dir)) return;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) {
