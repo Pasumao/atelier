@@ -12,6 +12,8 @@
 | 08-31 | P3-1 前置：M3 加难任务层 task4-6 落地（brief+参考解+harness 扩张+protocol/grade 同步）；2026-09-04 六正控复核全 PASS | `d27a34f` |
 | 09-06 | P3-4 全收口：`atelier api-diff snapshot\|check`（框架四面/应用两面，breaking/additive/relaxed/valueDrift+churn，--allow/--strict/--budget）· checkpoint 第三道门（API 漂移拒锚）· CI 接线 · 负例红检实证。F-2 二期·构建期图查询：buildGraph + codegen `--graph`/`--graph-only` + MCP `graph.static`（25 工具，stdio 双径 e2e）。M3 RUNBOOK 逐臂操作卡 | `6b12b99`→`c0bc95d` |
 | 09-06 | **仓库整理**（删 SKILL_DRAFT/.dsh-trash；SKILLS-PLAN/BACKLOG 索引化）+ **独立子代理锐评**（8/10 side-project 坐标 / 3/10 框架坐标；整改=F-5 立项、出数前置增补、README 数字修正、名实对齐候选池、生死判据入 ROADMAP §7） | `83e4a7a`→ |
+| 09-06(锐评整改批次) | 锐评三件事收口：F-5 组件模型补强红检转绿（响应式 props + effect 所有权，`tests/f5-kernel.test.ts`）· 负控集六枚 + `negative-check.mjs` 机检 6/6 + CI 接线 · README/AGENTS 数字改标记位（docs-numbers sync/check 机检）· R6 radius 纪律（F-3 收口）· struct `FACT_TOKEN_REFS` token 对账 · checkpoint 仓库发现向上查找 · M3 Wave-6 先导波（抓出 task4 brief 歧义 → brief v2 消歧并验证）· P3-5 D 子集预研报告（MCP Apps/A2UI 正交，定论不立项深投入） | `83e4a7a`→`a2e18a8` |
+| 09-19 | **FS-M1 全站化第一里程碑**：决策 17-23 定稿 · `atelier/server/` S0 端点运行时（defineQuery/defineCommand 读写二分 + 显式注册表 + Web 标准 Request/Response 分发 + ATR-2xx 契约校验 + command 审计 journal）· `~standard` 互操作口（contract.ts 抽 collectFlatIssues，文案逐字不变）· SQLite 薄宿主适配（bun:sqlite/node:sqlite 四原语，差异锁死 sqlite.ts）· 测试 135→160 绿 · docs-numbers sync。同日 M3 Wave-7 正式波 45 run 出数（三臂全 100%，诚实判读见 M3 波次记录） | `b592847` |
 
 ## 活跃队列
 
@@ -21,7 +23,7 @@
 |---|---|---|---|
 | F-1 | 事务层完整版（决策 5） | ✅ 一期+MCP 接线（08-30）：命名合并/journal/store.graph/bridge 下行；诚实边界：恢复走全量快照 | 无（回放恢复/静态化归 F-2） |
 | F-2 | 编译器静态依赖图（决策 3） | 🔄 一期 ✅（清单+差分对拍，语法级超集）；二期 2/3 ✅（09-06 构建期图查询 buildGraph/`--graph`/`graph.static` + 跳过追踪快路径 `$effectStatic`：exactness 判据=无函数调用+全根标识符解析为信号，不确定即回退动态追踪宁慢勿错；短路=良性超订阅；模板层 ATR-301 拒括号使 paren 守卫为纵深防御；5 专项用例+122 全绿+六正控 6/6+bench 全 PASS） | **prod 剥离**（dev 校验/追踪簿记的发布面剥离；需构建面设计，阶段四） |
-| F-3 | 样式纪律收紧（决策 16） | ✅ 二期（R1-R5 全链：颜色/间距/字号；recipe 层同责；诚实边界：reset 豁免、border/line-height/阴影不辖、radius 留候选） | radius 纪律候选 |
+| F-3 | 样式纪律收紧（决策 16） | ✅ R1-R6 全链（08-30 二期 R4/R5 间距字号 + 09-06 R6 radius：border-radius 只准 var(--radius-*)/0、rounded-* 类限 config 键，starter 真违例迁移实证；recipe 层同责；诚实边界：reset 豁免、border/line-height/阴影不辖） | 无 |
 | F-4 | codegen 覆盖扩张 | ✅ 两批（08-30）：else-if 链/void 元素/ATR-101/错位闭合拒绝/对象数组字面量/配对花括号 | 属性级指令（on:/bind: 族）= 新方向候选，需先出设计 |
 | **F-5** | **组件模型补强（响应式 props + effect 所有权）** | ✅ **红检转绿（2026-09-06 同日）**：① 红检复现锐评双取证（`tests/f5-kernel.test.ts` 红检①②，先红后绿）→ ② effect 所有权：teardown 栈（if 换支/each 无 key 全清/keyed 行移除三路 cleanup，嵌套实例级联 dispose，与 HMR `__effectSink` 两级正交）→ ③ 响应式 props：prop 信号+getter（子组件 `props.x` 语法不变），父侧 effect 回写，解释器/codegen 双路同源（`rt.bindProp`/`rt.validateProps`）。回归：115+8skip 绿 · golden DOM parity（含旧一次性语义测试翻转为传导对拍）· M3 六正控 6/6 PASS · starter 应用 18/18。诚实边界：函数体内 props 直读仍 initial-only；prop 信号入依赖图/journal | **无**（性能四指标复测 2026-09-06 全 PASS；数字以根 README 性能表为唯一人工口径，此处不重复记录） |
 
@@ -39,9 +41,9 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 
 | # | 项 | 状态 | 剩余 |
 |---|---|---|---|
-| FS-1 | S0 端点运行时（`atelier/server/`）：defineQuery/defineCommand 显式注册表 + Web 标准 Request/Response 分发 + 契约校验（复用 validateFlat，ATR-2xx 四段式）+ command 审计 journal + live 端点元数据位 | 🔄 M1 实现中（2026-09-19） | gen endpoint 生成器接入、atelier dev 托管 |
-| FS-2 | `~standard` 互操作口（决策 22）：schema 对象挂 `~standard` 属性，validate 委托 validateFlat | 🔄 M1 实现中 | 编译期 JSON Schema/openapi-3.0 投影（归 FS-9，compiler 侧） |
-| FS-3 | SQLite 薄宿主适配（bun:sqlite/node:sqlite，四原语 prepare/run/all/get 锁差异）+ 数据契约 + gen db 薄生成层 | 🔄 宿主适配 M1 实现中 | gen db 生成层（L 级） |
+| FS-1 | S0 端点运行时（`atelier/server/`）：defineQuery/defineCommand 显式注册表 + Web 标准 Request/Response 分发 + 契约校验（复用 validateFlat，ATR-2xx 四段式）+ command 审计 journal + live 端点元数据位 | ✅ M1（2026-09-19，`endpoints.ts`，10 专项用例） | 生成器接入归 FS-5 · dev 托管归 FS-7 |
+| FS-2 | `~standard` 互操作口（决策 22）：schema 对象挂 `~standard` 属性，validate 委托 validateFlat | ✅ M1（2026-09-19，`standard-schema.ts`，9 专项用例） | 编译期 JSON Schema/openapi-3.0 投影（归 FS-9，compiler 侧） |
+| FS-3 | SQLite 薄宿主适配（bun:sqlite/node:sqlite，四原语 prepare/run/all/get 锁差异）+ 数据契约 + gen db 薄生成层 | ✅ 宿主适配 M1（2026-09-19，`sqlite.ts`） | gen db 生成层（L 级，随 FS-5 批次） |
 | FS-4 | 可逆迁移器（up/down）+ checkpoint 联动回滚（检出未逆迁移强制先 down，confirm=ask） | 未开工 | |
 | FS-5 | gen endpoint / gen auth 生成器（产物显式 import 闭合 + 生成后零修改可编译门禁） | 未开工 | |
 | FS-6 | MCP endpoint.*/db.schema 工具族（超集对表 Next 8 工具）+ struct 八层（+server 边界层/+数据契约层/import 白名单） | 未开工 | 三处同步纪律照旧 |
@@ -76,7 +78,8 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 
 ### 挂起区（等 F 线里程碑后启动）
 
-- 干扰面实验（不给源码只给 CLI/错误输出）——技能包价值（核心竞争力）的决定性检验；执行方式同 M3 三臂（逐臂独立会话，RUNBOOK 同款纪律）。**启动条件已满足（2026-09-06）**：M3 加难层正式波（Wave-7，45 run）出数完成，三臂全平，技能包价值悬念移交本实验 + 混合实验回答。
+- 干扰面实验（不给源码只给 CLI/错误输出，= ROADMAP P3-2）——技能包价值的决定性检验；执行方式同 M3 三臂（逐臂独立会话，RUNBOOK 同款纪律）。**启动条件已满足（2026-09-06）**：M3 加难层正式波（Wave-7，45 run）出数完成，三臂全平，技能包价值悬念移交本实验 + 混合实验回答。
+- 混合实验（内联文档 vs skills vs 混合三臂，= ROADMAP P3-3；D-1 已拍板立项 2026-09-06）——正面回应 Vercel evals 反证；启动条件同上已满足，可与干扰面实验并联排期；**结论可推翻"纯 skills"定论**，若混合更优则修订 design-decisions 相应决策并出迁移方案。
 
 ### M3 实验波次记录
 

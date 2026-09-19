@@ -35,14 +35,15 @@ export const HelloCard = component(function HelloCard(props) {
 
 组件 = 契约（`reqProps/optProps` 扁平 schema）+ 实现（显式 `$state` + `html` 模板）。这份 schema 不是注释：代理写代码前就能用它校验 props（错误带修复建议），运行时用它做白名单渲染，同一个形态还直接充当 MCP 工具参数定义——一份三用。
 
-## 架构：五层（详见 ARCHITECTURE.md）
+## 架构：五层 + 服务层 S0（详见 ARCHITECTURE.md）
 
 ```
 L5 人对界面    atelier review —— 预览 / checkpoint 时间轴 / 批准-驳回-点踩
 L4 反馈通道    atelier dev —— 亚秒 HMR · 截图回环 · 审计日志
 L3 代理层      stdio MCP Server —— 查询 / 操作 / 审计三面工具（token 鉴权）
-L2 契约层      扁平 schema 单一真相 —— 组件契约 / MCP 工具定义 / 注册表白名单一份三用
+L2 契约层      扁平 schema 单一真相 —— 组件 ∪ 端点 ∪ 数据一份多用
 L1 内核        零依赖运行时 —— 信号引擎 · 事务状态层 · 三态原语 · 模板渲染
+S0 服务层      atelier/server —— defineQuery/defineCommand 读写二分 · 契约校验 · 审计 journal（FS-M1 已落地）
 ```
 
 工具链与前端运行时**零代码耦合**：runtime 不 import 任何工具链模块，工具链只通过 HTTP dev 面 / git / 文件系统与应用交互。新应用 = `atelier init` 三步组装（应用模板 + 拷贝 runtime + 拷贝 dev 面工具），生成自包含可跑的目录。
@@ -110,7 +111,8 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 ## 当前状态与已知边界
 
 - **未发布 npm**：需 clone 仓库使用；无第三方生产用户。
-- **正确率数据待补**：三臂对照实验在简单任务层全平（天花板效应）；加难任务层数据落地前，我们不引用任何"首遍正确率"数字，请引用者同样克制。
+- **全站化推进中**：FS-M1 已落地（`atelier/server` 端点运行时 + Standard Schema 互操作口 + SQLite 薄宿主适配，决策 17-23）；生成器 / 迁移 / MCP 全栈工具族未落地，见 `BACKLOG.md` FS 线。
+- **正确率主张克制**：三臂对照实验在简单层与加难层（Wave-7 正式波 45 run）均全平——绝对口径 100% 达标、相对区分力为零；「技能包优势」主张悬置待干扰面/混合实验出数，我们不引用任何"首遍正确率优势"数字，请引用者同样克制。
 - **性能数字为单机实测**（2026-09-06 / Windows / Node 24），会随修复移动。
 - **未实现即明说**：CLI 命令按实现程度标注（完整 / 最小 / 未实现），未实现的命令返回 exit 4 并指路规格文档，永不伪造成功。
 - 所有"未确认"结论明确标注，不写成事实。
@@ -119,13 +121,16 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 
 | 文档 | 回答的问题 |
 |---|---|
-| `atelier/docs/ARCHITECTURE.md` | 系统是什么（五层架构、模块边界） |
+| `atelier/docs/README.md` | 文档导航（每份一行：定位 + 状态 + 时点） |
+| `atelier/docs/ARCHITECTURE.md` | 系统是什么（五层 + S0 服务层、仓库布局、模块边界） |
 | `atelier/docs/SPEC-Agentic-DX-v0.1.md` | 代理怎么用（硬约定 / 错误规范 / DoD / 性能基线闸门） |
-| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-16 + 未决项） |
+| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-23 + 未决项） |
 | `atelier/docs/AI-OPTIMAL-STRUCTURE.md` | 六层 AI 友好结构公理与机检规则集 |
 | `atelier/docs/ROADMAP.md` | 路线计划（方向与里程碑） |
-| `atelier/docs/BACKLOG.md` | 缺口与改进执行队列 |
-| `atelier/docs/TECH-*` / `SKILLS-PLAN.md` | 调研底稿与技能包设计依据 |
+| `atelier/docs/BACKLOG.md` | 缺口与改进执行队列（唯一源） |
+| `atelier/docs/FULLSTACK-DESIGN.md` | 全站化设计书 v0.2（已拍板，转背景文献） |
+| `atelier/docs/research/` | 2026-09 三路深度调研（决策 17-23 证据基线；v0.1 survey 已被取代留档） |
+| `atelier/docs/TECH-*` / `SKILLS-PLAN.md` | 调研底稿（时点快照）与技能包设计依据 |
 | `AGENTS.md` | 本仓库的常用命令与维护纪律 |
 
 ## License

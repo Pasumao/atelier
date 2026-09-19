@@ -1,5 +1,7 @@
 # Atelier × 主流框架 — 实现技术逐项对照（v0.2）
 
+> **时点快照横幅（2026-09-19 加注）**：成文于 2026-08 前、无日期戳——文中「⚠️未测 / 欠账」项已部分落地：Template AST 缓存、keyed each reconcile、bundle 实测（gzip 9.09KB PASS）、编译期静态依赖图（F-2 一二期）；现状以仓库根 README / `BACKLOG.md` 归档为准。§14 三个根源性路线选择与对照方法论仍有效。
+>
 > 对象：本仓实际源码（行号可查）vs 各框架公开实现的公认机制描述。
 > 标注约定：`【同】`技术路线一致 · `【异】`不同路线（附后果）· `⚠️未测`。定性数字为社区常见量级，非精确基准。
 
@@ -100,9 +102,9 @@ runtime 核心（core+expr+template+contract 合计 ~35KB 源码，零依赖）g
 2. **自有 DSL（分布外）vs 复用 JSX（分布内）**：赌"语法面小+技能包纠偏 > 语料规模优势"；该赌注由 M3 A/B 实验裁决，不通则局部回退 JSX 方言选项。
 3. **Agent 内建 vs 外挂生态**：主流把 agent 需求留给工具层拼装；我们把契约/检视/恢复做成内核器官。反向兼容也保留（Playwright MCP 等照常可用）。
 
-## 15. 借力清单（下一步抄作业目标）
+## 15. 借力清单（下一步抄作业目标；2026-09-19 回填销账）
 
-1. lit-html 式 Template 缓存 + Part 化绑定（消重复解析）
-2. `{#each}` keyed reconcile（最长递增子序列算法来自 Vue/inferno 公开研究）
-3. 官方 MCP SDK 的 capabilities 协商（当协议面超出 3 方法时切换）
-4. struct check 接入 eslint-boundaries 式自定义规则声明（公理可扩展）
+1. ~~lit-html 式 Template 缓存 + Part 化绑定（消重复解析）~~ → **✅ 已落地**（2026-08-30：AST 缓存，解释器与 dump.mjs 同源解析器）
+2. ~~`{#each}` keyed reconcile（最长递增子序列算法来自 Vue/inferno 公开研究）~~ → **✅ 已落地**（2026-08-30：keyed each + 行级 effect 析构，F-5 补强）
+3. 官方 MCP SDK 的 capabilities 协商（当协议面超出 3 方法时切换）→ **仍开放**（MCP 2026-07-28 无状态化重写后需重估，见决策 21）
+4. struct check 接入 eslint-boundaries 式自定义规则声明（公理可扩展）→ **仍开放**（FS-6 八层扩展时一并评估）

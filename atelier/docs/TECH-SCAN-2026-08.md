@@ -94,22 +94,24 @@
 
 ## 7. 建议清单（研究输入，立项需另行决策）
 
+> **销账回填（2026-09-19）**：A1-A5、B2-B5 已全部落地（明细见 `BACKLOG.md` 归档：A1-A5 = P2-2 标准五件套，B2 = P2-3 specs v2，B3 = P3-4 api-diff，B4 = P3-5 预研报告（定论不立项），B5 = P2-4 agent 体检）；**B1 仍开放** = P3-3 混合实验（启动条件已满足，挂 BACKLOG 挂起区）。此清单仅作溯源，单读不会重复立项。
+
 **A. 低成本跟进（工具链层）**
-1. check-skills 增加 Agent Skills 标准符合性门禁（frontmatter name ≤64 kebab-case + description 语义）。
-2. MCP：四段式错误映射标准 structured error/isError；工具面按 toolsets 分组+按需启用（GitHub MCP 模式）；评估向官方 Registry 提交。
-3. dev 面增加 a11y 快照端点（Playwright MCP 验证了无障碍树优于视觉模型）。
-4. token 层支持 DTCG 格式导出/导入。
-5. 信号内核对齐 TC39 signal-polyfill 语义，留标准兼容出口。
+1. check-skills 增加 Agent Skills 标准符合性门禁（frontmatter name ≤64 kebab-case + description 语义）。→ ✅ 已落地（P2-2①）
+2. MCP：四段式错误映射标准 structured error/isError；工具面按 toolsets 分组+按需启用（GitHub MCP 模式）；评估向官方 Registry 提交。→ ✅ 已落地（P2-2②；Registry 提交 ⏸ 待账号）
+3. dev 面增加 a11y 快照端点（Playwright MCP 验证了无障碍树优于视觉模型）。→ ✅ 已落地（P2-2③ `ui.a11y`）
+4. token 层支持 DTCG 格式导出/导入。→ ✅ 已落地（P2-2④ `atelier tokens export|import`）
+5. 信号内核对齐 TC39 signal-polyfill 语义，留标准兼容出口。→ ✅ 已落地（P2-2⑤）
 
 **B. 需要实验/决策的项**
-1. 技能包 vs 内联文档：设计"内联文档为底 + skills 增强"混合策略，用 M3 加难任务层做受控对照（回应 Vercel evals 反证）。
-2. specs/ 吸收 EARS 记法与 constitution 概念；对外讲"可执行规格"故事。
-3. 公共 API diff 门禁与漂移度量（AI slop 对策的框架化）。
-4. D 子集与 MCP Apps/A2UI 的适配面预研。
-5. dev 面 agent 检测 + JSON 结构化日志（Astro 7 模式借鉴）。
+1. 技能包 vs 内联文档：设计"内联文档为底 + skills 增强"混合策略，用 M3 加难任务层做受控对照（回应 Vercel evals 反证）。→ **开放** = P3-3 混合实验（D-1 已拍板立项；Wave-7 出数后启动条件满足，未执行）
+2. specs/ 吸收 EARS 记法与 constitution 概念；对外讲"可执行规格"故事。→ ✅ 已落地（P2-3）
+3. 公共 API diff 门禁与漂移度量（AI slop 对策的框架化）。→ ✅ 已落地（P3-4 `atelier api-diff`）
+4. D 子集与 MCP Apps/A2UI 的适配面预研。→ ✅ 已完成（P3-5 报告，定论 = 不立项深投入）
+5. dev 面 agent 检测 + JSON 结构化日志（Astro 7 模式借鉴）。→ ✅ 已落地（P2-4 agent 体检 + agent-health 端点）
 
 **C. 明确不跟进**
-- A2A/AGNTCY（agent↔agent 互操作，非本层）；llms.txt 重投入（降级为生成物之一）；SSR 流式服务器（决策 4 不变）；独立 atelier-mcp 进程（决策 7 不变）。
+- A2A/AGNTCY（agent↔agent 互操作，非本层）；llms.txt 重投入（降级为生成物之一）；SSR 流式服务器（决策 4 不变）；独立 atelier-mcp 进程（决策 7 不变）。→ 维持不跟进（全站化拍板后重申：`atelier-server` 为数据服务层，非 SSR 服务器，决策 18）。
 
 ## 8. 主要来源（合并四路，去重）
 
