@@ -587,15 +587,12 @@ export const chatAsk = defineCommand("chat.ask", { /* §2.2 形态 */ });
 （失败不断流；fix 字段可直接渲染为可操作提示——"错误即导航"贯通到 UI 最后一厘米）。
 `optimisticList` 的 revert 携带触发它的 AtrError（供 toast 展示 fix）。
 
-### 8.4 异步表达式守卫（FS-11，方向=显式拒绝〔定方向，待原型定稿〕）
+### 8.4 异步表达式守卫（FS-11，方向=显式拒绝〔已定稿：决策 24，2026-09-19〕）
 
-- expr 求值器遇 Promise 值 → **ATR-30x 四段式拒绝**（码号实现时对表现用 3xx 占用；fix 文案
-  指路三态原语/live 端点两条合法异步通道）；
-- 守卫位置：解释器与 codegen 双路径同源（`rt.bindExpr` 求值出口统一检测，同 `$effectStatic`
-  接入点先例——不出现"两套语义"）；
-- 红检：模板表达式返回 Promise 的最小用例先红后绿；
-- 原型验证产出（FS-11 交付物）：① 拒绝路径测试；② 一个"若无此守卫会怎样"的反例记录
-  （Solid 2 async-in-graph 语义对照）；③ 结论回写 design-decisions 定稿 D-F9。
+- expr 求值器遇 Promise/thenable 值 → **ATR-323 四段式拒绝**（fix 文案指路三态原语/live 端点两条合法异步通道）；
+- 守卫位置（原型定稿）：**evalExpr 求值出口单点**（解释器与 codegen 生成代码的全部模板表达式求值汇聚该函数——bindExpr/bindProp/{#if}/{#each}/on: 全挂点覆盖，双路径同源，产物零 import 红线不破）；分层事实：调用语法 `{ fn() }` 由 ATR-301 解析期拒绝，ATR-323 收口值形态；
+- 红检：值形态 Promise 进图的最小用例先红后绿（`tests/fs11-async.test.ts` 16 用例 + 反例证据固化于文件头）；
+- 原型验证产出（FS-11 已交付）：① 拒绝路径测试；② "若无此守卫会怎样"反例记录（`"{}"` 静默渲染/真值颠倒/Promise 入 journal——Solid 2 async-in-graph 语义对照）；③ 结论已回写 design-decisions 定稿决策 24。
 
 ---
 
@@ -772,6 +769,7 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 | ATR-314 | 3xx 运行 | live/invalidate 声明非法（键语法错） | §4.1 |
 | ATR-321 | 3xx 运行 | live 重算失败（SSE error 事件，不断流） | §4.2 |
 | ATR-322 | 3xx 运行 | 端点超时（503） | §3.6 |
+| ATR-323 | 3xx 运行 | 模板表达式返回 Promise（异步泄漏进响应式图，显式拒绝） | §8.4（FS-11，已落地） |
 | ATR-331 | 3xx 运行 | 迁移缺 down（不成对） | §5.4 |
 | ATR-332 | 3xx 运行 | 迁移 checksum 不匹配 | §5.4 |
 | ATR-333 | 3xx 运行 | down 缺失/执行失败 | §5.4 |

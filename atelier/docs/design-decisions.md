@@ -274,7 +274,14 @@
 - **定论**：① 前端模板语法（决策 1〔定〕）在全站化期间**冻结**，扩展只走 codegen 覆盖扩张（Svelte 5 / Solid 2 / Remix 3 的语料断裂实证；"宁可 boring"的交付节奏本身是 AI 友好性）；② 服务端代码 = 普通 TS 零新语法，唯一新概念 = 端点/契约声明；③ 全部生成器（gen endpoint/db/auth）产物锚定"**显式 import 闭合**"形态（生成器形态学第四级：单文件上下文可静态理解，AI 价值最高级），进"生成后零修改可编译"门禁测试（Loco 实证形态）；升级走 regen+diff 而非依赖升级（phx.gen.auth "regen 即升级"实证）；④ API 面 snapshot（P3-4〔定〕）把服务端公共面一并纳入。
 - 时间：2026-09-19。
 
+## 决策 24：异步表达式显式拒绝（D-F9 定稿，ATR-323）
+- **定论**：模板表达式求值结果为 Promise/thenable（跨 realm 安全 then 判定）时**四段式显式拒绝**（ATR-323）——fix 指路两条合法异步通道：三态原语（streamValue/optimisticList）边界消费与 live 端点订阅。异步收敛在原语与端点边界的方向定稿（D-F9 方向拍板 2026-09-19 → 原型验证通过）。
+- **守卫位置（原型实测定稿）**：`evalExpr` 求值出口**单点**——解释器与 codegen 生成代码的全部模板表达式求值（bindExpr/bindProp/{#if}/{#each}/on:）都汇聚该函数，双路径同源同码、错误渲染 golden 逐字节一致，产物零 import 红线不破（bindExpr 为其子集挂点）。
+- **分层事实**：调用语法 `{ fn() }` 早已被 ATR-301 解析期拒绝（迷你求值器无函数调用）；ATR-323 收口**值形态**（如 `$state(fetchUser())` 笔误把 Promise 存进信号）。若未来求值器扩函数调用，值层守卫自动接管，无改动。
+- **反例证据（守卫前红检实测）**：Promise 进图 → 文本插值静默渲染 `"{}"`（JSON.stringify 损坏，无错误卡无 journal）；`{#if}` 存 Promise.resolve(false) 仍渲染首分支（真值静默颠倒）；`{#each}` 裸抛无 fix；on: 静默 no-op。显式拒绝优于静默进图，Solid 2 async 经 Suspense/createAsync 边界收敛为同向先例。用例锁定 `tests/fs11-async.test.ts`（16 用例红绿双证 + 六正控 6/6）。
+- 时间：2026-09-19（原型验证当日定稿）。
+
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
-- **异步表达式策略**（D-F9，方向拍板 2026-09-19）：倾向"**显式拒绝**"——异步只许出现在三态原语与 live 端点边界，expr 求值保持纯同步（与显式优于隐式、静态依赖图可判定性、语法冻结三者一致）；Solid 2 RC / Svelte 5.36+ async 趋势下需尽快原型验证后定稿（BACKLOG FS-11），避免破坏性补课。
+- ~~异步表达式策略（D-F9）~~ → **已定稿为决策 24**（2026-09-19，原型通过）。
 - 全站版 slogan 措辞终审：「意图进，全站出 / *Intent in, full stack out.*」为设计书提案，未终审。
