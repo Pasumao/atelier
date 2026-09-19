@@ -14,7 +14,9 @@
  *                     must MATCH it — MISMATCH refuses the anchor (fix via `atelier snapshot check --update`)
  *                     gate 3 (P3-4 api-diff gate): if .atelier/api-surface.json exists, unexempted public API breaking drift
  *                     refuses the anchor (re-baseline via `atelier api-diff snapshot`; carve-outs via `--allow`)
- *   list [--json]     show the human-visible timeline (.atelier/checkpoints.jsonl — versioned & auditable)
+ *   list [--json]     show the human-visible timeline (.atelier/checkpoints.jsonl — local-only
+ *                     ledger since 15d9059: deliberately gitignored, recoverability comes from
+ *                     the anchor commits themselves; tracked-ledger repos still get meta commits)
  *   rollback <id>     move the branch window back to a checkpoint; a backup tag keeps the future reachable
  *                     (time-travel back: `git checkout <backup-tag>`), refuses when the tree is dirty
  *
@@ -40,6 +42,20 @@ function git(repo, args) {
   const r = spawnSync("git", full, { encoding: "utf8" });
   if (r.status !== 0) die(1, `error: git ${args.join(" ")} failed`, (r.stderr || r.stdout || "").trim());
   return (r.stdout ?? "").trim();
+}
+
+/**
+ * Timeline meta commit：只在台账会被 git 跟踪时执行。
+ * 15d9059 起台账有意为本地态（.gitignore `.atelier/*`）——被 ignore 的文件不进 status，
+ * 不会弄脏工作树（meta commit 的存在理由），此时 `git add` 会硬失败。探测走 check-ignore -q
+ * 的退出码（0 = 被忽略 → 跳过；旧仓库台账仍被跟踪 → 保持原行为）。
+ */
+function ledgerMetaCommit(repo, message) {
+  const ignored = spawnSync("git", ["-C", repo, "check-ignore", "-q", STORE_FILE], { encoding: "utf8" }).status === 0;
+  if (ignored) return false;
+  git(repo, ["add", STORE_FILE]);
+  git(repo, ["commit", "-m", message]);
+  return true;
 }
 
 function readStore(repo) {
@@ -227,11 +243,11 @@ async function cmdSave(repo, name, skipGate, jsonMode) {
   appendStore(repo, entry);
   // fold the timeline row itself into a meta commit — otherwise the store file would keep the
   // tree permanently dirty and the rollback safety gate would deadlock (found in e2e).
-  git(repo, ["add", STORE_FILE]);
-  git(repo, ["commit", "-m", `timeline(${entry.id})`]);
+  // （台账被 .gitignore 忽略时跳过——见 ledgerMetaCommit 注记。）
+  const metaDone = ledgerMetaCommit(repo, `timeline(${entry.id})`);
   if (jsonMode) { console.log(JSON.stringify({ ok: true, ...entry })); return; }
   console.log(`saved ${entry.id} "${name}" (${entry.at}) — files anchored at commit ${anchor}`);
-  console.log(`timeline grows at ${STORE_FILE}; rollback anytime: atelier checkpoint rollback ${entry.id}`);
+  console.log(`timeline grows at ${STORE_FILE}${metaDone ? "" : " (local-only — gitignored per 15d9059)"}; rollback anytime: atelier checkpoint rollback ${entry.id}`);
 }
 
 function cmdList(repo, json) {
@@ -269,8 +285,7 @@ function cmdRollback(repo, id, jsonMode) {
   const entry = { type: "rollback", id: `rb-${cur ? cur.slice(0, 5) : "root"}`, target: target.id, backup: backupTag, at: new Date().toISOString() };
   appendStore(repo, entry);
   // fold the rollback row so the tree ends clean, otherwise the next gate would self-lock (same bug as in save)
-  git(repo, ["add", STORE_FILE]);
-  git(repo, ["commit", "-m", `timeline(rollback→${target.id})`]);
+  ledgerMetaCommit(repo, `timeline(rollback→${target.id})`);
   if (jsonMode) { console.log(JSON.stringify({ ok: true, ...entry })); return; }
   console.log(`rolled back → ${target.id} "${target.name}". The discarded future stays reachable:`);
   console.log(`  time-travel forward:  git checkout ${backupTag}`);
