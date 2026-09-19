@@ -60,10 +60,14 @@ COMPILER
 GENERATE / DATA (FS-M2 全站化)
   atelier gen db [--root <dir>]                                    MINI* 数据契约 schema.ts → tables/crud + 迁移骨架
                                                                           （追加式永不重写已应用迁移；regen 幂等）
+  atelier gen auth [--root <dir>]                                  MINI* 鉴权五件套（FS-5 §6）：sessions/users 契约 +
+                                                                          scrypt 会话原语 + cookie + auth.* 端点骨架 +
+                                                                          NNN_auth 迁移对（追加式；regen 幂等）
   atelier gen endpoint [--root <dir>] [--mount /api]               MINI* 端点定义 → src/generated/api.ts 类型化客户端
                                             [--from-specs]                （--from-specs 兼发 specs 意图段的可编译骨架）
-  atelier migrate status|up|down|verify [--root <dir>]             MINI* 可逆迁移器（FS-4）：status/up/down/verify
-                                            [--db <f>] [--to <name>] [--force]（影子库干跑幂等校验）
+  atelier migrate status|up|down|verify|seed [--root <dir>]        MINI* 可逆迁移器（FS-4）+ SQL 种子（D-F17）：
+                                            [--db <f>] [--to <name>] [--force]（影子库干跑幂等校验；seed 逐文件 tx
+                                                                          幂等重跑，库缺失不静默建库）
   atelier impact <contractKey> [--root <dir>]                      MINI* 契约 → 端点 → 前端调用点 两跳影响面导航
                                                                           （导航不是门禁——exit 恒 0）
 
@@ -203,14 +207,15 @@ switch (cmd) {
   }
   case "gen": {
     // FS-M2：契约/数据契约 → 生成物（产物显式 import 闭合；regen 幂等；FS-DESIGN §7.1）
-    const genFile = sub === "db" ? path.join(PKG, "gen", "gen-db.mjs") : sub === "endpoint" ? path.join(PKG, "gen", "gen-endpoint.mjs") : null;
-    if (!genFile) die("usage: atelier gen db [--root <dir>] | endpoint [--root <dir>] [--mount /api] [--from-specs]", 2);
+    const genFile = sub === "db" ? path.join(PKG, "gen", "gen-db.mjs") : sub === "endpoint" ? path.join(PKG, "gen", "gen-endpoint.mjs") : sub === "auth" ? path.join(PKG, "gen", "gen-auth.mjs") : null;
+    if (!genFile) die("usage: atelier gen db [--root <dir>] | endpoint [--root <dir>] [--mount /api] [--from-specs] | auth [--root <dir>]", 2);
     runFile(genFile, rest);
     break;
   }
   case "migrate":
-    // FS-4 可逆迁移器：库在 server/migrate.ts，runner 做装配与诚实呈现（破坏性 down 走 --force 显式同意）
-    if (!["status", "up", "down", "verify"].includes(sub)) die("usage: atelier migrate status|up|down|verify [--root <dir>] [--db <f>] [--to <name>] [--force]", 2);
+    // FS-4 可逆迁移器 + D-F17 SQL 种子：库在 server/migrate.ts / server/seed.ts，runner 做装配与诚实呈现
+    // （破坏性 down 走 --force 显式同意；seed 逐文件 tx 幂等，库缺失提示先 up——不静默建库）
+    if (!["status", "up", "down", "verify", "seed"].includes(sub)) die("usage: atelier migrate status|up|down|verify|seed [--root <dir>] [--db <f>] [--to <name>] [--force]", 2);
     runFile(script("migrate.mjs"), [sub, ...rest]);
     break;
   case "impact":

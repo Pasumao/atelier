@@ -7,6 +7,8 @@
  *   b. src/generated/db/crud.ts          每表 4 个薄函数 GetByPk/Insert/Update/Delete（SQL 内联可读、全参数化）
  *   c. src/server/db/migrations/NNN_<table>.{up,down}.sql  建表/删表迁移骨架（**追加式**：
  *      只为尚无迁移的表生成，编号 = 现有最大 NNN+1 递增；已存在迁移文件永不重写，§5.4）
+ *   d. src/server/db/seeds/001_example.seed.sql  种子目录 + 示例骨架（D-F17，FS-M2(m2d) 加法；
+ *      只在文件缺失时落一次盘，已存在永不重写——与迁移同款追加式纪律）
  *
  * 为什么是纯文本扫描器（dump.mjs 先例）：schema.ts 遵守扁平字面量纪律（§2.1——列定义是
  * 普通对象字面量，无方法链/无计算值/无展开），这使得"找 `export const X = table(` 调用 +
@@ -406,6 +408,19 @@ function renderMigrationDown(def) {
   ].join("\n");
 }
 
+/** 种子示例骨架（D-F17，FS-M2(m2d) 加法）：纯注释占位——取消注释并替换成应用自己的幂等语句 */
+function renderSampleSeed() {
+  return [
+    `-- seed 示例（gen db 骨架，D-F17）：执行 migrate seed 前改成你的种子数据。`,
+    `-- 每条语句必须幂等（UPSERT 语义，重复执行安全）：INSERT OR REPLACE INTO ... 或 INSERT ... ON CONFLICT(<键>) DO UPDATE ...`,
+    `-- 状态记于 atelier_seeds（name/checksum/applied_at）：已应用且文件被改 = ATR-335 拒绝；`,
+    `-- 裸 INSERT 且全文无 ON CONFLICT = ATR-336 拒绝（应用前静态拦截）。已应用种子永不重写（同迁移追加式纪律）。`,
+    `-- 幂等语句模板（取消注释并替换表/列/值）：`,
+    `-- INSERT OR REPLACE INTO chats (id, name) VALUES (1, '示例行（替换成你的种子数据）');`,
+    ``,
+  ].join("\n");
+}
+
 /** 新表拓扑排序（新表间 references 依赖先行；已出迁移的表视为已存在；环 = 硬错）。稳定：依赖外保声明序 */
 export function topoSortNewTables(defs) {
   const byName = new Map(defs.map((d) => [d.name, d]));
@@ -495,6 +510,15 @@ export function genDb(root) {
     put(up, renderMigrationUp(def));
     put(down, renderMigrationDown(def));
     migrationsAppended.push(def.name);
+  }
+
+  // 种子骨架（D-F17，追加式）：目录 + 示例文件只落一次盘，已存在永不重写（regen 幂等）
+  const seedsDir = path.join(root, "src", "server", "db", "seeds");
+  const sampleSeed = path.join(seedsDir, "001_example.seed.sql");
+  if (!fs.existsSync(sampleSeed)) {
+    fs.mkdirSync(seedsDir, { recursive: true });
+    fs.writeFileSync(sampleSeed, renderSampleSeed());
+    written.push(relDisplay(root, sampleSeed));
   }
   return { written, migrationsAppended };
 }

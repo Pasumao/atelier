@@ -9,9 +9,11 @@
  * 错误码（决策 9 四域的 3xx 运行时域）：310 未知端点 / 311 方法不允许 / 312 非法 JSON /
  * 313 端点注册冲突或命名非法 / 314 live/invalidate 键语法非法 / 320 handler 抛错 /
  * 322 端点超时；2xx 契约域：215 输出契约违规（开发者错误）/ 216 输出非 JSON-safe；SQLite 宿主面见 sqlite.ts ATR-330。
+ * 鉴权域（FS-M2(m2d) 加法，§6.2）：340 会话缺失/读取器未装配（401）/ 341 角色不符（403）——
+ * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）。
  * 依赖注入（§3.2）：无 DI 容器——db / auth 由 createHandler 装配点一次性显式注入，装配代码明文可见。
- * v2 边界（诚实）：鉴权仅元数据位 + 装配式会话读取器（gen auth 产物归 FS-5）；live 仅声明位 +
- * 键语法校验 + 摘要（SSE 失效-重算-推送引擎归 FS-7）；注册表与 journal 为单进程内存态
+ * v2 边界（诚实）：gen auth 产物（会话原语/cookie/端点骨架）归 FS-5 生成器，本模块只做装配层拦截；
+ * live 仅声明位 + 键语法校验 + 摘要（SSE 失效-重算-推送引擎归 FS-7）；注册表与 journal 为单进程内存态
  * （多实例/落盘归后续）；timeout 中止只停止等待，handler 自身须监听 ctx.signal 提前退出。
  */
 import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contract.ts";
@@ -39,6 +41,14 @@ export type EndpointContext<TDb = unknown> = {
   auth: AuthInfo | null;
   signal: AbortSignal;
   audit: (note: string) => void;
+  /**
+   * Set-Cookie 侧通道（§6.1 gen auth 装配语义，FS-M2(m2d) 加法）：成功响应透传 Set-Cookie 头
+   * （AtrEndpointError 失败路径不带——登录失败不该种 cookie）。多次调用 = 多枚 cookie；
+   * 值为完整序列化串（含 HttpOnly/SameSite 属性——gen auth 产物 cookie.ts 负责序列化）。
+   * 可选位：只有 createHandler 装配的 ctx 才有——手工构造 ctx 的宿主为 undefined，
+   * handler 以 ctx.setCookie?.() 调用（防御形态，gen auth 骨架即如此）。
+   */
+  setCookie?: (serialized: string) => void;
 };
 
 /** live/emits 失效键语法（§4.1）：表级或业务键——读写两侧都显式可查，非法 = ATR-314 */
@@ -110,6 +120,8 @@ export type EndpointSummary = {
   timeoutMs?: number;
   idempotent?: boolean;
   authType?: string;
+  /** 角色声明（§6.2 MCP 消费位）：auth: { type, role } 声明了 role 时携带（agent 可查"哪些端点要什么身份"） */
+  authRole?: string;
 };
 
 export function endpointError(code: string, message: string, fix: string, hints?: string[]): AtrError {
@@ -247,6 +259,7 @@ export class EndpointRegistry {
         ...(d.timeoutMs != null ? { timeoutMs: d.timeoutMs } : {}),
         ...(d.idempotent != null ? { idempotent: d.idempotent } : {}),
         ...(d.auth ? { authType: d.auth.type } : {}),
+        ...(d.auth != null && typeof (d.auth as { role?: unknown }).role === "string" ? { authRole: (d.auth as { role: string }).role } : {}),
       };
     });
   }
@@ -306,6 +319,50 @@ export class EndpointRegistry {
       if (!def) {
         return errorResponse(404, endpointError("ATR-310", `未知端点：${name}`, `用以下已注册端点之一：${this.names().join(", ") || "（无）"}`, this.names()));
       }
+
+      // ---- 鉴权拦截（§6.2，FS-M2(m2d) 加法）：只对声明 auth: { type } 且 type !== "none" 的端点生效 ----
+      // auth: { type: "none" } = 显式消警（"沉默缺省"才是 agent 高错区）。未声明端点连 readAuth 的
+      // 调用时机都维持原状（仍在下方 ctx 装配处调用一次）——行为零变化。拦截在 handler 之前，
+      // journal 不记账（journal 语义 = "分发穿过 handler 之后"，§3.5——被拒之门的请求未触达 handler）。
+      // 声明了 auth 的端点：readAuth 在此处调用一次并复用进 ctx（总调用次数与旧路径相同）。
+      const authRequired = def.auth != null && def.auth.type !== "none";
+      let gatedAuth: AuthInfo | null = null;
+      if (authRequired) {
+        gatedAuth = readAuth ? readAuth(req) : null;
+        if (gatedAuth == null) {
+          // 读取器未装配（装配点开发者遗漏）与请求无会话（调用方问题）同码 ATR-340（401），fix 分流：
+          return errorResponse(
+            401,
+            readAuth
+              ? endpointError(
+                  "ATR-340",
+                  `端点 ${name} 要求 ${def.auth.type} 鉴权，请求未携带有效会话`,
+                  `先建立会话再调用（gen auth 产物 = POST auth.login，成功响应 Set-Cookie 会话 cookie，携 cookie 重试）；该端点确属免鉴权时显式声明 auth: { type: "none" }（显式选择优于沉默缺省，§6.2）`,
+                  [name]
+                )
+              : endpointError(
+                  "ATR-340",
+                  `端点 ${name} 声明了 auth: { type: "${def.auth.type}" }，但 createHandler 未装配 auth 会话读取器`,
+                  `装配点显式接线：createHandler({ db, auth: createSessionReader(db) })（gen auth 产物 auth.ts 提供读取器工厂）；该端点确属免鉴权时改为 auth: { type: "none" }`,
+                  [name]
+                )
+          );
+        }
+        const wantRole = (def.auth as { role?: unknown }).role;
+        if (typeof wantRole === "string" && gatedAuth.role !== wantRole) {
+          const actual = typeof gatedAuth.role === "string" ? gatedAuth.role : "（无角色）";
+          return errorResponse(
+            403,
+            endpointError(
+              "ATR-341",
+              `端点 ${name} 要求角色 ${wantRole}，会话主体 ${gatedAuth.principal ?? "（匿名）"} 的角色是 ${actual}`,
+              `为该主体授予 ${wantRole} 角色（应用侧用户数据，行级判断在 handler 内读 ctx.auth 显式做——RLS 式隐式策略不做，§6.2），或修正端点 auth: { type, role } 声明`,
+              [name]
+            )
+          );
+        }
+      }
+
       let input: unknown;
       try {
         input = await req.json();
@@ -322,8 +379,12 @@ export class EndpointRegistry {
 
       // ---- v2 ctx 装配（§3.2）：db / auth / signal / audit ----
       const notes: string[] = [];
-      const auth = readAuth ? readAuth(req) : null;
+      // auth：拦截过的端点复用拦截结果（readAuth 只调一次）；未声明端点维持旧路径（此处调用）
+      const auth = authRequired ? gatedAuth : readAuth ? readAuth(req) : null;
       const principal = auth?.principal ?? null;
+      // Set-Cookie 收集（§6.1）：ctx.setCookie 经此透传进成功响应头（Headers.append 支持多枚
+      // set-cookie 的独立行承载）；失败路径（AtrEndpointError/超时/契约违规）不合并——登录失败不种 cookie。
+      const setCookies: string[] = [];
       // timeoutMs 声明 → AbortSignal.timeout 与 req.signal 合并（Web 标准 AbortSignal.any）；
       // signal 中止只负责让监听它的 handler 退出 + 分发停等，强杀 handler 副作用在 JS 无解（诚实边界）。
       const timeoutSignal = def.timeoutMs != null ? AbortSignal.timeout(def.timeoutMs) : undefined;
@@ -336,6 +397,13 @@ export class EndpointRegistry {
         signal,
         audit: (note: string) => {
           notes.push(note);
+        },
+        setCookie: (serialized: string) => {
+          // 开发者传值护栏（HTTP 头注入面）：空串/换行直接走 handler 抛错路径（ATR-320 兜底，消息可定位）
+          if (typeof serialized !== "string" || serialized.length === 0 || /[\r\n]/.test(serialized)) {
+            throw new Error(`ctx.setCookie 值非法（须为非空且不含换行的完整序列化 cookie 串——gen auth 产物 cookie.ts 的 serializeSessionCookie 负责序列化）`);
+          }
+          setCookies.push(serialized);
         },
       };
       const t0 = performance.now();
@@ -389,10 +457,13 @@ export class EndpointRegistry {
         if (def.kind === "command") {
           this.journalPush(this.journalEntry(def, payload, "ok", principal, durMs(), notes));
         }
-        return new Response(JSON.stringify(result ?? null), {
-          status: 200,
-          headers: { "content-type": "application/json; charset=utf-8", "x-atelier-endpoint": def.name, "x-atelier-endpoint-kind": def.kind },
+        const okHeaders = new Headers({
+          "content-type": "application/json; charset=utf-8",
+          "x-atelier-endpoint": def.name,
+          "x-atelier-endpoint-kind": def.kind,
         });
+        for (const c of setCookies) okHeaders.append("set-cookie", c);
+        return new Response(JSON.stringify(result ?? null), { status: 200, headers: okHeaders });
       } catch (e) {
         const dur = durMs();
         // ---- d. 超时（§3.6）：ATR-322（503）——race 输家或 handler 因中止信号抛错 ----

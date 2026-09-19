@@ -247,3 +247,125 @@ describe("端点运行时 v2（FS-M2：ctx 注入 / 输出契约 / 错误映射 
     expect(postSummary.invalidateKeys).toBeUndefined(); // 非 live 声明 → 无失效键位
   });
 });
+
+/* ================= 鉴权拦截（§6.2，FS-M2(m2d) 加法） =================
+ * 端点声明 auth: { type }（type !== "none"）→ 分发层自动拦截：
+ *   未装配读取器 / 读取结果 null → 401 ATR-340；role 声明与 ctx.auth.role 不符 → 403 ATR-341。
+ * auth: { type: "none" } = 显式消警；未声明 auth 的端点行为零变化（readAuth 调用时机/次数不变）。
+ */
+describe("鉴权拦截（FS-DESIGN §6.2，FS-M2(m2d)：ATR-340/341 + setCookie 透传）", () => {
+  it("声明了 auth 但 createHandler 未装配读取器 → 401 ATR-340，fix 指向装配点（装配遗漏与调用方问题分流）", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("secret.get", { auth: { type: "session" }, handler: () => 1 }));
+    const res = await post(reg.createHandler(), "secret.get", {});
+    expect(res.status).toBe(401);
+    const err = await res.json();
+    expect(err.code).toBe("ATR-340");
+    expect(err.message).toContain("未装配 auth 会话读取器");
+    expect(err.fix).toContain("createSessionReader");
+  });
+
+  it("装配了读取器但会话无效（null）→ 401 ATR-340；会话有效 → 200 且 ctx.auth 直通 handler", async () => {
+    const reg = new EndpointRegistry();
+    let seen: unknown = null;
+    reg.register(defineQuery("secret.get", { auth: { type: "session" }, handler: (_i, ctx) => ((seen = ctx.auth), { ok: true }) }));
+    const handler = reg.createHandler({ auth: (req) => (req.headers.get("x-token") === "good" ? { type: "session", principal: "u1" } : null) });
+    const denied = await post(handler, "secret.get", {});
+    expect(denied.status).toBe(401);
+    expect((await denied.json()).code).toBe("ATR-340");
+    expect(seen).toBeNull(); // 拦截在 handler 之前——未过门 handler 不执行
+    const allowed = await handler(new Request("http://local.test/secret.get", { method: "POST", headers: { "x-token": "good" }, body: "{}" }));
+    expect(allowed.status).toBe(200);
+    expect(seen).toEqual({ type: "session", principal: "u1" });
+  });
+
+  it("role 声明：不匹配 → 403 ATR-341（消息带要求角色与实际角色）；匹配 → 200", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("admin.only", { auth: { type: "session", role: "admin" }, handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({
+      auth: (req) => {
+        const role = req.headers.get("x-role");
+        return role ? { type: "session", principal: "u1", role } : null;
+      },
+    });
+    const req = (role: string) => new Request("http://local.test/admin.only", { method: "POST", headers: { "x-role": role }, body: "{}" });
+    const forbidden = await handler(req("user"));
+    expect(forbidden.status).toBe(403);
+    const err = await forbidden.json();
+    expect(err.code).toBe("ATR-341");
+    expect(err.message).toContain("admin"); // 要求的角色
+    expect(err.message).toContain("user"); // 实际角色
+    const allowed = await handler(req("admin"));
+    expect(allowed.status).toBe(200);
+  });
+
+  it('auth: { type: "none" } = 显式消警：无读取器也放行；未声明端点零变化（readAuth 每请求恰一次，时机不变）', async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("public.explicit", { auth: { type: "none" }, handler: () => ({ ok: true }) }));
+    reg.register(defineQuery("public.legacy", { handler: () => ({ ok: true }) }));
+    let calls = 0;
+    const handler = reg.createHandler({
+      auth: () => {
+        calls++;
+        return null;
+      },
+    });
+    expect((await post(handler, "public.explicit", {})).status).toBe(200);
+    expect((await post(handler, "public.legacy", {})).status).toBe(200);
+    expect(calls).toBe(2); // 每请求一次（ctx 装配路径，与既有行为一致——none/未声明都不在拦截处调用）
+  });
+
+  it("setCookie（§6.1 装配语义）：成功响应透传多枚 Set-Cookie；AtrEndpointError 失败路径不携带；非法值（换行）→ handler 抛错路径", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(
+      defineCommand("login.ok", {
+        auth: { type: "none" },
+        handler: (_i, ctx) => {
+          ctx.setCookie?.("a=1; Path=/; HttpOnly");
+          ctx.setCookie?.("b=2; Path=/; HttpOnly");
+          return { ok: true };
+        },
+      })
+    );
+    reg.register(
+      defineCommand("login.fail", {
+        auth: { type: "none" },
+        handler: (_i, ctx) => {
+          ctx.setCookie?.("a=1; Path=/");
+          throw new AtrEndpointError(endpointError("ATR-340", "登录失败", "核对凭据"), 401);
+        },
+      })
+    );
+    const ok = await post(reg.createHandler(), "login.ok", {});
+    expect(ok.status).toBe(200);
+    const raw = ok.headers.getSetCookie ? ok.headers.getSetCookie() : [ok.headers.get("set-cookie") ?? ""];
+    expect(raw).toHaveLength(2); // Headers.append：多枚 set-cookie 独立承载
+    expect(raw.some((c) => c.startsWith("a=1"))).toBe(true);
+    expect(raw.some((c) => c.startsWith("b=2"))).toBe(true);
+    const fail = await post(reg.createHandler(), "login.fail", {});
+    expect(fail.status).toBe(401);
+    expect(fail.headers.get("set-cookie")).toBeNull(); // 登录失败不种 cookie
+    reg.register(
+      defineCommand("cookie.bad", {
+        auth: { type: "none" },
+        handler: (_i, ctx) => {
+          ctx.setCookie?.("bad=1\r\nX-Inject: 1"); // 头注入面
+          return { ok: true };
+        },
+      })
+    );
+    const injected = await post(reg.createHandler(), "cookie.bad", {});
+    expect(injected.status).toBe(500); // 开发者传值护栏 → handler 抛错路径（ATR-320 兜底）
+  });
+
+  it("journal/summary 联动：拦截端点成功入账 principal；summary 暴露 authType + authRole（MCP 消费位）", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineCommand("doc.write", { auth: { type: "session", role: "editor" }, handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({ auth: () => ({ type: "session", principal: "agent-7", role: "editor" }) });
+    await post(handler, "doc.write", {});
+    expect(reg.journal()[0]).toMatchObject({ name: "doc.write", status: "ok", principal: "agent-7" });
+    const summary = reg.list().find((s) => s.name === "doc.write")!;
+    expect(summary.authType).toBe("session");
+    expect(summary.authRole).toBe("editor");
+  });
+});
