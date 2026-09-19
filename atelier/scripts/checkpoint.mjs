@@ -9,6 +9,7 @@
  * Commands:
  *   save <name>       snapshot the working tree as a named checkpoint (git commit; auto `git init` on first use)
  *                     [--no-gate] skip the 未检不锚 gates (deliberate wip anchors only)
+ *                     [--db <file>] migration-head source db (default .atelier/dev.db, FS-M2(m2d) 决策 21-③)
  *                     gate 1 (决策 15 test gate): the package.json test suite must pass — a red suite refuses the anchor
  *                     gate 2 (P2-2 snapshot gate): if .atr/snapshots/baseline.png exists and the dev face answers, the live render
  *                     must MATCH it — MISMATCH refuses the anchor (fix via `atelier snapshot check --update`)
@@ -19,8 +20,15 @@
  *                     the anchor commits themselves; tracked-ledger repos still get meta commits)
  *   rollback <id>     move the branch window back to a checkpoint; a backup tag keeps the future reachable
  *                     (time-travel back: `git checkout <backup-tag>`), refuses when the tree is dirty
+ *                     [--db <file>] and (决策 21-③): refuses when the target anchor's migrationHead is
+ *                     BELOW the db's current migration head — run `migrate down --to <head>` first
+ *                     (never auto-down: destructive ops need explicit human consent)
  *
  * Identity rule: checkpoint id = short commit sha — the jsonl entry IS the git anchor.
+ *
+ * Migration linkage (决策 21-③, FS-M2(m2d)): save records the db's atelier_migrations head
+ * (max id + name) as `migrationHead` on the ledger entry; no db / no table / no node:sqlite →
+ * vacuous skip, printed honestly (same honesty convention as the three gates above).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -76,6 +84,45 @@ function ensureRepo(repo) {
 }
 function headSha(repo) {
   try { return git(repo, ["rev-parse", "HEAD"]); } catch { return null; }
+}
+
+/* ---- 决策 21-③ 迁移联动（FS-M2(m2d)，全站双轨回滚的地基）------------------------
+ * save：读当前库的 atelier_migrations head（最大 id + name）记入台账 migrationHead 字段；
+ * rollback：目标锚点 head 低于当前库 head → 拒绝执行，指路"先 migrate down --to <目标 head>
+ * 再 rollback"——绝不自动执行 down（破坏性操作走 confirm=ask 语义，v1 = 人工先跑）。
+ * 无库 / 无表 / node:sqlite 不可用 / 目标 head >= 当前 → vacuous（诚实打印，行为零变化）。
+ */
+const MIGRATION_STATUS_TABLE = "atelier_migrations";
+const DEFAULT_MIG_DB = path.join(".atelier", "dev.db");
+
+/** 从 rest 参数剥离 --db <file>（缺省 .atelier/dev.db）；返回 { dbRel, rest: 剥离后的参数 } */
+function takeDbFlag(args) {
+  const i = args.indexOf("--db");
+  if (i < 0) return { dbRel: DEFAULT_MIG_DB, rest: args };
+  const dbRel = args[i + 1] ?? DEFAULT_MIG_DB;
+  return { dbRel, rest: [...args.slice(0, i), ...args.slice(i + 2)] };
+}
+
+async function readMigrationHead(repo, dbRel) {
+  const dbFile = path.isAbsolute(dbRel) ? dbRel : path.join(repo, dbRel);
+  if (!fs.existsSync(dbFile)) return { head: null, note: `no db at ${path.relative(repo, dbFile) || dbFile} — migration head not recorded` };
+  let db;
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    db = new DatabaseSync(dbFile);
+  } catch (e) {
+    return { head: null, note: `sqlite unavailable (${e?.message ?? e}) — migration head not recorded` };
+  }
+  try {
+    const has = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(MIGRATION_STATUS_TABLE);
+    if (!has) return { head: null, note: "no atelier_migrations table (migrate up first) — migration head not recorded" };
+    const row = db.prepare("SELECT id, name FROM atelier_migrations ORDER BY id DESC LIMIT 1").get();
+    return { head: row ? { id: Number(row.id), name: String(row.name) } : null, note: null };
+  } catch (e) {
+    return { head: null, note: `migration head unreadable (${e?.message ?? e}) — vacuous` };
+  } finally {
+    db.close();
+  }
 }
 
 /* ---- P2-2 未检不锚 gate ----------------------------------------------
@@ -223,8 +270,8 @@ function apiDiffGate(repo, skip) {
   );
 }
 
-async function cmdSave(repo, name, skipGate, jsonMode) {
-  if (!name) die(1, 'usage: checkpoint save <name> [--no-gate] [--json]', 'e.g. atelier checkpoint save "AI round 4: added ModelCard"');
+async function cmdSave(repo, name, skipGate, jsonMode, dbRel) {
+  if (!name) die(1, 'usage: checkpoint save <name> [--no-gate] [--db <file>] [--json]', 'e.g. atelier checkpoint save "AI round 4: added ModelCard"');
   ensureRepo(repo);
   const dirty = git(repo, ["status", "--porcelain"]).length > 0;
   if (!dirty) {
@@ -236,10 +283,14 @@ async function cmdSave(repo, name, skipGate, jsonMode) {
   await testGate(repo, skipGate); // 决策 15 提交闸门（测试半边）: a red suite must not be silently anchored
   await snapshotGate(repo, skipGate); // P2-2 未检不锚: a red render must not be silently anchored
   apiDiffGate(repo, skipGate); // P3-4 未检不锚: unexempted public API breaking drift must not be silently anchored
+  // 决策 21-③：锚定时刻读迁移 head 入台账（无库/无表 → vacuous 诚实打印，条目不带该字段）
+  const mig = await readMigrationHead(repo, dbRel);
+  if (mig.head) console.log(`[ledger] migration head recorded: #${mig.head.id} ${mig.head.name}`);
+  else if (mig.note) console.log(`[ledger] ${mig.note}`);
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-m", `checkpoint(${name}): AI turn snapshot`]);
   const anchor = headSha(repo);
-  const entry = { type: "save", id: anchor.slice(0, 7), sha: anchor, name, at: new Date().toISOString() };
+  const entry = { type: "save", id: anchor.slice(0, 7), sha: anchor, name, at: new Date().toISOString(), ...(mig.head ? { migrationHead: mig.head } : {}) };
   appendStore(repo, entry);
   // fold the timeline row itself into a meta commit — otherwise the store file would keep the
   // tree permanently dirty and the rollback safety gate would deadlock (found in e2e).
@@ -255,13 +306,13 @@ function cmdList(repo, json) {
   if (!rows.length) { console.log("(empty timeline — first checkpoint: atelier checkpoint save <name>)"); return; }
   if (json) { console.log(JSON.stringify(rows, null, 2)); return; }
   for (const r of rows) {
-    if (r.type === "save") console.log(`${r.id}  save      ${JSON.stringify(r.name)}  ${r.at}`);
+    if (r.type === "save") console.log(`${r.id}  save      ${JSON.stringify(r.name)}  ${r.at}${r.migrationHead ? `  head=#${r.migrationHead.id} ${r.migrationHead.name}` : ""}`);
     else if (r.type === "rollback") console.log(`${r.id}  rollback  → target ${r.target}  (future kept at tag ${r.backup})  ${r.at}`);
   }
 }
 
-function cmdRollback(repo, id, jsonMode) {
-  if (!id) die(1, "usage: checkpoint rollback <id>", "pick an id from: atelier checkpoint list");
+async function cmdRollback(repo, id, jsonMode, dbRel) {
+  if (!id) die(1, "usage: checkpoint rollback <id> [--db <file>]", "pick an id from: atelier checkpoint list");
   const rows = readStore(repo);
   const target = rows.find((r) => r.type === "save" && (r.id === id || r.sha.startsWith(id)));
   if (!target) {
@@ -272,6 +323,15 @@ function cmdRollback(repo, id, jsonMode) {
   if (git(repo, ["status", "--porcelain"]).length > 0) {
     die(1, `error: refusing rollback with uncommitted changes`,
       `one round = one checkpoint — run 'atelier checkpoint save "wip"' first, then roll back`);
+  }
+  // 决策 21-③：锚点带的 migrationHead 低于当前库 head → 拒绝（代码回滚 ≠ 数据回滚——库状态
+  // 不随 git 回退，双轨必须显式各走各的）。绝不自动执行 down（破坏性操作 confirm=ask，v1 = 人工先跑）。
+  const mig = await readMigrationHead(repo, dbRel);
+  if (target.migrationHead && mig.head && target.migrationHead.id < mig.head.id) {
+    die(1,
+      `error: refusing rollback — checkpoint ${target.id} anchors migration head #${target.migrationHead.id} (${target.migrationHead.name}) but the db is already at #${mig.head.id} (${mig.head.name})`,
+      `rewind the db first: run 'migrate down --to ${target.migrationHead.id}' (destructive — review what is dropped), then re-run 'atelier checkpoint rollback ${target.id}'`,
+    );
   }
   const cur = headSha(repo);
   if (cur && cur.startsWith(target.id)) {
@@ -310,11 +370,15 @@ const [, , cmd, ...rest] = process.argv;
 const jsonMode = rest.includes("--json");
 if (cmd === "save") {
   const skipGate = rest.includes("--no-gate");
-  cmdSave(repo, rest.filter((a) => !a.startsWith("--")).join(" "), skipGate, jsonMode).catch((e) => die(1, `error: ${e?.message ?? e}`));
+  const { dbRel, rest: restClean } = takeDbFlag(rest);
+  cmdSave(repo, restClean.filter((a) => !a.startsWith("--")).join(" "), skipGate, jsonMode, dbRel).catch((e) => die(1, `error: ${e?.message ?? e}`));
 }
 else if (cmd === "list") cmdList(repo, jsonMode);
-else if (cmd === "rollback") cmdRollback(repo, rest.find((a) => !a.startsWith("--")), jsonMode);
+else if (cmd === "rollback") {
+  const { dbRel, rest: restClean } = takeDbFlag(rest);
+  cmdRollback(repo, restClean.find((a) => !a.startsWith("--")), jsonMode, dbRel).catch((e) => die(1, `error: ${e?.message ?? e}`));
+}
 else {
-  console.error("usage: checkpoint save <name> [--no-gate] [--json] | list [--json] | rollback <id> [--json]");
+  console.error("usage: checkpoint save <name> [--no-gate] [--db <file>] [--json] | list [--json] | rollback <id> [--db <file>] [--json]");
   process.exit(2);
 }

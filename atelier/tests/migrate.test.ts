@@ -1,9 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { openSqlite, type SqliteDb } from "../server/sqlite";
 import { migrateStatus, migrateUp, migrateDown, migrateVerify, MIGRATIONS_TABLE_DDL } from "../server/migrate";
+import { seedAll } from "../server/seed";
 import { AtrEndpointError } from "../server/endpoints";
 
 /* ---------- 迁移目录 fixture ---------- */
@@ -318,5 +321,160 @@ describeSqlite("SqliteDb.tx 事务原语（§5.5，FS-M2(m2b) 加法扩展；nod
     const db = await openSqlite(":memory:");
     await expect(db.tx((tx) => tx.tx(() => 1))).rejects.toThrow();
     db.close();
+  });
+});
+
+/* ================= migrate seed（D-F17，FS-M2(m2d)；SQL 种子——server/seed.ts 有偏离声明） ================= */
+describeSqlite("migrate seed（D-F17 SQL 种子：逐文件 tx + atelier_seeds 记账 + 幂等重跑）", () => {
+  const GOOD_SEED = [
+    "-- 示例种子（幂等：INSERT OR REPLACE，重复执行安全）",
+    "INSERT OR REPLACE INTO chats (id, name) VALUES (1, '示例会话');",
+    "",
+  ].join("\n");
+  const GOOD_SEED_2 = [
+    "-- 第二个种子（UPSERT 语义：ON CONFLICT DO UPDATE）",
+    "INSERT INTO chats (id, name) VALUES (2, '第二行') ON CONFLICT(id) DO UPDATE SET name = excluded.name;",
+    "",
+  ].join("\n");
+
+  function makeSeedsDir(files: Record<string, string>): { root: string; seedsDir: string } {
+    const root = makeMigDir(); // 复用迁移测试的 tmp 目录生命周期
+    const seedsDir = path.join(root, "seeds");
+    fs.mkdirSync(seedsDir, { recursive: true });
+    for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(seedsDir, name), content);
+    return { root, seedsDir };
+  }
+
+  async function makeDb(): Promise<SqliteDb> {
+    const db = await openSqlite(":memory:");
+    db.exec("CREATE TABLE chats (id INTEGER PRIMARY KEY, name TEXT NOT NULL);");
+    return db;
+  }
+
+  it("seedAll：应用 + atelier_seeds 记账（name/checksum/applied_at）；无 ON CONFLICT 的 OR REPLACE 也放行", async () => {
+    const db = await makeDb();
+    const { seedsDir } = makeSeedsDir({ "001_example.seed.sql": GOOD_SEED });
+    const r = seedAll(db, seedsDir);
+    expect(r.applied.map((s) => s.name)).toEqual(["001_example.seed.sql"]);
+    expect(r.skipped).toEqual([]);
+    expect(r.applied[0].checksum).toMatch(/^[0-9a-f]{64}$/);
+    expect(db.prepare("SELECT id, name FROM chats WHERE id = 1").get()).toEqual({ id: 1, name: "示例会话" });
+    const row = db.prepare("SELECT name, checksum, applied_at FROM atelier_seeds WHERE name = ?").get("001_example.seed.sql") as { name: string; checksum: string; applied_at: number };
+    expect(row.checksum).toBe(r.applied[0].checksum);
+    expect(row.applied_at).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it("幂等重跑：第二次全 skipped、数据不重复；多文件按名排序应用", async () => {
+    const db = await makeDb();
+    const { seedsDir } = makeSeedsDir({
+      "002_b.seed.sql": GOOD_SEED_2,
+      "001_a.seed.sql": GOOD_SEED,
+    });
+    const first = seedAll(db, seedsDir);
+    expect(first.applied.map((s) => s.name)).toEqual(["001_a.seed.sql", "002_b.seed.sql"]); // 文件名升序
+    const second = seedAll(db, seedsDir);
+    expect(second.applied).toEqual([]);
+    expect(second.skipped).toEqual(["001_a.seed.sql", "002_b.seed.sql"]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM chats").get()!.n).toBe(2); // UPSERT 语义：不重复
+    db.close();
+  });
+
+  it("红检 ATR-335：已应用种子被改（sha256 不符）→ 拒绝且 fix 给出恢复/追加/开发态逃生口三路", async () => {
+    const db = await makeDb();
+    const { seedsDir } = makeSeedsDir({ "001_example.seed.sql": GOOD_SEED });
+    seedAll(db, seedsDir);
+    fs.writeFileSync(path.join(seedsDir, "001_example.seed.sql"), GOOD_SEED + "-- 被改了一行\n");
+    try {
+      seedAll(db, seedsDir);
+      throw new Error("应当抛出");
+    } catch (e) {
+      expect(atrCode(e)).toBe("ATR-335");
+      expect((e as AtrEndpointError).message).toContain("001_example.seed.sql");
+      expect((e as AtrEndpointError).atr.fix).toContain("另起新");
+      expect((e as AtrEndpointError).atr.fix).toContain("atelier_seeds");
+    }
+    db.close();
+  });
+
+  it("红检 ATR-336：裸 INSERT 无 ON CONFLICT → 应用前静态拦截（不落状态行）；执行失败 → 事务回滚无残留", async () => {
+    const db = await makeDb();
+    const { seedsDir } = makeSeedsDir({
+      "001_bad.seed.sql": "INSERT INTO chats (id, name) VALUES (1, '非幂等');",
+    });
+    try {
+      seedAll(db, seedsDir);
+      throw new Error("应当抛出");
+    } catch (e) {
+      expect(atrCode(e)).toBe("ATR-336");
+      expect((e as AtrEndpointError).atr.fix).toContain("INSERT OR REPLACE");
+    }
+    expect(db.prepare("SELECT COUNT(*) AS n FROM chats").get()!.n).toBe(0); // 未执行
+    expect(db.prepare("SELECT COUNT(*) AS n FROM atelier_seeds").get()!.n).toBe(0); // 未记账
+    // 执行失败（SQL 语法错）：tx 已回滚——前面文件的提交不受影响，坏文件无残留
+    const ok = makeSeedsDir({
+      "001_good.seed.sql": GOOD_SEED,
+      "002_broken.seed.sql": "INSERT OR REPLACE INTO chats (id, name) VALUES ('x', 1, 2);", // 列数不符 → 执行炸
+    });
+    const db2 = await makeDb();
+    try {
+      seedAll(db2, ok.seedsDir);
+      throw new Error("应当抛出");
+    } catch (e) {
+      expect(atrCode(e)).toBe("ATR-336");
+      expect((e as AtrEndpointError).message).toContain("002_broken.seed.sql");
+      expect((e as AtrEndpointError).message).toContain("回滚");
+    }
+    expect(db2.prepare("SELECT COUNT(*) AS n FROM chats WHERE id = 1").get()!.n).toBe(1); // 001 已提交
+    expect((db2.prepare("SELECT COUNT(*) AS n FROM atelier_seeds WHERE name = '002_broken.seed.sql'").get() as { n: number }).n).toBe(0);
+    db2.close();
+    db.close();
+  });
+
+  it("空目录/缺目录 = vacuous 空清单；纯注释种子可应用（占位骨架安全）", async () => {
+    const db = await makeDb();
+    const empty = makeSeedsDir({});
+    expect(seedAll(db, empty.seedsDir)).toEqual({ applied: [], skipped: [] });
+    const missing = makeSeedsDir({});
+    fs.rmdirSync(missing.seedsDir);
+    expect(seedAll(db, missing.seedsDir)).toEqual({ applied: [], skipped: [] });
+    const commentOnly = makeSeedsDir({ "001_placeholder.seed.sql": "-- 只注释占位（gen db 骨架形态）\n" });
+    const r = seedAll(db, commentOnly.seedsDir);
+    expect(r.applied).toHaveLength(1);
+    db.close();
+  });
+
+  it("CLI：seed 不静默建库（库缺失 → exit 1 + 指路 migrate up）；有库有种子 → 诚实清单输出", async () => {
+    const script = fileURLToPath(new URL("../scripts/migrate.mjs", import.meta.url));
+    // 红路径：库不存在 → 指路不静默建库
+    const bareRoot = makeMigDir();
+    fs.mkdirSync(path.join(bareRoot, "src", "server", "db", "seeds"), { recursive: true });
+    fs.writeFileSync(path.join(bareRoot, "src", "server", "db", "seeds", "001_example.seed.sql"), GOOD_SEED);
+    let thrown = false;
+    try {
+      execFileSync(process.execPath, [script, "seed", "--root", bareRoot], { encoding: "utf8" });
+    } catch (e) {
+      thrown = true;
+      const err = e as { status: number; stderr: string };
+      expect(err.status).toBe(1);
+      expect(err.stderr).toContain("不静默建库");
+      expect(err.stderr).toContain("migrate up");
+    }
+    expect(thrown).toBe(true);
+    expect(fs.existsSync(path.join(bareRoot, ".atelier", "dev.db"))).toBe(false); // 未静默建库
+    // 绿路径：先建库（migrate up 造的库形态）→ seed 应用 + 幂等重跑
+    const root = makeMigDir();
+    const migDir = path.join(root, "src", "server", "db", "migrations");
+    const seedsDir = path.join(root, "src", "server", "db", "seeds");
+    fs.mkdirSync(migDir, { recursive: true });
+    fs.mkdirSync(seedsDir, { recursive: true });
+    fs.writeFileSync(path.join(migDir, "001_chats.up.sql"), "CREATE TABLE chats (id INTEGER PRIMARY KEY, name TEXT NOT NULL);");
+    fs.writeFileSync(path.join(migDir, "001_chats.down.sql"), "DROP TABLE chats;");
+    fs.writeFileSync(path.join(seedsDir, "001_example.seed.sql"), GOOD_SEED);
+    execFileSync(process.execPath, [script, "up", "--root", root], { encoding: "utf8" });
+    const out1 = execFileSync(process.execPath, [script, "seed", "--root", root], { encoding: "utf8" });
+    expect(out1).toContain("seeded 001_example.seed.sql");
+    const out2 = execFileSync(process.execPath, [script, "seed", "--root", root], { encoding: "utf8" });
+    expect(out2).toContain("skipped 001_example.seed.sql"); // 幂等重跑
   });
 });

@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 /**
- * migrate.mjs — `atelier migrate` runner（FS-4，FS-DESIGN §5.4）。
- * 库在 server/migrate.ts（宿主差异锁 sqlite.ts）；本文件只做装配与诚实呈现：
- *   atelier migrate status|up|down|verify [--root <dir>] [--db <file>] [--to <name>] [--force]
- * 约定：迁移目录 = <root>/src/server/db/migrations；dev 库缺省 <root>/.atelier/dev.db（§11.1，
- * gitignore 位）。TS 库经 Node 类型剥离直 import（cli compile/dump.mjs 同先例，Node ≥22.18）。
+ * migrate.mjs — `atelier migrate` runner（FS-4，FS-DESIGN §5.4；seed = D-F17，FS-M2(m2d)）。
+ * 库在 server/migrate.ts / server/seed.ts（宿主差异锁 sqlite.ts）；本文件只做装配与诚实呈现：
+ *   atelier migrate status|up|down|verify|seed [--root <dir>] [--db <file>] [--to <name>] [--force]
+ * 约定：迁移目录 = <root>/src/server/db/migrations；种子目录 = <root>/src/server/db/seeds；
+ * dev 库缺省 <root>/.atelier/dev.db（§11.1，gitignore 位）。TS 库经 Node 类型剥离直 import
+ * （cli compile/dump.mjs 同先例，Node ≥22.18）。
+ * seed 语义（D-F17，SQL 种子——server/seed.ts 头注有偏离声明）：逐文件 tx + atelier_seeds 记账，
+ * 幂等重跑跳过已应用；库不存在时提示先 up（不静默建库）。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -19,6 +22,7 @@ const argOf = (k) => {
 const root = path.resolve(argOf("--root") ?? process.cwd());
 const dbFile = path.resolve(root, argOf("--db") ?? path.join(".atelier", "dev.db"));
 const migDir = path.join(root, "src", "server", "db", "migrations");
+const seedsDir = path.join(root, "src", "server", "db", "seeds");
 const to = argOf("--to");
 const force = rest.includes("--force");
 
@@ -28,12 +32,13 @@ function die(msg, code = 2, fix) {
   process.exit(code);
 }
 
-if (!["status", "up", "down", "verify"].includes(sub)) {
-  die(`usage: atelier migrate status|up|down|verify [--root <dir>] [--db <file>] [--to <name>] [--force]`);
+if (!["status", "up", "down", "verify", "seed"].includes(sub)) {
+  die(`usage: atelier migrate status|up|down|verify|seed [--root <dir>] [--db <file>] [--to <name>] [--force]`);
 }
 
 const { openSqlite } = await import("../server/sqlite.ts");
 const { migrateStatus, migrateUp, migrateDown, migrateVerify } = await import("../server/migrate.ts");
+const { seedAll } = await import("../server/seed.ts");
 
 function printSteps(label, steps) {
   for (const s of steps) console.log(`  ${label} ${s.name}（checksum ${s.checksum.slice(0, 12)}…，${s.durMs}ms）`);
@@ -67,6 +72,11 @@ try {
       for (const p of st.pending) console.log(`  ○ ${p.name} pending${p.hasDown ? "" : "  ⚠ 缺 down（ATR-331，up 会拒绝）"}${p.irreversible ? "（含不可逆标记）" : ""}`);
       mem.close();
       process.exit(0);
+    } else if (sub === "seed") {
+      // D-F17：seed 不静默建库——库是迁移的产物，种子在无迁移的空库上跑没有意义
+      console.error(`[atelier migrate] 库不存在：${dbFile}——seed 不静默建库`);
+      console.error("fix: 先 migrate up（建库并应用迁移）后重跑 migrate seed");
+      process.exit(1);
     } else {
       console.log(`[atelier migrate] 库不存在：${dbFile}——down 无可回滚迁移`);
       process.exit(0);
@@ -93,6 +103,16 @@ try {
       if (steps.length === 0) console.log("[atelier migrate] down：无可回滚迁移");
       printSteps("↓ rolled back", steps);
       console.log("[atelier migrate] down 完成（数据不可回——down 只保证 schema 可逆；破坏性操作走 confirm 纪律）");
+    } else if (sub === "seed") {
+      // D-F17 SQL 种子：逐文件 tx + atelier_seeds 记账（name/checksum/applied_at）——幂等重跑安全
+      const r = seedAll(db, seedsDir);
+      for (const s of r.applied) console.log(`  ⚑ seeded ${s.name}（checksum ${s.checksum.slice(0, 12)}…，${s.durMs}ms）`);
+      for (const s of r.skipped) console.log(`  · skipped ${s}（已应用，checksum 相符）`);
+      console.log(
+        r.applied.length === 0 && r.skipped.length === 0
+          ? "[atelier migrate] seed：无种子文件（<root>/src/server/db/seeds/*.seed.sql——gen db 生成示例骨架）"
+          : `[atelier migrate] seed 完成：应用 ${r.applied.length} 条，跳过 ${r.skipped.length} 条（每条语句须幂等/UPSERT——重复执行安全；状态记于 atelier_seeds）`
+      );
     }
   } finally {
     db.close();
