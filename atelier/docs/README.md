@@ -13,6 +13,7 @@
 | `AI-OPTIMAL-STRUCTURE.md` | 六层 AI 友好结构公理与机检规则集（struct 的公理源） | v0.2 · 七层扩展见决策 17（struct 八层归 FS-6） |
 | `ROADMAP.md` | 路线计划书：方向与里程碑（2026H2 → 2027H1） | v0.2 · 阶段 3.5（全站化）推进中，M1 已落地 |
 | `BACKLOG.md` | **执行队列唯一源**：活跃队列 / 候选池 / 挂起区 / M3 波次 | FS 线 FS-1~FS-11（M1 ✅，M2 起未开工） |
+| `FS-DESIGN.md` | 全站化细化设计：决策 17-23 之下的实现级规格（端点 v2/live/迁移器/生成器/守卫/MCP 工具族/OpenAPI）+ 前沿概念穷尽评估表 + 拍板清单 D-F11+ | v0.1 · 2026-09-19（M2/M3 规划基线，〔议〕项待拍板） |
 | `SKILLS-PLAN.md` | Agent Skills 包规格：八包设计原则 / 行数预算 / 校验门禁 | 已落地转规格（8 包在 `atelier/skills/`） |
 
 ## 调研证据（`research/`）

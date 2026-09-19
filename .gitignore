@@ -19,3 +19,6 @@ DAgentic.m3-runs_react-tpl/
 # 在干净 checkout 上需要基线，untrack 它会让 matrix 四组合全红（2026-09-06 实证）
 .atelier/*
 !.atelier/api-surface.json
+
+# FS-M2 多智能体协作 worktrees（主智能体编排用；分支合并回 main 后可删）
+.worktrees/
