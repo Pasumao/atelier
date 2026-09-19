@@ -15,3 +15,24 @@ export {
   type EndpointSummary,
 } from "./endpoints.ts";
 export { openSqlite, SqliteUnavailableError, type SqliteDb, type SqliteStatement, type SqliteRunResult } from "./sqlite.ts";
+/* FS-M2(m2b) 数据面追加（只加不改——既有行不动，api-diff 盯兼容性） */
+export {
+  table,
+  pick,
+  createTableSql,
+  dropTableSql,
+  type SqlColumnType,
+  type ColumnDef,
+  type IndexDef,
+  type TableDef,
+} from "./db.ts";
+export {
+  migrateStatus,
+  migrateUp,
+  migrateDown,
+  migrateVerify,
+  MIGRATIONS_TABLE_DDL,
+  type MigrationStep,
+  type MigrateStatus,
+  type MigrateVerifyResult,
+} from "./migrate.ts";
