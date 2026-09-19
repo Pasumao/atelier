@@ -24,6 +24,8 @@ description: Atelier error code reference. ATR-1xx compile / 2xx contract / 3xx 
 | ATR-201 | Props missing/wrong type vs flat schema | `ModelCard` got no `name` | `fix` lists available keys — fill per schema (`name`, `badge`, `tagline`, `highlights`) |
 | ATR-204 | Style references undefined token | `var(--color-1)` (not in config) | `fix` lists valid tokens; use an existing semantic token or add one to `atelier.config.json` |
 | ATR-205 | Input not a JSON object | contract demo got `"string"` | Return an object with string keys |
+| ATR-215 | Endpoint output violates `output` contract (server developer error, NOT client) | handler returns `{id:"x"}` but output schema wants number | Fix the handler return to match the `output` flat schema; dev-only check (stripped in prod, JSON-safe stays) |
+| ATR-216 | Endpoint returned non-JSON-safe value (function/Symbol/BigInt/Promise/circular) | handler returns `{ fn: () => 1 }` | Map rich objects to pure data before return; message locates the path (e.g. `$.fn`); enforced in dev AND prod |
 
 ## ATR-3xx — Runtime
 
@@ -31,6 +33,8 @@ description: Atelier error code reference. ATR-1xx compile / 2xx contract / 3xx 
 |---|---|---|---|
 | ATR-301 | Template expression parse failure | `=>` arrow, `=` assignment, or function call (`.map(...)`) left in a `{...}` expression — leftover tokens are rejected, never silently dropped | Use named handler (`.locals({ bump })` + `on:click={bump}`); precompute with `$derived`; keep expressions simple |
 | ATR-305 | Writing to a `$derived` signal | `double.value = 4` | Derive-only: change upstream `$state` instead |
+| ATR-314 | `live.invalidate` / `emits` key syntax illegal | `invalidate: ["messages"]` (missing `table:`) | Key syntax: `table:<name>` (`[A-Za-z0-9_]`) or `key:<business key>`; fix the declaration at registration time |
+| ATR-322 | Endpoint exceeded its `timeoutMs` budget | handler hangs longer than the declared 10s | Raise `timeoutMs`, or unblock the handler: observe `ctx.signal` and exit early (abort stops the dispatch wait, it cannot kill the handler) |
 | ATR-331 | Migration missing its `.down.sql` pair (reversibility is a hard gate) | `001_create_chats.up.sql` with no `001_create_chats.down.sql` | Write the missing down file (`gen db` scaffolds pairs; `migrate up` refuses to apply unpaired migrations) |
 | ATR-332 | Applied migration file changed/missing (sha256 checksum mismatch vs `atelier_migrations`) | edited `002_add_messages.up.sql` after `migrate up` | Applied migrations are never rewritten — revert the edit (restore from git/checkpoint) or write a new numbered migration instead |
 | ATR-333 | Down missing/failed, or down carries an irreversible marker (`-- 不可逆：`) without `force: true` | `migrateDown` hit a down file with `-- 不可逆：数据可弃` and no force | Read the 不可逆 note in the down file to confirm what is dropped and why it is safe, then re-run with `force: true` (irreversible ops need explicit consent, never silent defaults) |

@@ -11,6 +11,8 @@ export {
   type EndpointDef,
   type EndpointContext,
   type EndpointAuthMeta,
+  type AuthInfo,
+  type AuthReader,
   type EndpointJournalEntry,
   type EndpointSummary,
 } from "./endpoints.ts";

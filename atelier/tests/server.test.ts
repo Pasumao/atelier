@@ -114,7 +114,7 @@ describe("atelier-server 端点运行时（决策 18/20，FS-1）", () => {
     expect(err.message).toContain("内部炸了");
   });
 
-  it("command 成功入审计 journal；query 不入；失败 command 不入；环形有界（journalLimit=3）", async () => {
+  it("command 成功入审计 journal（status=ok，D-F12）；query 不入；环形有界（journalLimit=3）", async () => {
     const reg = makeRegistry();
     const handler = reg.createHandler();
     await post(handler, "chat.query", { id: 1 });
@@ -122,12 +122,13 @@ describe("atelier-server 端点运行时（决策 18/20，FS-1）", () => {
     await post(handler, "chat.send", { id: 5 });
     await post(handler, "chat.send", { id: 6 });
     expect(reg.journal().length).toBe(2);
-    expect(reg.journal()[0]).toMatchObject({ name: "chat.send", kind: "command", input: { id: 5 } });
+    expect(reg.journal()[0]).toMatchObject({ name: "chat.send", kind: "command", input: { id: 5 }, status: "ok" });
     await post(handler, "chat.send", { id: 7 });
     await post(handler, "chat.send", { id: 8 });
     await post(handler, "chat.send", { id: -1 }); // handler 正常返回（done:false）仍算成功调用 → 入账
     expect(reg.journal().length).toBe(3); // 环形截断
     expect(reg.journal().map((e) => e.input)).toEqual([{ id: 6 }, { id: 7 }, { id: 8 }]);
+    // 失败 command 亦入账（status=failed + 根因 error）——D-F12 新语义，专项用例在 server-v2.test.ts
   });
 
   it("无契约端点：对象输入放行、数组输入 → ATR-312（契约纪律不因缺省而敞开）", async () => {
