@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-06T05:39:18.163Z",
+  "generatedAt": "2026-09-19T09:17:43.931Z",
   "root": "Agentic",
   "layout": "framework",
   "surfaces": {
@@ -42,6 +42,18 @@
         "kind": "type"
       },
       {
+        "id": "FlatIssue",
+        "kind": "type"
+      },
+      {
+        "id": "FlatLeaf",
+        "kind": "type"
+      },
+      {
+        "id": "FlatOf",
+        "kind": "type"
+      },
+      {
         "id": "FlatSchema",
         "kind": "type"
       },
@@ -58,7 +70,27 @@
         "kind": "type"
       },
       {
+        "id": "STANDARD_VENDOR",
+        "kind": "value"
+      },
+      {
         "id": "Signal",
+        "kind": "type"
+      },
+      {
+        "id": "StandardIssue",
+        "kind": "type"
+      },
+      {
+        "id": "StandardSchemaFace",
+        "kind": "type"
+      },
+      {
+        "id": "StandardSchemaProps",
+        "kind": "type"
+      },
+      {
+        "id": "StandardValidateResult",
         "kind": "type"
       },
       {
@@ -95,6 +127,10 @@
       },
       {
         "id": "booly",
+        "kind": "value"
+      },
+      {
+        "id": "collectFlatIssues",
         "kind": "value"
       },
       {
@@ -135,6 +171,10 @@
       },
       {
         "id": "installStateBridge",
+        "kind": "value"
+      },
+      {
+        "id": "isStandardSchema",
         "kind": "value"
       },
       {
@@ -180,6 +220,10 @@
       {
         "id": "validateUnknown",
         "kind": "value"
+      },
+      {
+        "id": "withStandard",
+        "kind": "value"
       }
     ],
     "cli-commands": [
@@ -208,7 +252,13 @@
         "id": "e2e"
       },
       {
+        "id": "gen"
+      },
+      {
         "id": "help"
+      },
+      {
+        "id": "impact"
       },
       {
         "id": "init"
@@ -218,6 +268,9 @@
       },
       {
         "id": "mcp"
+      },
+      {
+        "id": "migrate"
       },
       {
         "id": "package"

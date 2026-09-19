@@ -14,6 +14,7 @@
 | 09-06 | **仓库整理**（删 SKILL_DRAFT/.dsh-trash；SKILLS-PLAN/BACKLOG 索引化）+ **独立子代理锐评**（8/10 side-project 坐标 / 3/10 框架坐标；整改=F-5 立项、出数前置增补、README 数字修正、名实对齐候选池、生死判据入 ROADMAP §7） | `83e4a7a`→ |
 | 09-06(锐评整改批次) | 锐评三件事收口：F-5 组件模型补强红检转绿（响应式 props + effect 所有权，`tests/f5-kernel.test.ts`）· 负控集六枚 + `negative-check.mjs` 机检 6/6 + CI 接线 · README/AGENTS 数字改标记位（docs-numbers sync/check 机检）· R6 radius 纪律（F-3 收口）· struct `FACT_TOKEN_REFS` token 对账 · checkpoint 仓库发现向上查找 · M3 Wave-6 先导波（抓出 task4 brief 歧义 → brief v2 消歧并验证）· P3-5 D 子集预研报告（MCP Apps/A2UI 正交，定论不立项深投入） | `83e4a7a`→`a2e18a8` |
 | 09-19 | **FS-M1 全站化第一里程碑**：决策 17-23 定稿 · `atelier/server/` S0 端点运行时（defineQuery/defineCommand 读写二分 + 显式注册表 + Web 标准 Request/Response 分发 + ATR-2xx 契约校验 + command 审计 journal）· `~standard` 互操作口（contract.ts 抽 collectFlatIssues，文案逐字不变）· SQLite 薄宿主适配（bun:sqlite/node:sqlite 四原语，差异锁死 sqlite.ts）· 测试 135→160 绿 · docs-numbers sync。同日 M3 Wave-7 正式波 45 run 出数（三臂全 100%，诚实判读见 M3 波次记录） | `b592847` |
+| 09-19 | **FS-M2 第一批（主/子智能体 git worktree 协作，三分支并行 `111fb2c`/`a25630c`/`150263c`）**：FS-8 边界守卫（struct 八层：SERVER_IMPORT_LEAK/IMPORT_ALLOWLIST/SERVER_AUTH_MISSING/SERVER_JOURNAL_SILENT + DB_MIGRATION_PAIR/CHECKSUM/SCHEMA_DRIFT，ATR-105/106，红绿双证）· FS-3 剩余数据契约（`server/db.ts` table() 扁平定义→rowSchema/DDL 单源 + `tx` 事务原语）· FS-4 可逆迁移器（status/up/down/verify 影子库干跑 + sha256 体检 + 不可逆 force 约定，ATR-331~334）· 端点 v2（ctx 显式注入 db/auth/signal/audit + 输出契约 ATR-215/216 + timeoutMs ATR-322 + live/emits 键语法 ATR-314 + journal 记失败条目 D-F12 建议采纳 + AtrEndpointError httpStatus 缺省 422）· 生成器半（gen db：tables/crud/迁移骨架追加式 regen 幂等；gen endpoint：api.ts 类型化客户端 FlatOf 投影 + specs 骨架；impact 两跳导航）· CLI 接线 gen/migrate/impact + 主智能体旗舰链路端到端冒烟（gen db→migrate up/status/verify→gen endpoint→impact→struct check 全通）· 测试 160→248 绿 · docs-numbers sync。诚实边界：gen auth/seed=M2-d 未做 · live SSE 引擎=FS-7 · checkpoint 迁移联动未接 · tsc 零修改可编译门禁未接线 | 本批合并链 `f115e40`→`0c0ec46` |
 
 ## 活跃队列
 
@@ -41,17 +42,17 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 
 | # | 项 | 状态 | 剩余 |
 |---|---|---|---|
-| FS-1 | S0 端点运行时（`atelier/server/`）：defineQuery/defineCommand 显式注册表 + Web 标准 Request/Response 分发 + 契约校验（复用 validateFlat，ATR-2xx 四段式）+ command 审计 journal + live 端点元数据位 | ✅ M1（2026-09-19，`endpoints.ts`，10 专项用例） | 生成器接入归 FS-5 · dev 托管归 FS-7 |
+| FS-1 | S0 端点运行时（`atelier/server/`）：defineQuery/defineCommand 显式注册表 + Web 标准 Request/Response 分发 + 契约校验（复用 validateFlat，ATR-2xx 四段式）+ command 审计 journal + live 端点元数据位 | ✅ M1（2026-09-19，`endpoints.ts`，10 专项用例）+ ✅ v2（09-19 M2 第一批：ctx 注入/输出契约/journal 强化） | dev 托管归 FS-7 |
 | FS-2 | `~standard` 互操作口（决策 22）：schema 对象挂 `~standard` 属性，validate 委托 validateFlat | ✅ M1（2026-09-19，`standard-schema.ts`，9 专项用例） | 编译期 JSON Schema/openapi-3.0 投影（归 FS-9，compiler 侧） |
-| FS-3 | SQLite 薄宿主适配（bun:sqlite/node:sqlite，四原语 prepare/run/all/get 锁差异）+ 数据契约 + gen db 薄生成层 | ✅ 宿主适配 M1（2026-09-19，`sqlite.ts`） | gen db 生成层（L 级，随 FS-5 批次） |
-| FS-4 | 可逆迁移器（up/down）+ checkpoint 联动回滚（检出未逆迁移强制先 down，confirm=ask） | 未开工 | |
-| FS-5 | gen endpoint / gen auth 生成器（产物显式 import 闭合 + 生成后零修改可编译门禁） | 未开工 | |
-| FS-6 | MCP endpoint.*/db.schema 工具族（超集对表 Next 8 工具）+ struct 八层（+server 边界层/+数据契约层/import 白名单） | 未开工 | 三处同步纪律照旧 |
-| FS-7 | dev 面集成：atelier dev 托管 server 面 watch/重启 + live 端点 SSE→streamValue 直通信号图 | 未开工 | |
-| FS-8 | 边界守卫：src/server import 越界 = ATR-1xx 红错 | 未开工 | |
-| FS-9 | `atelier export openapi`（挂 ~standard JSON Schema 投影，内建一等） | 未开工 | |
+| FS-3 | SQLite 薄宿主适配（bun:sqlite/node:sqlite，四原语 prepare/run/all/get 锁差异）+ 数据契约 + gen db 薄生成层 | ✅ 宿主适配 M1（2026-09-19，`sqlite.ts`）+ ✅ 数据契约+gen db M2 第一批（`db.ts`/`gen/gen-db.mjs`） | bun 路径待 Bun 环境回归（挂账） |
+| FS-4 | 可逆迁移器（up/down）+ checkpoint 联动回滚（检出未逆迁移强制先 down，confirm=ask） | ✅ 迁移器 M2 第一批（`migrate.ts` + `atelier migrate`，verify 干跑/checksum/不可逆 force） | checkpoint 联动强制先 down 未接（下批） |
+| FS-5 | gen endpoint / gen auth 生成器（产物显式 import 闭合 + 生成后零修改可编译门禁） | 🔄 gen endpoint ✅ M2 第一批（api.ts 客户端 + specs 骨架 + impact）；regen 幂等红绿已证 | gen auth（M2-d）· tsc 零修改可编译门禁接线 |
+| FS-6 | MCP endpoint.*/db.schema 工具族（超集对表 Next 8 工具）+ struct 八层（+server 边界层/+数据契约层/import 白名单） | 🔄 struct 八层 ✅ M2 第一批（7 规则红绿双证 + ATR-105/106） | MCP 工具族（M3-FS，注册表数据源已备：EndpointSummary 已扩 invalidate/output/timeoutMs/idempotent） |
+| FS-7 | dev 面集成：atelier dev 托管 server 面 watch/重启 + live 端点 SSE→streamValue 直通信号图 | 未开工（live 声明位/键语法/客户端 EventSource 消费形态 M2 第一批已备） | |
+| FS-8 | 边界守卫：src/server import 越界 = ATR-1xx 红错 | ✅ M2 第一批（SERVER_IMPORT_LEAK/IMPORT_ALLOWLIST struct 接线，红绿双证） | 无（动态 import() 不查=诚实边界记 B 队） |
+| FS-9 | `atelier export openapi`（挂 ~standard JSON Schema 投影，内建一等） | 未开工 | 投影器可与 FS-6 并行（同管线 §2.4） |
 | FS-10 | M3 全栈任务臂（跨端任务三臂照抄）+ 评分器开放协议对外可比 | 未开工（后置） | |
-| FS-11 | 异步表达式策略原型验证（D-F9 前置：倾向显式拒绝，异步收敛在三态原语/live 端点边界） | 未开工 | 定稿后回写 design-decisions |
+| FS-11 | 异步表达式策略原型验证（D-F9 前置：倾向显式拒绝，异步收敛在三态原语/live 端点边界） | 未开工（端点 v2 已把 Promise 列入 ATR-216 非法序列化面——独立防线先行） | 定稿后回写 design-decisions |
 
 ### 候选池（锐评衍生 + 既有候选，按需触发，未排期）
 

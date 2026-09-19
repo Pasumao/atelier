@@ -11,15 +11,16 @@
 | 目录 / 文件 | 说明 |
 |---|---|
 | `atelier/runtime/` | 零依赖运行时内核（真相源）：core.ts 信号引擎 / template.ts 模板解释器 / expr.ts 表达式求值 / contract.ts 契约校验（collectFlatIssues 供互操作口复用）/ standard-schema.ts Standard Schema `~standard` 互操作口（决策 22）/ component.ts 注册表 / primitives.ts 三态原语 / bridge.ts dev 状态桥 / index.ts 桶出口。 |
-| `atelier/server/` | 全站服务层（S0，决策 18-20，FS 线 M1）：endpoints.ts 端点运行时（defineQuery/defineCommand 读写二分 + 显式注册表 + Web 标准 Request/Response 分发 + 契约校验 ATR-2xx + command 审计 journal）、sqlite.ts 薄宿主适配（bun:sqlite/node:sqlite 四原语，差异锁死本文件）。dev 托管/生成器/MCP 工具族归 FS 线后续。 |
+| `atelier/server/` | 全站服务层（S0，决策 18-20，FS 线 M2）：endpoints.ts 端点运行时 v2（defineQuery/defineCommand 读写二分 + 显式注册表 + Web 标准分发 + 输入/输出契约校验 + ctx 显式注入 db/auth/signal/audit + 幂等/超时元数据 + 审计 journal 含失败条目）、db.ts 数据契约（table() 扁平定义 → rowSchema/DDL 单源）、migrate.ts 可逆迁移器（up/down/verify，sha256 体检，ATR-331~334）、sqlite.ts 薄宿主适配（bun:sqlite/node:sqlite 四原语 + tx，差异锁死本文件）。dev 托管/MCP 工具族归 FS 线后续。 |
+| `atelier/gen/` | FS-M2 生成器族（产物显式 import 闭合 + regen 字节幂等 + 纯文本扫描禁 TS 解析器）：`gen-db.mjs`（schema.ts → tables/crud + 迁移骨架，追加式永不重写已应用迁移）、`gen-endpoint.mjs`（端点定义 → src/generated/api.ts 类型化客户端 + specs 意图段可编译骨架）、`impact.mjs`（契约→端点→调用点两跳影响面导航）。经 `atelier gen db\|endpoint` / `atelier impact` 接线。 |
 | `atelier/compiler/` | 编译器（P0-2）：`dump.mjs`（②：.atr.ts → 模板 AST JSON，与解释器同一解析器）+ `codegen.mjs`（③：AST → 零 import 静态 effect 图模块）。产物经 `registerCompiled` 注册后该组件走零 tokenize 快路径（语义与解释器同源，golden DOM diff 在 tests/codegen.test.ts）。 |
 | `atelier/benchmarks/m3/` | M3 三臂对照实验台（P0-3）：protocol.md（noskill/skill/react × 首遍正确率）+ 6 任务书（task1-3 冒烟正控层 + task4-6 加难层：流式 keyed each / 跨组件事务 / token 纪律）+ grade.mjs 评分器（acceptance harness，正控参考解在 reference/）+ report.mjs §7 出数 + RUNBOOK.md 逐臂出数操作卡。改评分器后必跑六正控回归。 |
 | `atelier/dev/` | dev 面框架件：`atelier-dev-plugin.mjs`（Vite 插件，/__atelier/* 查询/桥接/审计/token 门禁/SSE 下行）、`dev-screenshot.mjs`（CDP 无头截图）、`gen-tailwind-theme.mjs`（决策 16 token→@theme AOT）、`probe-mount.mjs`（挂载诊断探针，PROBE_URL 可换目标）。init 时 vendor 进应用 `scripts/`。 |
-| `atelier/tests/` | runtime 单测（vitest，<!--@num:tests-->160<!--@/--> 用例：内核/契约/表达式 fuzz/codegen golden DOM 对拍/F-2 静态依赖差分对拍/桥接/HMR/token DTCG/mcp-confirm 闸；M3 评分 harness 无 env 时整体 skip）。 |
+| `atelier/tests/` | runtime 单测（vitest，<!--@num:tests-->248<!--@/--> 用例：内核/契约/表达式 fuzz/codegen golden DOM 对拍/F-2 静态依赖差分对拍/桥接/HMR/token DTCG/mcp-confirm 闸/server v2 端点面/db 数据契约/迁移器/gen-db/gen-endpoint/struct 八层守卫；M3 评分 harness 无 env 时整体 skip）。 |
 | `atelier/templates/app/` | 应用 starter 模板：vite.config / index.html / atelier.config.json（token SSOT）/ src/main.ts + HelloCard 与 ContractProbe 三元共置示例（.atr.ts + .atr.md + .atr.spec.ts）/ manifest.json / llms.txt / atelier-ui.css recipe / styling-discipline + state-discipline 守卫测试。`atelier init` 以此组装自包含应用（specs/ 骨架含 guardrails.md 常驻负例）。 |
 | `atelier/mcp/` | stdio MCP Server（<!--@num:tools-->25<!--@/--> 工具单源生成，live 工具需一个运行中的应用 dev 面）。 |
 | `atelier/skills/` | 多工具兼容技能包（8 个 kebab-case 目录包）。 |
-| `atelier/scripts/` + `cli.mjs` | init（三步组装：模板 + runtime vendor + dev vendor）/ dev / struct / checkpoint / snapshot / skills / mcp，三级诚实标注。 |
+| `atelier/scripts/` + `cli.mjs` | init（三步组装：模板 + runtime vendor + dev vendor）/ dev / struct / checkpoint / snapshot / skills / mcp / gen / migrate / impact，三级诚实标注。 |
 | `atelier/docs/` | 框架规格文档：ARCHITECTURE / SPEC-Agentic-DX / design-decisions 0-23 / AI-OPTIMAL-STRUCTURE / ROADMAP（2026H2→2027H1 路线计划书，阶段 3.5=全站化）/ BACKLOG（执行队列唯一源，含 FS 全站化线）/ SKILLS-PLAN / research/（2026-09 三路调研报告）；导航索引 = `atelier/docs/README.md`。 |
 | `.dsh/skills/` | 本会话已安装的技能副本（harness 发现目录；源在 `atelier/skills/`）。 |
 
@@ -34,7 +35,11 @@
 | 应用测试（契约/样式守卫） | 应用目录下 `pnpm test` |
 | 技能包一致性校验 | `node atelier/scripts/check-skills.mjs`（exit code 可接 CI；改动 skills/mcp-definitions 后必跑） |
 | 一键安装技能到项目 | `node atelier/cli.mjs skills install --target <dir> --name <Name>`（双落点 + 模板渲染 + specs 骨架，幂等） |
-| 结构地图/结构检查 | `node atelier/cli.mjs struct map` / `check`（六层 OK-WARN-ERROR 分级；在应用目录跑） |
+| 结构地图/结构检查 | `node atelier/cli.mjs struct map` / `check`（八层 OK-WARN-ERROR 分级：1-6 既有 + 7 server 边界层（import 越界/auth 缺声明/审计静默）+ 8 数据契约层（迁移配对/checksum/漂移）+ import 白名单横切；在应用目录跑） |
+| 生成数据面产物 | `node atelier/cli.mjs gen db --root <appDir>`（schema.ts → tables/crud/迁移骨架；追加式 regen 幂等） |
+| 生成 API 客户端 | `node atelier/cli.mjs gen endpoint --root <appDir> [--mount /api] [--from-specs]`（→ src/generated/api.ts 类型化客户端；--from-specs 兼发可编译骨架） |
+| 迁移管理 | `node atelier/cli.mjs migrate status\|up\|down\|verify --root <appDir> [--db <f>] [--to <name>] [--force]`（verify=影子库干跑幂等；不可逆 down 须 --force） |
+| 契约影响面 | `node atelier/cli.mjs impact <contractKey> --root <appDir>`（契约→端点→调用点两跳导航；导航不是门禁 exit 恒 0） |
 | 已有应用拉齐 vendor | `node atelier/cli.mjs sync [--target <dir>]`（runtime + dev 面全量覆盖到框架当前时点；specs 模板补种；应用源码/config 不碰） |
 | 打开 review UI | 应用目录下 `node atelier/cli.mjs review [--open]`（dev 面 /__atelier/review：timeline + 双图判定写回；需 pnpm dev 在跑） |
 | 视觉回归快照 | 应用目录下 `node <repo>/atelier/cli.mjs snapshot save` / `check [--update]`（绝不自动晋升） |
