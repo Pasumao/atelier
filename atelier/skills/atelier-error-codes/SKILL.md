@@ -14,6 +14,8 @@ description: Atelier error code reference. ATR-1xx compile / 2xx contract / 3xx 
 |---|---|---|---|
 | ATR-101 | Template syntax error (unclosed tag/block) | `{#each}` without `{/each}` | Close the block; expression braces balanced |
 | ATR-103 | Contract type violates H1 (generic/mapped in contract) | `props: Array<T>` used in props | Replace with pure data + literal discriminants |
+| ATR-105 | Server boundary import leak — frontend entry graph reaches a server module | `src/main.ts` → `import { api } from "./server/api.ts"` | Frontend reaches server state only via endpoint HTTP calls (generated client); move the import into `src/server/**` or the server entry (`src/main-server.ts`) — `src/vendor/atelier/server/**` must never enter the frontend graph |
+| ATR-106 | Bare import whose package name is outside `package.json` deps (hallucinated package / slopsquatting) | `import { ghost } from "hallucinated-pkg"` with no such entry in dependencies/devDependencies | Install the real package (`pnpm add <pkg>`) or correct the specifier — bare names must resolve to `dependencies ∪ devDependencies`; check `atelier struct check` for the offending file list |
 
 ## ATR-2xx — Contract
 
