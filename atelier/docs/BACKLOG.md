@@ -35,6 +35,22 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 ③ RUNBOOK 增补对应附录 ✅。样本量口径诚实化：每格 5 个二值 run 的置信区间宽于 +15pt 判据，
 结论措辞按此克制。
 
+### FS 线 — 全站化（2026-09-19 立项：决策 17-23 定稿；设计书 `FULLSTACK-DESIGN.md` v0.2；调研 `research/2026-09-report{1,2,3}-*.md`）
+
+| # | 项 | 状态 | 剩余 |
+|---|---|---|---|
+| FS-1 | S0 端点运行时（`atelier/server/`）：defineQuery/defineCommand 显式注册表 + Web 标准 Request/Response 分发 + 契约校验（复用 validateFlat，ATR-2xx 四段式）+ command 审计 journal + live 端点元数据位 | 🔄 M1 实现中（2026-09-19） | gen endpoint 生成器接入、atelier dev 托管 |
+| FS-2 | `~standard` 互操作口（决策 22）：schema 对象挂 `~standard` 属性，validate 委托 validateFlat | 🔄 M1 实现中 | 编译期 JSON Schema/openapi-3.0 投影（归 FS-9，compiler 侧） |
+| FS-3 | SQLite 薄宿主适配（bun:sqlite/node:sqlite，四原语 prepare/run/all/get 锁差异）+ 数据契约 + gen db 薄生成层 | 🔄 宿主适配 M1 实现中 | gen db 生成层（L 级） |
+| FS-4 | 可逆迁移器（up/down）+ checkpoint 联动回滚（检出未逆迁移强制先 down，confirm=ask） | 未开工 | |
+| FS-5 | gen endpoint / gen auth 生成器（产物显式 import 闭合 + 生成后零修改可编译门禁） | 未开工 | |
+| FS-6 | MCP endpoint.*/db.schema 工具族（超集对表 Next 8 工具）+ struct 八层（+server 边界层/+数据契约层/import 白名单） | 未开工 | 三处同步纪律照旧 |
+| FS-7 | dev 面集成：atelier dev 托管 server 面 watch/重启 + live 端点 SSE→streamValue 直通信号图 | 未开工 | |
+| FS-8 | 边界守卫：src/server import 越界 = ATR-1xx 红错 | 未开工 | |
+| FS-9 | `atelier export openapi`（挂 ~standard JSON Schema 投影，内建一等） | 未开工 | |
+| FS-10 | M3 全栈任务臂（跨端任务三臂照抄）+ 评分器开放协议对外可比 | 未开工（后置） | |
+| FS-11 | 异步表达式策略原型验证（D-F9 前置：倾向显式拒绝，异步收敛在三态原语/live 端点边界） | 未开工 | 定稿后回写 design-decisions |
+
 ### 候选池（锐评衍生 + 既有候选，按需触发，未排期）
 
 - ~~struct check 检出力补强~~ → **已落地（2026-09-06）**：新增 `FACT_TOKEN_REFS`（*.atr.ts style 块

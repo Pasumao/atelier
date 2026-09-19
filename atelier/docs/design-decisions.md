@@ -23,6 +23,13 @@
 | 14 | 框架命名 | **Atelier**（工坊）；旧前缀 fnh/Fnh 全体系映射为 atelier/ATR/atr（见决策 14 映射表） |
 | 15 | 源码回滚与版本基线 | git 为源码版本基线；状态 checkpoint（决策 5）与源码 checkpoint 双轨；无 git 时降级文件树快照 |
 | 16 | 工具类样式层 | Tailwind v4 作为 H3「生成 utility」的实现：config 单源派生 @theme；只准 token 派生类（机检护栏）；scoped 降级为动画逃生舱 |
+| 17 | 全站化方向与定位 | 工坊 + 可验证性基建；五层→七层架构；差异化四件（结构机检/双轨回滚/API 面门禁/首遍正确率实验） |
+| 18 | 服务层形态 | `atelier/server` 内嵌；读写二分 query/command；gen auth 明文产物；Bun 优化态 + Node 兜底 |
+| 19 | 数据层 | SQLite 内建基座（bun:sqlite/node:sqlite 薄适配）+ 扁平数据契约 + 自研薄生成层 + 可逆迁移；Drizzle=fallback |
+| 20 | 客户端-服务端边界 | 文件位置边界 + 契约显式跨界 + live 端点（SSE→信号图）；否决 RSC/内联指令 |
+| 21 | 可验证性基建 | endpoint.*/db.schema 工具族 + 全站 struct 八层 + 迁移联动回滚 + M3 开放；MCP 2026-07-28 对齐 |
+| 22 | Standard Schema 互操作 | 扁平 schema 实现 `~standard` 接口 + 编译期 JSON Schema/openapi-3.0 投影；决策 6 加固非推翻 |
+| 23 | 全站语法与生成器纪律 | 前端 DSL 冻结；服务端普通 TS；生成器产物显式 import 闭合 + 零修改可编译门禁 |
 
 > 总原则：「框架不内嵌 LLM」（一切生成/理解由外部代理完成，框架只提供原语、协议、执行器）。
 
@@ -225,5 +232,48 @@
 - **第二期（2026-08-30，F-3 间距/字号纪律，recipe 层同责）**：token 组新增 **`font`**（字号刻度；runtime 注入 `--font-*`，Tailwind 映射 `--text-*`——定义即覆盖原生刻度，字号单源收口）+ `space.xs`（4px）。护栏新增 **R4**（间距声明只准 `var(--space-*)` 组合 / `calc(var(--space-*)·无单位系数)` / 0 / auto）与 **R5**（CSS `font-size` 只准 `var(--font-*)`；模板 `text-<刻度>` 类只准 config font 组键名）；R2/R2b 扫描面扩到 recipe `atelier-ui.css`，recipe 取值全量迁移 token（padding/font-size/scroll-margin）。诚实边界：index.html 基线 reset 豁免（preflight 不引入）；border 宽度 / line-height / letter-spacing / 阴影与 transform 内长度不属 R4 管辖；**radius 纪律留后续候选**；recipe 数值迁移为就近 token（±几 px 级归一）。验证：starter 脚手架端到端 18/18 绿 + R4 负例红检（裸 `0.52rem` 实证被抓）+ `text-md` 工具类生成实证；check-skills 31/0；技能包 atelier-styling 同步。
 - 时间（二期）：2026-08-30。
 
+## 决策 17：全站化方向与定位（2026-09-19）
+- **定论**：Atelier 从前端框架升级为**全站框架**。定位 = 一间完整工坊 + **可验证性基建**：人写意图（界面 + 服务行为），代理从契约单源砌出全栈；与 2026 主流框架的分野 = 它们给 agent 上下文（文档/错误/日志），Atelier 给 agent 证据（机检/门禁/回滚/可复现评分）。架构从五层扩为七层（新增 S0 服务层；L2 契约层从"组件的合同"升维为"全栈的合同"——组件 ∪ 端点 ∪ 数据同一扁平 schema 单源）。差异化四件（2026-09 调研证实仍无人区）：全站结构机检、全站双轨回滚、API 面漂移 CI 门禁、以 agent 首遍正确率为北极星的框架级对照实验。
+- **概念区分（防混淆）**：`atelier-server` 是**数据服务层**（端点/数据/迁移），非 SSR 渲染服务器——决策 4「SSR 服务器=后期可选插件」不变。
+- 依据：三路深度调研（`docs/research/2026-09-report{1,2,3}-*.md`，含对 `2026-fullstack-survey.md` 的逐项复核）× 设计书 `FULLSTACK-DESIGN.md` v0.2 × 用户拍板（2026-09-19 指令「开始制作」，D-F1~D-F10 整体通过；D-F9 为方向拍板，见未决项）。
+- 时间：2026-09-19。
+
+## 决策 18：服务层形态 —— `atelier/server` 内嵌
+- **定论**：服务层为框架内置目录 `atelier/server/`（应用 init 时 vendor，与 runtime/dev 同模式）；dev 由 `atelier dev` 托管，prod 编译为单入口产物（桌面形态 = 单文件 sidecar exe）。**Web 标准 Request/Response 优先；Bun 优化态、Node 兜底**——2025-12-02 Anthropic 收购 Bun 后，"绑定 Bun"修订为"优化态"：代码只走 Web 标准 API + 薄宿主适配层，Bun（bun:sqlite/compile/HTTP2）为默认优化宿主，Node（node:sqlite 内建）为兜底宿主，双宿主可运行由测试钉住。
+- **读写二分**：端点显式声明 `query`（读，可缓存语义显式声明）或 `command`（写，自动入审计 journal）；与 SvelteKit remote functions 的行业收敛线同形，差异 = **显式注册表**（无编译器魔法）+ 契约单源可被 MCP/机检消费。
+- **鉴权**：`atelier gen auth` 生成明文可读可改的会话代码进应用（Rails 8/Phoenix 生成器路线）；不 vendor Better Auth；端点契约元数据预留**鉴权声明位**（供机检与 MCP 读取）；"应用作为 OAuth 资源服务器暴露给 agent"列远期扩展口（Better Auth MCP 插件实证的需求位）。
+- 取舍：弃 DI 容器（NestJS 式 AI 高错区）、装饰器路由、RSC 内联边界、Bun 私有 API 绑定。
+- 时间：2026-09-19。
+
+## 决策 19：数据层 —— SQLite 内建基座 + 自研薄生成层
+- **定论**：默认库 SQLite，基座 = **bun:sqlite（Bun）/ node:sqlite（Node ≥22.5）双宿主零依赖内建**，差异锁死在 `prepare/run/all/get` 四原语量级的薄宿主适配层。数据契约（表/列/关系）用扁平 TS 定义单源；`atelier gen db` **编译期**生成类型化访问层（落 TS 生态空位：sqlc-gen-typescript 仍 preview，无成熟"SQL→TS 类型函数"AOT 生成器）；迁移器要求**每个迁移可逆**（up/down），迁移即 checkpoint 审计对象。
+- vendor 对照：Drizzle = **fallback**（1.0 仍 RC + 团队归属 PlanetScale 两风险；其 stable 后 SQLite 支持不变可重开评估）；Prisma 排除（多步 generate = AI 出错点）；不引 libSQL（维护态）、不用 Bun.SQL 多方言统一 API（与 SQLite 单方言贴 SQL 纪律冲突）。
+- 队列：不引 Redis/PG 基建；自研极薄 SQLite 队列为 P2+ 候选（command 事务内投递 = 业务写入与任务投递原子化；参照 River 设计清单）。
+- 边界（诚实）：v1 不做云端复制（Litestream VFS 为容灾参照）、不做 Postgres 适配承诺、浏览器端 sqlite-wasm 留门不实现。
+- 时间：2026-09-19。
+
+## 决策 20：客户端-服务端边界 + live 端点
+- **定论**：边界 = **文件位置**（`src/server/` 内代码只在服务端跑；编译器静态校验前端 import 越界 = ATR-1xx 红错），否决 RSC 式内联边界指令。跨边界数据 = 契约 schema 显式声明（扁平红线〔决策 6〕延续，设计上规避 RSC 式序列化面及其安全前科）。`streamValue`（决策 5）升维为全栈原语：前端引用类型化 query 端点 → 服务端 SSE 推流 → 同一三态模型消费。**live 端点**（对应 SvelteKit `query.live()` / Convex 订阅）：query 端点可选声明为 live，写事务后重算受影响查询并推送——"服务端粗粒度信号 → 客户端细粒度信号"两级依赖图；不造 Convex 型数据库（无读集追踪，以写后重放换取数据库自由）。
+- 服务器驱动 UI 仍不做（决策 4 重申）：live 端点推数据不推 UI 指令，与 LiveView 本质不同。
+- 时间：2026-09-19。
+
+## 决策 21：可验证性基建（原"agent 全栈基建"重新定位）
+- **定论**：2026-09 调研证实 dev 可观测 MCP（Next 16.2 `/_next/mcp` + 8 工具）、AGENTS.md 脚手架生成、文档随包分发已被抢跑，"agent 基建"不再成立为差异化口号。差异化收敛为**可验证性基建**四件：① `endpoint.*`/`db.schema` MCP 工具族（超集对表 Next 8 工具基线）；② 全站 struct 六层扩八层（+server 边界层、+数据契约层，含 **import 白名单校验** = 包幻觉/slopsquatting 对策）；③ 迁移回滚与源码回滚联动（`checkpoint.rollback` 检出含未逆迁移的 checkpoint 强制先 down，confirm=ask 起步）；④ M3 首遍正确率协议开放对外可比（Supabase Evals 2026-08 开源先例）。
+- 配套：MCP 桥按 **2026-07-28 无状态规范**对齐（HTTP 直连 + 头路由，无会话粘性）；长任务（编译流水/struct 检查）按 **Tasks 扩展**建模；运行时内省（组件树/信号图/effect 队列快照，对标 Agent Browser）扩到服务端面；OpenAPI 导出为内建一等能力（tRPC 靠插件补丁的教训）；扁平红线与 MCP 新规范不冲突（$ref 允许非强制，扁平 = 有意的 LLM 可读性选择）。
+- agent 应用原语（框架的第二种用法）：以 AI SDK 7 七条共性原语（类型化工具/上下文注入/审批 HITL/持久执行/遥测评测/记忆/MCP 互通）为 checklist，全部挂在契约单源之上；P2+ 远期，规范先行不实现。
+- 时间：2026-09-19。
+
+## 决策 22：Standard Schema 互操作（决策 6 加固）
+- **定论**：`contract.ts` 扁平 schema 对象实现 **Standard Schema V1 `~standard` 接口**（约 60 行纯 TS 类型，官方明示可 copy-paste，零运行时依赖）：`~standard.validate` 委托既有微型校验器（issues 映射标准 issues 列表）；`~standard.jsonSchema` 为**编译期投影**（归 compiler 侧：从扁平 schema 单向生成 draft-2020-12 / openapi-3.0 target，超出扁平语义的 JSON Schema 能力显式不支持而非静默降级）。换得：tRPC/Hono/TanStack/oRPC/NestJS 12 生态可直接消费 Atelier 契约。
+- 与决策 6 关系：否决 zod/TypeBox/valibot 作契约源的理由（双源/不扁平/API 变动快）2026 复核**全部仍成立——加固而非推翻**；被消除的是"不引入即失去互操作"的隐含代价。禁 $ref/oneOf 不动；不 vendor 任何 schema 库。
+- 风险标注：Standard Schema 无正式治理结构（三位作者个人背书）；JSON Schema V1 各实现覆盖度未确认（接口面积小，适配层风险可控）。
+- 时间：2026-09-19。
+
+## 决策 23：全站语法与生成器纪律
+- **定论**：① 前端模板语法（决策 1〔定〕）在全站化期间**冻结**，扩展只走 codegen 覆盖扩张（Svelte 5 / Solid 2 / Remix 3 的语料断裂实证；"宁可 boring"的交付节奏本身是 AI 友好性）；② 服务端代码 = 普通 TS 零新语法，唯一新概念 = 端点/契约声明；③ 全部生成器（gen endpoint/db/auth）产物锚定"**显式 import 闭合**"形态（生成器形态学第四级：单文件上下文可静态理解，AI 价值最高级），进"生成后零修改可编译"门禁测试（Loco 实证形态）；升级走 regen+diff 而非依赖升级（phx.gen.auth "regen 即升级"实证）；④ API 面 snapshot（P3-4〔定〕）把服务端公共面一并纳入。
+- 时间：2026-09-19。
+
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
+- **异步表达式策略**（D-F9，方向拍板 2026-09-19）：倾向"**显式拒绝**"——异步只许出现在三态原语与 live 端点边界，expr 求值保持纯同步（与显式优于隐式、静态依赖图可判定性、语法冻结三者一致）；Solid 2 RC / Svelte 5.36+ async 趋势下需尽快原型验证后定稿（BACKLOG FS-11），避免破坏性补课。
+- 全站版 slogan 措辞终审：「意图进，全站出 / *Intent in, full stack out.*」为设计书提案，未终审。

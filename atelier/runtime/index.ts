@@ -9,8 +9,10 @@ export { parseTemplate } from "./template.ts"; // compiler face (P0-2②): same 
 export type { TemplateNode, TemplateAttr } from "./template.ts";
 export { streamValue, optimisticList } from "./primitives.ts";
 export type { StreamValue, OptimisticItem } from "./primitives.ts";
-export { validateFlat, validateUnknown } from "./contract.ts";
-export type { FlatSchema, AtrError } from "./contract.ts";
+export { validateFlat, validateUnknown, collectFlatIssues } from "./contract.ts";
+export type { FlatSchema, AtrError, FlatIssue } from "./contract.ts";
+export { withStandard, isStandardSchema, STANDARD_VENDOR } from "./standard-schema.ts"; // 决策 22（FS-2）：Standard Schema V1 互操作口
+export type { StandardSchemaFace, StandardSchemaProps, StandardValidateResult, StandardIssue } from "./standard-schema.ts";
 export { component, registry } from "./component.ts";
 export { installStateBridge } from "./bridge.ts";
 export { hmrRemountAll } from "./template.ts"; // P0-5: 保值热交换（dev 插件注入的 accept 回调经 window 钩子调用）
