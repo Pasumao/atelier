@@ -5,13 +5,14 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 
 # Built-in Tool Surface (MCP, in-process with `atelier dev`)
 
-## Three faces (never mix privileges)
+## Four face groups (never mix privileges)
 
 | Face | Tools | Power |
 |---|---|---|
 | **Query (read-only)** | `structure.map` · `structure.check` · `graph.static` · `registry.list_components` · `registry.get_component` · `tokens.list` · `state.snapshot` · `state.get` · `state.graph` · `state.journal` · `ui.screenshot` · `ui.a11y` · `docs.search` | inspect only — `structure.*`/`graph.static` computed server-locally, no dev server needed |
-| **Operation** | `checkpoint.list` · `checkpoint.rollback` · `checkpoint.source_list` · `checkpoint.source_commit` · `checkpoint.source_rollback` · `state.time_travel` · `test.run` · `snapshot.diff` · `snapshot.review_diff` · `diff.report` | changes state; **audit-logged**, confirm tier applies |
-| **Audit** | `audit.log` · `feedback.read` | read side effects + human feedback |
+| **Query (server face)** | `endpoint.list` · `endpoint.contract` · `endpoint.impact` · `db.schema` · `db.migrations` · `server.introspect` | inspect the full-stack surface — served from the app dev face `server-status`; `endpoint.impact` is static (no dev face) |
+| **Operation** | `checkpoint.list` · `checkpoint.rollback` · `checkpoint.source_list` · `checkpoint.source_commit` · `checkpoint.source_rollback` · `state.time_travel` · `test.run` · `snapshot.diff` · `snapshot.review_diff` · `diff.report` · `endpoint.call` | changes state; **audit-logged**, confirm tier applies |
+| **Audit** | `audit.log` · `feedback.read` · `endpoint.journal` | read side effects + human feedback |
 
 ## Command ↔ tool mapping (use the tool when the CLI is not enough)
 
@@ -23,18 +24,21 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 | `atelier review` | `diff.report` + `feedback.read` |
 | rollback (any) | `checkpoint.rollback` / `checkpoint.source_rollback` |
 | `atelier checkpoint save` | `checkpoint.source_commit` (same code path — 未检不锚 snapshot gate applies; `--no-gate` escape hatch is CLI-only) |
+| `atelier impact <contractKey>` | `endpoint.impact` (same engine — two-hop static chain) |
+| `atelier migrate status` | `db.migrations` |
 
 ## Confirm tiers & audit (decision 12)
 
 - `atelier.config.json → agent.confirm`: `auto` (AI may auto-rollback, default) | `ask` | `deny`
 - Destructive ops (rollback/source_rollback) always: confirm tier + audit-log entry
+- `endpoint.call` goes through the same tier: `deny` = ATR-402 structured refusal before any request is sent
 - dev/MCP binds 127.0.0.1 only + one-time token (`requireToken`)
 
 ## Params = flat schema (decision 6)
 
 Tools accept **flat** schemas (no `$ref`/`oneOf`) — identical to component contracts. If a tool's `fix`/schema is unfamiliar, query `docs.search` instead of guessing.
 
-## Wire notes (v0.2 — 全部 25 工具已接线)
+## Wire notes (v0.3 — 33 tools defined; the server-face 8 consume the app dev face `server-status`)
 
 - `state.get`：path = `sig-<n>[.子路径]`（信号按安装序编号，无 debugName——bridge 已知边界）；拿不准先 `state.snapshot` 看全貌。
 - `state.graph`：活依赖图——signals（sig-N 键+kind）与每条 effect 依赖边；sig-N 与 `state.snapshot.signals` 同一键空间；适合改代码前判断"动哪个信号会影响哪些 effect"。
@@ -53,6 +57,16 @@ specs/feedback.jsonl      # 每条判定一行 JSON：{at, verdict: "approve"|"d
 specs/<name>.feedback.md  # 自由格式 markdown，原文返回
 ```
 
+## Server-face tools (FS-6, FS-DESIGN §10.1 — 超集对表 Next `/_next/mcp`)
+
+- `endpoint.list`：端点注册表摘要（name/kind/live+失效键/emits/auth/timeout/idempotent）——路由枚举先查表不猜路径；schema 体归 `endpoint.contract`（token 纪律）。
+- `endpoint.contract`：输入/输出 FlatSchema 原样直读；可选 `target: "draft-2020-12" | "openapi-3.0"` 走编译器单管线投影成 JSON Schema（§2.4 三消费同源）——扁平语义之外 ATR-107，绝不静默降级。
+- `endpoint.impact`：契约 → 端点 → 前端调用点两跳静态链（§2.5，与 CLI 同引擎）；导航报告不阻断；**不依赖 dev face**。
+- `db.schema`（表/列/索引，可按 `table` 聚焦）/ `db.migrations`（head/applied/pending——不可逆 down 仍是人工 CLI `--force`）/ `server.introspect`（server 摘要 + live 订阅 + journal 尾部）。
+- `endpoint.journal`：command 审计（成功与失败同源呈现）——"代理改了什么、砸了什么"从这里查。
+- `endpoint.call`：POST `<mount|/api>/<name>` JSON 体；响应体/状态/耗时返回，端点级 ATR 错误原样留在 body 作数据（不吞）；诚实边界：`ask` 档暂同 auto（stdio 无审批通道）。
+- live 组在 dev face 不在时返回四段式结构化错误（fix 指路应用目录 `pnpm dev`），绝不静默空结果。
+
 ## Common failures
 
 | Symptom | Fix |
@@ -60,3 +74,4 @@ specs/<name>.feedback.md  # 自由格式 markdown，原文返回
 | `ATR-402` permission denied | Check `agent.confirm` tier; ask human to raise to auto for this op, or perform via CLI with approval |
 | Registry missing component | Component file not imported/registered (`opts.name` mismatch — pass `name` explicitly) |
 | Diff can't be reviewed | Use `snapshot.review_diff` (image + baseline), review before `--update` |
+| `ATR-4xx-dev` dev surface unreachable | Start the app dev server (`pnpm dev` in the app dir) or set `ATELIER_DEV_URL` |
