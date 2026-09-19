@@ -8,13 +8,17 @@
  * （dev 态校验，违规 → ATR-215；prod 剥离但 JSON-safe 检查保留——"对内证伪可剥离、对外设防保留"§3.7）。
  * 错误码（决策 9 四域的 3xx 运行时域）：310 未知端点 / 311 方法不允许 / 312 非法 JSON /
  * 313 端点注册冲突或命名非法 / 314 live/invalidate 键语法非法 / 320 handler 抛错 /
- * 322 端点超时；2xx 契约域：215 输出契约违规（开发者错误）/ 216 输出非 JSON-safe；SQLite 宿主面见 sqlite.ts ATR-330。
+ * 321 live 重算失败（SSE error 事件，不断流——live.ts）/ 322 端点超时；2xx 契约域：215 输出契约违规
+ * （开发者错误）/ 216 输出非 JSON-safe；SQLite 宿主面见 sqlite.ts ATR-330。
  * 依赖注入（§3.2）：无 DI 容器——db / auth 由 createHandler 装配点一次性显式注入，装配代码明文可见。
- * v2 边界（诚实）：鉴权仅元数据位 + 装配式会话读取器（gen auth 产物归 FS-5）；live 仅声明位 +
- * 键语法校验 + 摘要（SSE 失效-重算-推送引擎归 FS-7）；注册表与 journal 为单进程内存态
- * （多实例/落盘归后续）；timeout 中止只停止等待，handler 自身须监听 ctx.signal 提前退出。
+ * v2 边界（诚实）：鉴权仅元数据位 + 装配式会话读取器（gen auth 产物归 FS-5）；live 为全量引擎
+ * （FS-7，live.ts 协作对象：SSE 失效-重算-推送——单进程内存订阅、重连全量重算，诚实边界随 live.ts
+ * 文件头）；注册表与 journal 为单进程内存态（多实例/落盘归后续）；timeout 中止只停止等待，
+ * handler 自身须监听 ctx.signal 提前退出。
  */
 import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contract.ts";
+import { LiveEngine, type LiveEngineOptions } from "./live.ts";
+import { beginWriteCapture, endWriteCapture, type WriteCapture } from "./sqlite.ts";
 
 export type EndpointKind = "query" | "command";
 
@@ -53,7 +57,7 @@ export type EndpointDef<TInput = Record<string, unknown>, TOutput = unknown, TDb
   output?: FlatSchema;
   /** 超时（§3.6）：AbortSignal.timeout(ms) 与 req.signal 合并注入 ctx.signal；超时 → ATR-322（503） */
   timeoutMs?: number;
-  /** live 端点（§4.1）：true = 端点全名自键失效；{ invalidate } = 显式失效键。声明位 v2 即注册，SSE 引擎归 FS-7 */
+  /** live 端点（§4.1）：true = 端点全名自键失效；{ invalidate } = 显式失效键。SSE 引擎见 live.ts（FS-7） */
   live?: boolean | { invalidate: string[] };
   /** command 写侧声明（§4.1）：该 command 触达的失效键（显式声明优先于自动表名启发式） */
   emits?: string[];
@@ -136,6 +140,39 @@ function isProd(): boolean {
 }
 
 /**
+ * 输出面检查（§2.3/§3.7 单源）：POST 分发器与 live 推送前（live.ts）共用同一校验——两通道零语义差。
+ * 返回 null = 通过；ATR-216（JSON-safe，dev+prod 都启用——对外设防）；ATR-215（输出契约，仅 dev 强制）。
+ */
+export function checkEndpointOutput(def: { name: string; output?: FlatSchema }, result: unknown): AtrError | null {
+  const unsafe = findJsonUnsafePath(result);
+  if (unsafe) {
+    return endpointError(
+      "ATR-216",
+      `端点 ${def.name} 返回了不可 JSON 序列化的值：${unsafe}`,
+      `在端点 ${def.name} 的 handler 返回前把富对象显式映射为纯数据（函数/Symbol/BigInt/Promise/循环引用均不可序列化）；定位：${unsafe}`
+    );
+  }
+  if (def.output != null && !isProd()) {
+    if (result == null || typeof result !== "object" || Array.isArray(result)) {
+      return endpointError(
+        "ATR-215",
+        `端点 ${def.name} 输出契约违规：期望 JSON 对象，实际 ${result === null ? "null" : Array.isArray(result) ? "array" : typeof result}`,
+        `修正端点 ${def.name} 的 handler 返回值以匹配 output 契约（FlatSchema 形态 = 对象；这是服务端开发者错误，与输入侧 ATR-201 区分）`
+      );
+    }
+    const v = validateFlat(def.output, result as Record<string, unknown>, def.name);
+    if (!v.ok) {
+      return {
+        ...v.error!,
+        code: "ATR-215",
+        fix: `输出契约是服务端开发者错误（与输入侧 ATR-201 区分）：修正端点 ${def.name} 的 handler 返回值以匹配 output 契约。${v.error!.fix}`,
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * JSON-safe 检查（§2.3）：函数/Symbol/BigInt/循环引用/Promise → 返回定位路径，否则 null。
  * dev+prod 都启用（§3.7"对外设防"——JSON.stringify 对这些值要么抛含糊异常要么静默损坏）。
  * undefined 属性不报（JSON.stringify 本就跳过）；诚实边界：Map/Set 序列化为 {} 的静默损坏
@@ -194,9 +231,13 @@ export class EndpointRegistry {
   private defs = new Map<string, EndpointDef>();
   private journalBuf: EndpointJournalEntry[] = [];
   readonly journalLimit: number;
+  /** FS-7 live 引擎（协作对象）：SSE 订阅/失效重算/推送；内省位 subscriberCount()（§10.1 数据源） */
+  readonly liveEngine: LiveEngine;
 
-  constructor(opts: { journalLimit?: number } = {}) {
+  constructor(opts: { journalLimit?: number; live?: LiveEngineOptions } = {}) {
     this.journalLimit = opts.journalLimit ?? 500;
+    // journalPush 经受限钩子窄口进入私有环形缓冲（最小开面——不公开 journal 写入口）
+    this.liveEngine = new LiveEngine({ journalPush: (entry) => this.journalPush(entry) }, opts.live);
   }
 
   /** 显式注册（决策 18：无编译器魔法；重复名/非法名 = ATR-313，live/emits 键非法 = ATR-314，抛 AtrEndpointError） */
@@ -214,6 +255,7 @@ export class EndpointRegistry {
       assertInvalidateKeys(def.emits, `端点 ${def.name} emits`);
     }
     this.defs.set(def.name, def);
+    if (def.kind === "query" && def.live != null) this.liveEngine.addDefinition(def); // FS-7：live query 喂入引擎
     return this;
   }
 
@@ -286,18 +328,39 @@ export class EndpointRegistry {
 
   /**
    * Web 标准分发器 v2。约定：POST <mount>/<name>，请求体 = JSON 输入（query 与 command
-   * 同走 POST——输入必须过契约校验这条纪律不因动词分叉；GET 语义留给 FS-7 的 live SSE）。
+   * 同走 POST——输入必须过契约校验这条纪律不因动词分叉）；FS-7 加法通道：GET <mount>/<name>/live
+   * → 声明 live 的 query 端点走 SSE 订阅（live.ts 引擎：失效-重算-推送），其余非 POST 维持 ATR-311。
    * 装配点（§3.2）：db / auth 一次性显式注入，无 DI 容器——装配代码在应用入口明文可见。
    */
   createHandler(opts: { mount?: string; db?: unknown; auth?: AuthReader } = {}): (req: Request) => Promise<Response> {
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
     const db = opts.db; // 无库应用不传 = undefined（ctx.db 直通，诚实呈现）
     const readAuth = opts.auth;
+    this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     return async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       let rest = url.pathname;
       if (mount && rest.startsWith(mount)) rest = rest.slice(mount.length);
       const name = rest.replace(/^\/+|\/+$/g, "");
+
+      // ---- FS-7 live 路由：GET /<mount>/<name>/live → SSE（仅声明 live 的 query 端点；其余非 POST 维持 ATR-311） ----
+      if (req.method === "GET" && name.endsWith("/live")) {
+        const base = name.slice(0, -"/live".length);
+        const liveDef = base !== "" ? this.defs.get(base) : undefined;
+        if (liveDef && liveDef.kind === "query" && liveDef.live != null) {
+          const sse = this.liveEngine.handleLive(req, liveDef);
+          if (sse) return sse;
+        }
+        return errorResponse(
+          405,
+          endpointError(
+            "ATR-311",
+            `端点只接受 POST：${req.method} ${url.pathname}（/live SSE 通道仅面向声明 live 的 query 端点）`,
+            `订阅 live query：GET ${mount}/${base || "<name>"}/live；直调端点：POST ${mount}/${base || "<name>"}，JSON 体 = 契约输入`,
+            this.names()
+          )
+        );
+      }
 
       if (req.method !== "POST") {
         return errorResponse(405, endpointError("ATR-311", `端点只接受 POST：${req.method} ${url.pathname}`, `改为 POST ${mount}/${name}，JSON 体 = 契约输入`, this.names()));
@@ -340,8 +403,10 @@ export class EndpointRegistry {
       };
       const t0 = performance.now();
       const durMs = (): number => Math.round(performance.now() - t0);
+      let capture: WriteCapture | null = null; // FS-7 写捕获槽：command 分发期间收集写目标表（§4.1 自动表名启发式）
       try {
         let result: unknown;
+        capture = def.kind === "command" ? beginWriteCapture() : null;
         if (timeoutSignal) {
           const breach = new Promise<never>((_, reject) => {
             timeoutSignal.addEventListener("abort", () => reject(TIMEOUT_BREACH), { once: true });
@@ -351,43 +416,21 @@ export class EndpointRegistry {
           result = await def.handler(payload, ctx);
         }
 
-        // ---- a. JSON-safe 检查（§2.3）：dev+prod 都启用（对外设防，§3.7） ----
-        const unsafe = findJsonUnsafePath(result);
-        if (unsafe) {
-          const err = endpointError(
-            "ATR-216",
-            `端点 ${def.name} 返回了不可 JSON 序列化的值：${unsafe}`,
-            `在端点 ${def.name} 的 handler 返回前把富对象显式映射为纯数据（函数/Symbol/BigInt/Promise/循环引用均不可序列化）；定位：${unsafe}`
-          );
-          if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, durMs(), notes, err));
-          return errorResponse(500, err);
-        }
-
-        // ---- b. 输出契约校验（§2.3）：仅 dev 强制；prod 剥离（开发者错误不设在对外边界） ----
-        if (def.output != null && !isProd()) {
-          if (result == null || typeof result !== "object" || Array.isArray(result)) {
-            const err = endpointError(
-              "ATR-215",
-              `端点 ${def.name} 输出契约违规：期望 JSON 对象，实际 ${result === null ? "null" : Array.isArray(result) ? "array" : typeof result}`,
-              `修正端点 ${def.name} 的 handler 返回值以匹配 output 契约（FlatSchema 形态 = 对象；这是服务端开发者错误，与输入侧 ATR-201 区分）`
-            );
-            if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, durMs(), notes, err));
-            return errorResponse(500, err);
-          }
-          const v = validateFlat(def.output, result as Record<string, unknown>, def.name);
-          if (!v.ok) {
-            const err: AtrError = {
-              ...v.error!,
-              code: "ATR-215",
-              fix: `输出契约是服务端开发者错误（与输入侧 ATR-201 区分）：修正端点 ${def.name} 的 handler 返回值以匹配 output 契约。${v.error!.fix}`,
-            };
-            if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, durMs(), notes, err));
-            return errorResponse(500, err);
-          }
+        // ---- a+b. 输出面检查（§2.3 单源 checkEndpointOutput——live 推送前同源，两通道零语义差）：
+        //          JSON-safe（dev+prod 都启用，对外设防）+ 输出契约（仅 dev 强制，prod 剥离） ----
+        const outErr = checkEndpointOutput(def, result);
+        if (outErr) {
+          if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, durMs(), notes, outErr));
+          return errorResponse(500, outErr);
         }
 
         if (def.kind === "command") {
           this.journalPush(this.journalEntry(def, payload, "ok", principal, durMs(), notes));
+          // ---- FS-7 失效广播（§4.2，journal 入账后）：键 = 显式 emits 优先，否则写侧自动表名捕获合成 table:<name> ----
+          const captured = capture ? endWriteCapture(capture) : [];
+          capture = null;
+          const keys = def.emits ?? captured.map((t) => `table:${t}`);
+          if (keys.length > 0) this.liveEngine.onCommandSuccess(def.name, keys);
         }
         return new Response(JSON.stringify(result ?? null), {
           status: 200,
@@ -418,6 +461,10 @@ export class EndpointRegistry {
         );
         if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, dur, notes, err));
         return errorResponse(500, err);
+      } finally {
+        // FS-7 捕获槽兜底：失败路径（抛错/超时/输出面违规的早退）也必须收槽——防槽泄漏与跨分发串写；
+        // 失败 command 不广播（§4.2 只在提交成功后失效），捕获结果就此丢弃。
+        if (capture) endWriteCapture(capture);
       }
     };
   }
