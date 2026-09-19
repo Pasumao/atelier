@@ -35,7 +35,7 @@ AGENT SURFACE
   atelier skills install [--target <dir>] [--name <N>]             FULL  skills + client MCP configs
                                               [--no-dsh|--no-agents|--no-mcp]
   atelier skills check                                             FULL  consistency gate (CI exit code)
-  atelier struct [map|check] [--json]                              FULL  six-layer structural ground truth
+  atelier struct [map|check] [--json]                              FULL  eight-layer structural ground truth
                                                                          (map=human/json, check=gates)
   atelier review [--open]                                          MINI  open the dev-face review UI
                                                                          (timeline + 双图判定; needs pnpm dev)
@@ -56,6 +56,16 @@ COMPILER
                                                                           .atr/ast/*.json via the runtime parser
                                                                           (stage ③ codegen: node atelier/compiler/codegen.mjs
                                                                           --ast <dir> [--graph]; --graph-only = 依赖图查询 stdout)
+
+GENERATE / DATA (FS-M2 全站化)
+  atelier gen db [--root <dir>]                                    MINI* 数据契约 schema.ts → tables/crud + 迁移骨架
+                                                                          （追加式永不重写已应用迁移；regen 幂等）
+  atelier gen endpoint [--root <dir>] [--mount /api]               MINI* 端点定义 → src/generated/api.ts 类型化客户端
+                                            [--from-specs]                （--from-specs 兼发 specs 意图段的可编译骨架）
+  atelier migrate status|up|down|verify [--root <dir>]             MINI* 可逆迁移器（FS-4）：status/up/down/verify
+                                            [--db <f>] [--to <name>] [--force]（影子库干跑幂等校验）
+  atelier impact <contractKey> [--root <dir>]                      MINI* 契约 → 端点 → 前端调用点 两跳影响面导航
+                                                                          （导航不是门禁——exit 恒 0）
 
 BENCHMARK
   atelier bench --app <dir> [--port N] [--json] [--keep]           MINI* P0-4 SPEC §7 four-metric baseline
@@ -80,6 +90,10 @@ function die(msg, code = 2) {
 }
 function runScript(file, args) {
   const r = spawnSync(process.execPath, [script(file), ...args], { stdio: "inherit" });
+  process.exit(r.status ?? 1);
+}
+function runFile(file, args) {
+  const r = spawnSync(process.execPath, [file, ...args], { stdio: "inherit" });
   process.exit(r.status ?? 1);
 }
 function hasDevScript(dir) {
@@ -187,6 +201,23 @@ switch (cmd) {
     process.exit(child.status ?? 1);
     break;
   }
+  case "gen": {
+    // FS-M2：契约/数据契约 → 生成物（产物显式 import 闭合；regen 幂等；FS-DESIGN §7.1）
+    const genFile = sub === "db" ? path.join(PKG, "gen", "gen-db.mjs") : sub === "endpoint" ? path.join(PKG, "gen", "gen-endpoint.mjs") : null;
+    if (!genFile) die("usage: atelier gen db [--root <dir>] | endpoint [--root <dir>] [--mount /api] [--from-specs]", 2);
+    runFile(genFile, rest);
+    break;
+  }
+  case "migrate":
+    // FS-4 可逆迁移器：库在 server/migrate.ts，runner 做装配与诚实呈现（破坏性 down 走 --force 显式同意）
+    if (!["status", "up", "down", "verify"].includes(sub)) die("usage: atelier migrate status|up|down|verify [--root <dir>] [--db <f>] [--to <name>] [--force]", 2);
+    runFile(script("migrate.mjs"), [sub, ...rest]);
+    break;
+  case "impact":
+    // §2.5 契约影响面两跳导航（导航不是门禁，exit 恒 0）
+    if (!sub) die("usage: atelier impact <contractKey> [--root <dir>]", 2);
+    runFile(path.join(PKG, "gen", "impact.mjs"), [sub, ...rest]);
+    break;
   case "bench": {
     // P0-4: SPEC §7 four-metric baseline bench (needs an init'd app with deps installed)
     const child = spawnSync(process.execPath, [path.join(PKG, "scripts", "bench.mjs"), ...process.argv.slice(3)], { stdio: "inherit" });

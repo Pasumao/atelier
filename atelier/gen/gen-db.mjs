@@ -400,7 +400,7 @@ function renderMigrationDown(def) {
   return [
     `-- migration gen db 骨架（down）：可手改。`,
     `-- 级联不隐式（§5.1）：如启用 PRAGMA foreign_keys 且有子表引用，需先删子表或在此显式写级联——`,
-    `-- 确认本 down 会丢弃数据且安全后再执行（含「-- 不可逆：」标记的 down 须 force:true，§18 R7）。`,
+    `-- 不可逆：DROP TABLE 会丢弃该表全部数据；确认安全后以 migrate down --force 执行（§18 R7；删本行标记 = 显式声明非破坏）。`,
     dropTableSql(def),
     "",
   ].join("\n");
