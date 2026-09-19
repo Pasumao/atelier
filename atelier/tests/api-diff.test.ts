@@ -13,6 +13,7 @@ import {
   extractCliCommands,
   extractComponentContracts,
   extractMcpTools,
+  extractOpenApiPaths,
   extractRuntimeExports,
   extractTokenKeys,
   judge,
@@ -119,6 +120,38 @@ export const HelloCard = component(function HelloCard(props: { title: string }) 
       { id: "HelloCard.start", kind: "opt", type: "number" },
       { id: "HelloCard.title", kind: "req", type: "string" },
     ]);
+  });
+  it("openapi 端点面（FS-9 §13 纳管）：paths×method → METHOD+path 排序；x-atelier-* 扩展键不收；文件缺失 = 空面", () => {
+    const dir = tmpDir();
+    write(
+      path.join(dir, "openapi.json"),
+      JSON.stringify({
+        openapi: "3.0.3",
+        paths: {
+          "/api/chat.ask": { post: { "x-atelier-kind": "command" } },
+          "/api/chat.list": { post: {}, get: { "x-atelier-restful": true } },
+        },
+      }),
+    );
+    expect(extractOpenApiPaths(path.join(dir, "openapi.json"))).toEqual([
+      { id: "GET /api/chat.list", kind: "get" },
+      { id: "POST /api/chat.ask", kind: "post" },
+      { id: "POST /api/chat.list", kind: "post" },
+    ]);
+    expect(extractOpenApiPaths(path.join(dir, "nope.json"))).toEqual([]); // 未导出 OpenAPI 的应用 = 空面不报错
+  });
+
+  it("openapi 面 diff：端点删除 = breaking、新增 = additive、method 变化 = removed+added（§13 漂移可见）", () => {
+    const base = { openapi: [{ id: "POST /api/a", kind: "post" }, { id: "POST /api/b", kind: "post" }] };
+    const removed = diffSurfaces({ surfaces: base }, { surfaces: { openapi: [{ id: "POST /api/a", kind: "post" }] } });
+    expect(removed.summary).toMatchObject({ removed: 1, breaking: 1, ok: false });
+    const added = diffSurfaces({ surfaces: base }, { surfaces: { openapi: [{ id: "POST /api/a", kind: "post" }, { id: "POST /api/b", kind: "post" }, { id: "GET /api/c", kind: "get" }] } });
+    expect(added.summary).toMatchObject({ added: 1, breaking: 0, ok: true });
+    const methodChanged = diffSurfaces(
+      { surfaces: { openapi: [{ id: "POST /api/a", kind: "post" }] } },
+      { surfaces: { openapi: [{ id: "GET /api/a", kind: "get" }] } },
+    );
+    expect(methodChanged.summary).toMatchObject({ removed: 1, added: 1, breaking: 1, ok: false });
   });
 });
 

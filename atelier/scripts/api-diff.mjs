@@ -14,6 +14,8 @@
  *   应用 root（含 src/components + atelier.config.json）：
  *     component-contracts  src/components/*.atr.ts 契约 reqProps/optProps（id=Comp.path，kind=req|opt，type）
  *     token-keys           应用 atelier.config.json tokens 扁平路径
+ *     openapi              openapi.json 端点面（FS-9 §13：id="METHOD <path>"，kind=method——
+ *                          端点增删 = 漂移可见；method 变化 = removed+added；文件缺失 = 空面不报错）
  *
  * diff 分类（门禁语义）：
  *   removed / changed            = breaking（exit 1；--allow 清单可豁免）
@@ -163,6 +165,24 @@ export function extractComponentContracts(componentsDir) {
   return entries.sort(byId);
 }
 
+/** openapi.json 端点面（FS-9 §13 api-diff 纳管）：paths × method → { id: "METHOD <path>", kind: method }。
+ *  只认 OAS 操作方法键（x-atelier-* 扩展与 description 等非方法键不进门禁身份）；
+ *  文件缺失/无 paths = 空面（不报错——未导出 OpenAPI 的应用不受影响）。 */
+export function extractOpenApiPaths(openapiFile) {
+  const doc = readJson(openapiFile);
+  if (!doc?.paths || typeof doc.paths !== "object") return [];
+  const methods = new Set(["get", "post", "put", "patch", "delete", "head", "options", "trace"]);
+  const entries = [];
+  for (const [p, item] of Object.entries(doc.paths)) {
+    if (!item || typeof item !== "object") continue;
+    for (const method of Object.keys(item)) {
+      if (!methods.has(method)) continue;
+      entries.push({ id: `${method.toUpperCase()} ${p}`, kind: method });
+    }
+  }
+  return entries.sort(byId);
+}
+
 function byId(a, b) {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
@@ -194,6 +214,7 @@ export function extractSurfaces(root, only = null) {
       : {
           "component-contracts": () => extractComponentContracts(path.join(root, "src", "components")),
           "token-keys": () => extractTokenKeys(path.join(root, "atelier.config.json")),
+          "openapi": () => extractOpenApiPaths(path.join(root, "openapi.json")),
         };
   const names = Object.keys(extractors);
   const surfaces = {};
