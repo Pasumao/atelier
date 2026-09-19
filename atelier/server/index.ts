@@ -28,6 +28,8 @@ export {
   type IndexDef,
   type TableDef,
 } from "./db.ts";
+/* 契约形状类型转出口（应用契约单源 `satisfies FlatSchema` 与生成物 FlatOf 的 import 面——tsc 门禁 §7.3） */
+export type { FlatSchema, FlatOf } from "../runtime/contract.ts";
 export {
   migrateStatus,
   migrateUp,

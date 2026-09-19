@@ -374,9 +374,12 @@ export function generateApi(root, opts = {}) {
   L.push(`// 诚实边界：call 只做传输与错误透传（非 2xx 直接抛响应体 = ATR 四段式，fix 可执行）；`);
   L.push(`// live 失效-重算-推送的服务端引擎归 FS-7——本客户端按 §4.3 SSE 线协议消费。`);
   L.push(``);
-  if (usedIdents.length > 0) L.push(`import { ${usedIdents.join(", ")}, type FlatOf } from "${contractImportPath}";`);
+  // FlatOf 定义在框架 server 面（db.ts）——绝不要求应用契约单源转出口（生成器自闭合，§7.2）
+  const vendorServerImportPath = relImport(genDir, path.join(root, "src", "vendor", "atelier", "server", "index.ts"));
+  if (usedIdents.length > 0) L.push(`import { ${usedIdents.join(", ")} } from "${contractImportPath}";`);
+  if (endpoints.some((ep) => ep.contract || ep.output)) L.push(`import type { FlatOf } from "${vendorServerImportPath}";`);
   if (hasLive) L.push(`import { streamValue } from "${runtimeImportPath}";`);
-  if (usedIdents.length > 0 || hasLive) L.push(``);
+  if (usedIdents.length > 0 || hasLive || endpoints.some((ep) => ep.contract || ep.output)) L.push(``);
 
   // 类型别名（按端点名排序 = 端点清单序）
   for (const e of endpoints) {

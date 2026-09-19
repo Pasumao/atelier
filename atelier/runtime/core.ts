@@ -127,8 +127,8 @@ export function $state<T>(init: T, options?: { equals?: (a: T, b: T) => boolean 
       sig.value = nv;
     },
   };
-  store._signals.add(sig);
-  if (__creationSink.fn) __creationSink.fn(sig as Signal<unknown>);
+  store._signals.add(sig as Signal); // Set<Signal>（unknown 缺省）的协变收口——同 journal/notify 既有惯例
+  if (__creationSink.fn) __creationSink.fn(sig as unknown as Signal<unknown>);
   return sig;
 }
 

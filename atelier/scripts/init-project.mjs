@@ -48,8 +48,14 @@ if (!fs.existsSync(path.join(RUNTIME, "core.ts"))) {
   process.exit(1);
 }
 
-/* 1) app skeleton */
-fs.cpSync(TEMPLATE, target, { recursive: true });
+/* 1) app skeleton（node_modules/.atelier 等运行时产物绝不入脚手架——模板本地产了 lock 也不拷） */
+fs.cpSync(TEMPLATE, target, {
+  recursive: true,
+  filter: (src) => {
+    const rel = path.relative(TEMPLATE, src);
+    return rel === "" || !["node_modules", ".atelier", "dist"].includes(rel.split(path.sep)[0]);
+  },
+});
 
 /* 2) vendored runtime — 框架真相在 atelier/runtime，脚手架拿到的是初始化时点拷贝 */
 const targetRuntime = path.join(target, "src", "runtime");

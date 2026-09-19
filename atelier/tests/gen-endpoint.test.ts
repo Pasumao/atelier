@@ -114,7 +114,8 @@ describe("gen endpoint 生成器（§7.1-7.2：静态扫描 / api.ts / 骨架 / 
     expect(endpoints.length).toBe(2);
     expect(notes).toEqual([]);
     // 显式 import 闭合：契约单源 + FlatOf（排序确定）+ live 端点才带 streamValue
-    expect(content).toContain(`import { chatInputSchema, chatMessageListSchema, chatMessageSchema, type FlatOf } from "../contract.ts";`);
+    expect(content).toContain(`import { chatInputSchema, chatMessageListSchema, chatMessageSchema } from "../contract.ts";`);
+    expect(content).toContain(`import type { FlatOf } from "../vendor/atelier/server/index.ts";`); // FlatOf 单源自框架 server 面（生成器自闭合）
     expect(content).toContain(`import { streamValue } from "../vendor/atelier/runtime/index.ts";`);
     // 类型投影别名（生成物零内联重复类型——FlatOf 单源投影）
     expect(content).toContain(`type ChatAskInput = FlatOf<typeof chatInputSchema>;`);

@@ -221,8 +221,8 @@ function findJsonUnsafePath(v: unknown, path = "$", seen: Set<object> = new Set(
 /** 注册期键语法校验（ATR-314）：live.invalidate 与 emits 共用同一语法 */
 function assertInvalidateKeys(keys: unknown, owner: string): void {
   const bad = Array.isArray(keys)
-    ? keys.filter((k) => typeof k !== "string" || !INVALIDATE_KEY_RE.test(k))
-    : keys;
+    ? (keys as unknown[]).filter((k) => typeof k !== "string" || !INVALIDATE_KEY_RE.test(k))
+    : [keys]; // 非数组 = 整体非法（收成单元素数组保 bad 恒为 unknown[]）
   if (!Array.isArray(keys) || bad.length > 0) {
     throw new AtrEndpointError(
       endpointError(
@@ -253,7 +253,7 @@ export class EndpointRegistry {
   }
 
   /** 显式注册（决策 18：无编译器魔法；重复名/非法名 = ATR-313，live/emits 键非法 = ATR-314，抛 AtrEndpointError） */
-  register(def: EndpointDef): this {
+  register<TInput extends Record<string, unknown>, TOutput, TDb>(def: EndpointDef<TInput, TOutput, TDb>): this {
     if (!NAME_RE.test(def.name)) {
       throw new AtrEndpointError(endpointError("ATR-313", `端点名非法：${def.name}`, "端点名只允许字母开头的 [A-Za-z0-9_.-]（URL 路径拼接的安全前提）"));
     }
@@ -266,8 +266,9 @@ export class EndpointRegistry {
     if (def.emits != null) {
       assertInvalidateKeys(def.emits, `端点 ${def.name} emits`);
     }
-    this.defs.set(def.name, def);
-    if (def.kind === "query" && def.live != null) this.liveEngine.addDefinition(def); // FS-7：live query 喂入引擎
+    // 内部存储收口为非泛型形态（分发按 name 取用，泛型只活在注册调用点的类型检查里）
+    this.defs.set(def.name, def as EndpointDef);
+    if (def.kind === "query" && def.live != null) this.liveEngine.addDefinition(def as EndpointDef); // FS-7：live query 喂入引擎
     return this;
   }
 
@@ -301,7 +302,9 @@ export class EndpointRegistry {
         ...(d.timeoutMs != null ? { timeoutMs: d.timeoutMs } : {}),
         ...(d.idempotent != null ? { idempotent: d.idempotent } : {}),
         ...(d.auth ? { authType: d.auth.type } : {}),
-        ...(d.auth != null && typeof (d.auth as { role?: unknown }).role === "string" ? { authRole: (d.auth as { role: string }).role } : {}),
+        ...(d.auth != null && typeof (d.auth as { role?: unknown }).role === "string"
+          ? { authRole: (d.auth as { role?: unknown }).role as string }
+          : {}),
       };
     });
   }
@@ -388,7 +391,8 @@ export class EndpointRegistry {
       // 调用时机都维持原状（仍在下方 ctx 装配处调用一次）——行为零变化。拦截在 handler 之前，
       // journal 不记账（journal 语义 = "分发穿过 handler 之后"，§3.5——被拒之门的请求未触达 handler）。
       // 声明了 auth 的端点：readAuth 在此处调用一次并复用进 ctx（总调用次数与旧路径相同）。
-      const authRequired = def.auth != null && def.auth.type !== "none";
+      const authMeta = def.auth;
+      const authRequired = authMeta != null && authMeta.type !== "none";
       let gatedAuth: AuthInfo | null = null;
       if (authRequired) {
         gatedAuth = readAuth ? readAuth(req) : null;
@@ -399,19 +403,19 @@ export class EndpointRegistry {
             readAuth
               ? endpointError(
                   "ATR-340",
-                  `端点 ${name} 要求 ${def.auth.type} 鉴权，请求未携带有效会话`,
+                  `端点 ${name} 要求 ${authMeta.type} 鉴权，请求未携带有效会话`,
                   `先建立会话再调用（gen auth 产物 = POST auth.login，成功响应 Set-Cookie 会话 cookie，携 cookie 重试）；该端点确属免鉴权时显式声明 auth: { type: "none" }（显式选择优于沉默缺省，§6.2）`,
                   [name]
                 )
               : endpointError(
                   "ATR-340",
-                  `端点 ${name} 声明了 auth: { type: "${def.auth.type}" }，但 createHandler 未装配 auth 会话读取器`,
+                  `端点 ${name} 声明了 auth: { type: "${authMeta.type}" }，但 createHandler 未装配 auth 会话读取器`,
                   `装配点显式接线：createHandler({ db, auth: createSessionReader(db) })（gen auth 产物 auth.ts 提供读取器工厂）；该端点确属免鉴权时改为 auth: { type: "none" }`,
                   [name]
                 )
           );
         }
-        const wantRole = (def.auth as { role?: unknown }).role;
+        const wantRole = (authMeta as { role?: unknown }).role;
         if (typeof wantRole === "string" && gatedAuth.role !== wantRole) {
           const actual = typeof gatedAuth.role === "string" ? gatedAuth.role : "（无角色）";
           return errorResponse(

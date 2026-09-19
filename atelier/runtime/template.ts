@@ -75,7 +75,7 @@ export type TemplateNode =
   | { kind: "each"; expr: string; item: string; index: string; keyExpr?: string; children: TemplateNode[] };
 // internal short aliases (public names above are the compiler-facing surface)
 type Attr = TemplateAttr;
-type Node = TemplateNode;
+type AstNode = TemplateNode;
 
 class Parser {
   src: string;
@@ -97,8 +97,8 @@ class Parser {
   }
 
   /** expectedClose = 所属元素的标签名（元素子内容）；缺省 = 顶层或块子内容（任何 </ 均为游离闭合） */
-  parseContent(expectedClose?: string): Node[] {
-    const nodes: Node[] = [];
+  parseContent(expectedClose?: string): AstNode[] {
+    const nodes: AstNode[] = [];
     while (!this.eof()) {
       const rest = this.src.slice(this.pos);
       const c = this.src[this.pos];
@@ -134,7 +134,7 @@ class Parser {
         const mIf = /^\{#if\s+([^}]+)\}/.exec(rest);
         if (mIf) {
           this.pos += mIf[0].length;
-          const blocks: { test: string | null; children: Node[] }[] = [];
+          const blocks: { test: string | null; children: AstNode[] }[] = [];
           blocks.push({ test: mIf[1], children: this.parseContent() });
           for (;;) {
             const mElseIf = /^\{:else\s+if\s+([^}]+)\}/.exec(this.src.slice(this.pos));
@@ -199,7 +199,7 @@ class Parser {
     return nodes;
   }
   /** 解析元素（开始标签 + 属性，必要时递归子内容直到闭合标签） */
-  parseElement(tag: string): Node {
+  parseElement(tag: string): AstNode {
     let i = this.pos + 1 + tag.length;
     const attrs: Attr[] = [];
     for (;;) {
@@ -318,10 +318,10 @@ function matchBrace(src: string, start: number): number {
  * P1-2 解析缓存：html`` 同一处字面量的 raw 恒定 → 同组件重挂零解析成本；
  * 动态拼接的 raw 若频繁变化由容量上限兜底清空（AST 只读共享，渲染期不改树）。
  */
-const parseCache = new Map<string, Node[]>();
+const parseCache = new Map<string, AstNode[]>();
 /** exported for the compiler (P0-2② AST dump): one parser, one truth — the dump and the
  * runtime interpreter MUST see the same tree for the same template string. */
-export function parseTemplate(src: string): Node[] {
+export function parseTemplate(src: string): TemplateNode[] {
   let ast = parseCache.get(src);
   if (!ast) {
     ast = new Parser(src).parseContent();
@@ -688,7 +688,7 @@ if (typeof window !== "undefined") {
 }
 
 function renderNodes(
-  nodes: Node[],
+  nodes: AstNode[],
   scope: Record<string, unknown>,
   registry: ComponentRegistry,
   validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError },
@@ -704,7 +704,7 @@ function renderNodes(
 }
 
 function renderNode(
-  node: Node,
+  node: AstNode,
   scope: Record<string, unknown>,
   registry: ComponentRegistry,
   validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError },

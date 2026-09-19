@@ -318,6 +318,15 @@ function renderTables(tables, schemaFile, vendorDbFile, outFile) {
       lines.push(`  ${k}: ${tsType(col)}${rowRequired(col) ? "" : " | null"};`);
     }
     lines.push("};");
+    // Insert 输入类型与 Row 同源（tables.ts 单源）：全列显式（INTEGER 单主键可省——rowid 自增；
+    // 默认值不在此消解，调用方显式传值）
+    const pkAuto = def.primaryKey.length === 1 && def.columns[def.primaryKey[0]].type === "integer";
+    lines.push(`export type ${toPascal(def.name)}Insert = {`);
+    for (const [k, col] of Object.entries(def.columns)) {
+      const optional = col.primaryKey === true && pkAuto;
+      lines.push(`  ${k}${optional ? "?" : ""}: ${tsType(col)}${optional || rowRequired(col) ? "" : " | null"};`);
+    }
+    lines.push("};");
     lines.push("");
   }
   return lines.join("\n").replace(/\n+$/, "\n");
@@ -349,13 +358,6 @@ function renderCrud(tables, vendorSqliteFile, outFile) {
     lines.push(`// —— ${t.name} ——`);
     lines.push("");
     // Insert 输入：全列显式（INTEGER 单主键可省——rowid 自增；默认值不在此消解，调用方显式传值）
-    lines.push(`export type ${Pascal}Insert = {`);
-    for (const [k, col] of Object.entries(t.columns)) {
-      const optional = col.primaryKey === true && pkAuto;
-      lines.push(`  ${k}${optional ? "?" : ""}: ${tsType(col)}${optional || rowRequired(col) ? "" : " | null"};`);
-    }
-    lines.push("};");
-    lines.push("");
     lines.push(`export function ${fn}GetByPk(db: Pick<SqliteDb, "prepare">, pk: ${pkParam}): ${Pascal}Row | undefined {`);
     lines.push(`  return db.prepare("SELECT ${selCols} FROM ${t.name} WHERE ${where}").get(${pkArgs}) as ${Pascal}Row | undefined;`);
     lines.push("}");
