@@ -5,6 +5,7 @@
  * 应用是 init 时点的 vendor 拷贝（框架真相在 atelier/，应用持有时点快照）。框架演进后
  * 用本命令把 vendor 拉到当前时点：
  *   1. runtime/*.ts  → <target>/src/runtime/   全量覆盖（零依赖内核，应用零改动）
+ *   1b. runtime+server → <target>/src/vendor/atelier/  全量覆盖（FS 线生成器产物 import 面）
  *   2. dev 面三件    → <target>/scripts/       全量覆盖（atelier-dev-plugin / dev-screenshot /
  *                                               gen-tailwind-theme；vite.config 从 ./scripts/ 引入）
  *   3. specs/ 模板补种（_spec-template.md / guardrails.md，skip-if-exists——不碰用户文件）
@@ -47,6 +48,20 @@ for (const f of fs.readdirSync(RUNTIME)) {
   }
 }
 
+/* 1b) FS 线规范布局全量覆盖（FS-DESIGN §4.4/§7.2）：src/vendor/atelier/{runtime,server} —
+ *     gen endpoint/db/auth 产物与 api.ts 的 import 面；与 init-project 同一清单。 */
+let vendorFiles = 0;
+for (const [srcDir, dstName] of [[RUNTIME, "runtime"], [path.join(PKG, "server"), "server"]]) {
+  const dst = path.join(target, "src", "vendor", "atelier", dstName);
+  fs.mkdirSync(dst, { recursive: true });
+  for (const f of fs.readdirSync(srcDir)) {
+    if (f.endsWith(".ts")) {
+      fs.copyFileSync(path.join(srcDir, f), path.join(dst, f));
+      vendorFiles++;
+    }
+  }
+}
+
 /* 2) dev 面三件全量覆盖（与 init-project 同一清单） */
 const DEV_FILES = ["atelier-dev-plugin.mjs", "dev-screenshot.mjs", "gen-tailwind-theme.mjs"];
 for (const f of DEV_FILES) fs.copyFileSync(path.join(DEV, f), path.join(target, "scripts", f));
@@ -76,7 +91,7 @@ try {
   }
 } catch { /* package.json 读取失败不算同步失败 */ }
 
-console.log(`[atelier sync] ${path.basename(target)}: runtime ${runtimeFiles} modules + dev face ${DEV_FILES.length} scripts → 当前时点`);
+console.log(`[atelier sync] ${path.basename(target)}: runtime ${runtimeFiles} modules + vendor/atelier ${vendorFiles} modules + dev face ${DEV_FILES.length} scripts → 当前时点`);
 for (const p of planted) console.log(`  planted ${p} (skip-if-exists)`);
 if (hints.length) {
   console.log("dependency drift (hint only — review then `pnpm install`):");

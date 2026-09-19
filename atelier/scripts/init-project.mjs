@@ -6,6 +6,7 @@
  * Assembly (source-as-library, decision 14 — the app starts as readable, runnable source):
  *   1. templates/app/  → target/             app skeleton（config/index/main/components/tests/vite.config）
  *   2. runtime/*.ts    → target/src/runtime/ vendored 零依赖内核（应用不依赖框架目录即可跑）
+ *   2b. runtime+server → target/src/vendor/atelier/  FS 线规范布局（生成器产物 import 面，§4.4/§7.2）
  *   3. dev/*.mjs       → target/scripts/     dev 面插件 + 无头截图 + tailwind 主题生成
  *   4. init-ai（除非 --no-ai）：skills 双落点 + AGENTS.md/llms.txt + specs/ + MCP 客户端配置
  */
@@ -61,7 +62,23 @@ for (const f of fs.readdirSync(RUNTIME)) {
   }
 }
 
-/* 3) vendored dev face — vite.config 从 ./scripts/ 引入 */
+/* 3) vendored FS 线规范布局（FS-DESIGN §4.4/§7.2）：src/vendor/atelier/{runtime,server} —
+ *    gen endpoint/db/auth 产物与 api.ts 按此布局显式 import；既有 src/runtime 拷贝保留
+ *    （starter 组件的既有 import 不动），两布局并存直至 FS-7 dev 托管批次统一。 */
+const targetVendor = path.join(target, "src", "vendor", "atelier");
+let vendorFiles = 0;
+for (const [srcDir, dstName] of [[RUNTIME, "runtime"], [path.join(PKG, "server"), "server"]]) {
+  const dst = path.join(targetVendor, dstName);
+  fs.mkdirSync(dst, { recursive: true });
+  for (const f of fs.readdirSync(srcDir)) {
+    if (f.endsWith(".ts")) {
+      fs.copyFileSync(path.join(srcDir, f), path.join(dst, f));
+      vendorFiles++;
+    }
+  }
+}
+
+/* 4) vendored dev face — vite.config 从 ./scripts/ 引入 */
 const targetScripts = path.join(target, "scripts");
 fs.mkdirSync(targetScripts, { recursive: true });
 for (const f of ["atelier-dev-plugin.mjs", "dev-screenshot.mjs", "gen-tailwind-theme.mjs"]) {
@@ -92,7 +109,7 @@ const writtenCount = (function count(dir) {
   return n;
 })(target);
 
-console.log(`scaffolded ${writtenCount} files → ${target}  (app: ${pkg.name}, vendored runtime: ${runtimeFiles} modules)`);
+console.log(`scaffolded ${writtenCount} files → ${target}  (app: ${pkg.name}, vendored runtime: ${runtimeFiles} modules, vendor/atelier: ${vendorFiles} modules)`);
 console.log("next:");
 console.log(`  cd ${path.relative(process.cwd(), target) || path.basename(target)} && pnpm install && pnpm dev   # http://127.0.0.1:5173`);
 

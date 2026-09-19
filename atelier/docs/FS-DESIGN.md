@@ -468,8 +468,11 @@ await ctx.db.tx(async (tx) => {
 
 ### 5.7 种子与备份〔议：D-F17 / 观察位〕
 
-- `atelier migrate seed`：幂等种子命令（`seed.ts` 明文，UPSERT 语义，可重复执行）——dev 体验件，
-  S 级〔议〕。
+- `atelier migrate seed`：幂等种子命令——dev 体验件，S 级〔议〕。**已落地（M2-d，2026-09-19）**，
+  实现与本文有一处有意偏离：原文"seed.ts 明文"不可执行（生成器纪律禁 eval/TS 解析器，runner 无法
+  执行应用的 TS 模块），v1 落地为 **SQL 种子**——`src/server/db/seeds/*.seed.sql`（每条语句须幂等
+  UPSERT 语义，静态启发拦截裸 INSERT）+ `atelier_seeds` 状态表（checksum 体检 ATR-335，执行失败
+  回滚 ATR-336），重复执行跳过已应用。
 - 容灾：文档位（Litestream VFS 为参照的备份指南：SQLite 单文件 = `atelier checkpoint` 之外
   定期 `.backup` API/文件拷贝说明）；**不做**内建云复制（决策 19）。
 
@@ -763,6 +766,7 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 |---|---|---|---|
 | ATR-105 | 1xx 编译 | server 边界 import 越界 | §9.1（FS-8） |
 | ATR-106 | 1xx 编译 | import 白名单外包名（幻觉包） | §9.2（FS-6） |
+| ATR-107 | 1xx 编译 | 超出扁平投影能力（投影器遇 $ref/oneOf 等非扁平结构显式 throw，绝不静默降级） | §2.4（FS-9，已落地） |
 | ATR-215 | 2xx 契约 | 端点输出契约违规（开发者错误） | §2.3 |
 | ATR-216 | 2xx 契约 | 端点输出非 JSON-safe | §2.3 |
 | ATR-314 | 3xx 运行 | live/invalidate 声明非法（键语法错） | §4.1 |
