@@ -128,9 +128,8 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 | `atelier/docs/AI-OPTIMAL-STRUCTURE.md` | 六层 AI 友好结构公理与机检规则集 |
 | `atelier/docs/ROADMAP.md` | 路线计划（方向与里程碑） |
 | `atelier/docs/BACKLOG.md` | 缺口与改进执行队列（唯一源） |
-| `atelier/docs/FULLSTACK-DESIGN.md` | 全站化设计书 v0.2（已拍板，转背景文献） |
-| `atelier/docs/research/` | 2026-09 三路深度调研（决策 17-23 证据基线；v0.1 survey 已被取代留档） |
-| `atelier/docs/TECH-*` / `SKILLS-PLAN.md` | 调研底稿（时点快照）与技能包设计依据 |
+| `atelier/docs/SKILLS-PLAN.md` | 技能包设计规格（已落地转规格） |
+| `atelier/docs/research/` | 2026-09 三路深度调研（决策 17-23 证据基线） |
 | `AGENTS.md` | 本仓库的常用命令与维护纪律 |
 
 ## License

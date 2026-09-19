@@ -20,7 +20,7 @@
 | `atelier/mcp/` | stdio MCP Server（<!--@num:tools-->25<!--@/--> 工具单源生成，live 工具需一个运行中的应用 dev 面）。 |
 | `atelier/skills/` | 多工具兼容技能包（8 个 kebab-case 目录包）。 |
 | `atelier/scripts/` + `cli.mjs` | init（三步组装：模板 + runtime vendor + dev vendor）/ dev / struct / checkpoint / snapshot / skills / mcp，三级诚实标注。 |
-| `atelier/docs/` | 框架规格文档：ARCHITECTURE / design-decisions 0-23 / BACKLOG（执行队列唯一源，含 FS 全站化线）/ ROADMAP（2026H2→2027H1 路线计划书，阶段 3.5=全站化）/ FULLSTACK-DESIGN（全站化设计书，已拍板转背景文献）/ research/（三路调研报告）/ SKILLS-PLAN / TECH-*。 |
+| `atelier/docs/` | 框架规格文档：ARCHITECTURE / SPEC-Agentic-DX / design-decisions 0-23 / AI-OPTIMAL-STRUCTURE / ROADMAP（2026H2→2027H1 路线计划书，阶段 3.5=全站化）/ BACKLOG（执行队列唯一源，含 FS 全站化线）/ SKILLS-PLAN / research/（2026-09 三路调研报告）；导航索引 = `atelier/docs/README.md`。 |
 | `.dsh/skills/` | 本会话已安装的技能副本（harness 发现目录；源在 `atelier/skills/`）。 |
 
 ## 常用命令
