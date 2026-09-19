@@ -33,11 +33,11 @@ export const PROJECT_TARGETS = ["draft-2020-12", "openapi-3.0"];
 
 const DRAFT_2020_12_SCHEMA_URL = "https://json-schema.org/draft/2020-12/schema";
 
-/** ATR-107 四段式（新码：超出扁平投影能力）。Error 实例 + 四段字段随行（dump.mjs 同款形态）。 */
+/** ATR-107 四段式（新码：超出扁平投影能力）。Error 实例 + 四段字段随行（dump.mjs 同款形态；
+ *  message 带码前缀——endpoints.ts AtrEndpointError 同惯例），绝不静默降级。 */
 export function atrProjectError(message, fix, context = {}) {
   return Object.assign(new Error(`ATR-107: ${message}`), {
     code: "ATR-107",
-    message,
     context: { domain: "project-json", ...context },
     fix,
   });
