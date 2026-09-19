@@ -30,6 +30,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { inspectStructure } from "../scripts/struct.mjs";
 import { confirmGate, readAgentConfig } from "./confirm.mjs";
+import { callEndpointTool, FS6_TOOLS } from "./endpoint-tools.mjs";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const DEFS = JSON.parse(fs.readFileSync(path.join(HERE, "mcp-definitions.json"), "utf8"));
@@ -37,6 +38,9 @@ const SERVER_INFO = { name: "atelier", version: DEFS.$meta?.version ?? "0.1.0" }
 const PROTOCOL_LATEST = "2025-06-18";
 const BASE = (process.env.ATELIER_DEV_URL ?? "http://127.0.0.1:5173").replace(/\/$/, "");
 const PROJECT_ROOT_ENV = process.env.ATELIER_PROJECT_ROOT;
+/** 直接执行判定（gen/impact.mjs 同款）：库形态 import（测试直调 callTool）不启动 stdio 循环 */
+const INVOKED_DIRECTLY =
+  process.argv[1] && url.pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 /** dev-surface routes used by implemented tools (extend as endpoints land) */
 const ENDPOINT_MAP = {
@@ -146,8 +150,9 @@ function checkpointCli(args, cwd) {
 async function callTool(name, args) {
   const PROJECT_ROOT = process.env.ATELIER_PROJECT_ROOT ?? process.cwd();
 
-  /* ---- confirm 闸（决策 15）：破坏性操作（回滚族）过 agent.confirm 档，deny → ATR-402 结构化拒绝 ---- */
-  const denial = confirmGate(readAgentConfig(PROJECT_ROOT), name);
+  /* ---- confirm 闸（决策 15）：破坏性操作（回滚族）与操作面（endpoint.call）过 agent.confirm 档，
+   *      deny → ATR-402 结构化拒绝 ---- */
+  const denial = confirmGate(readAgentConfig(PROJECT_ROOT), name, args);
   if (denial) throw toolError(`${denial.code}: ${denial.message}`, denial.fix);
 
   /* ---- downlink-executed tools (runtime lives in the open page; P0-1 SSE channel) ---- */
@@ -439,6 +444,13 @@ async function callTool(name, args) {
     return out;
   }
 
+  /* ---- FS-6（§10.1）：L3 全栈工具族 —— live 组消费 dev 面 server-status（§10.3），
+   *      endpoint.impact 走 gen/impact.mjs 静态两跳链（不依赖 dev 面）；
+   *      endpoint.call 的 confirm 三档已在闸口收口。实现见 mcp/endpoint-tools.mjs ---- */
+  if (FS6_TOOLS.has(name)) {
+    return callEndpointTool(name, args, { devUrl: BASE, devToken: DEV_TOKEN, projectRoot: PROJECT_ROOT });
+  }
+
   const def = DEFS.tools.find((t) => t.name === name);
   if (!def) {
     throw toolError(`ATR-404: unknown tool "${name}"`, "pick a tool from tools/list output");
@@ -554,25 +566,30 @@ async function handle(msg) {
   }
 }
 
-/* ---------- lifecycle ---------- */
-const rl = readline.createInterface({ input: process.stdin, terminal: false });
-rl.on("line", (line) => {
-  const trimmed = line.trim();
-  if (!trimmed) return;
-  let msg;
-  try { msg = JSON.parse(trimmed); } catch {
-    send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } });
-    return;
-  }
-  Promise.resolve(handle(msg)).catch((e) => {
-    // last-resort containment: an unexpected crash must not kill the session
-    if (msg?.id !== undefined && msg?.id !== null) {
-      replyError(msg.id, -32603, `internal error: ${e?.message ?? String(e)}`);
+/* ---------- lifecycle（仅直接执行时启动 stdio 循环；import 消费只取 callTool）---------- */
+function main() {
+  const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  rl.on("line", (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let msg;
+    try { msg = JSON.parse(trimmed); } catch {
+      send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } });
+      return;
     }
+    Promise.resolve(handle(msg)).catch((e) => {
+      // last-resort containment: an unexpected crash must not kill the session
+      if (msg?.id !== undefined && msg?.id !== null) {
+        replyError(msg.id, -32603, `internal error: ${e?.message ?? String(e)}`);
+      }
+    });
   });
-});
-rl.on("close", () => process.exit(0));
-process.on("SIGINT", () => process.exit(0));
-process.on("SIGHUP", () => process.exit(0));
+  rl.on("close", () => process.exit(0));
+  process.on("SIGINT", () => process.exit(0));
+  process.on("SIGHUP", () => process.exit(0));
 
-process.stderr.write(`[atelier-mcp] ${SERVER_INFO.name}@${SERVER_INFO.version}: ${TOOLS.length} tools, dev=${BASE}\n`);
+  process.stderr.write(`[atelier-mcp] ${SERVER_INFO.name}@${SERVER_INFO.version}: ${TOOLS.length} tools, dev=${BASE}\n`);
+}
+
+export { callTool };
+if (INVOKED_DIRECTLY) main();

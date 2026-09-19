@@ -439,6 +439,160 @@
     "optProps": {}
    },
    "errors": []
+  },
+  {
+   "name": "endpoint.list",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Summarize the app's server endpoints (name/kind/live+invalidate keys/emits/auth/timeout/idempotent) from the dev face server-status. Registry-as-route enumeration — query the table instead of guessing paths.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "errors": []
+  },
+  {
+   "name": "endpoint.contract",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Read one endpoint's input/output flat schema verbatim; optional target=draft-2020-12|openapi-3.0 projects to JSON Schema via the single compiler projector (§2.4). Non-flat schema → ATR-107, never silent degrade.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "name": {
+      "type": "string"
+     }
+    },
+    "optProps": {
+     "target": {
+      "type": "string",
+      "enum": [
+       "draft-2020-12",
+       "openapi-3.0"
+      ]
+     }
+    }
+   },
+   "errors": [
+    "ATR-401",
+    "ATR-107"
+   ]
+  },
+  {
+   "name": "endpoint.impact",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Two-hop static impact chain for a contract key: contract → endpoints referencing it → frontend call sites (§2.5; same engine as 'atelier impact'). Navigation report, never a gate; computed statically, no dev face needed.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "contractKey": {
+      "type": "string"
+     }
+    },
+    "optProps": {
+     "root": {
+      "type": "string"
+     }
+    }
+   },
+   "errors": []
+  },
+  {
+   "name": "db.schema",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Database schema from the dev face server-status: tables with columns (name/type/notNull/pk) and indexes. Optional table filter focuses one table.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "table": {
+      "type": "string"
+     }
+    }
+   },
+   "errors": [
+    "ATR-401"
+   ]
+  },
+  {
+   "name": "db.migrations",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Migration state from the dev face server-status: head/applied/pending (reversibility view — irreversible down stays a human CLI act with --force).",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "errors": []
+  },
+  {
+   "name": "server.introspect",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Runtime introspection digest: server (startedAt/restarts/dbPath/host), live subscribers, endpoint count and the journal tail.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "errors": []
+  },
+  {
+   "name": "endpoint.call",
+   "face": "operation",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Invoke an app endpoint: POST <mount|/api>/<name> with JSON input. confirm tier applies (agent.confirm): deny = ATR-402 structured refusal; ask currently behaves as auto (honest boundary — no approval channel over stdio yet). Response body/status/latency returned; endpoint-level ATR errors stay in body as data.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "name": {
+      "type": "string"
+     }
+    },
+    "optProps": {
+     "input": {
+      "type": "object"
+     },
+     "mount": {
+      "type": "string"
+     }
+    }
+   },
+   "confirmDefault": "auto",
+   "errors": [
+    "ATR-402",
+    "ATR-401"
+   ]
+  },
+  {
+   "name": "endpoint.journal",
+   "face": "audit",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Endpoint audit journal from the dev face server-status (command entries, ok AND failed — what the agent changed and what it broke). Optional lines clamp on the tail (dev face caps at 50).",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "lines": {
+      "type": "number",
+      "min": 1,
+      "max": 50
+     }
+    }
+   },
+   "errors": []
   }
  ]
 }

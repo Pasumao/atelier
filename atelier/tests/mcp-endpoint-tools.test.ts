@@ -1,0 +1,414 @@
+/**
+ * mcp-endpoint-tools.test.ts — FS-6 L3 全栈工具族验收（FS-DESIGN §10.1，净增 8 工具）。
+ *
+ * 套路：本地 node:http 假 dev face（canned server-status JSON + POST /api/<name> 端点桩）
+ * → 环境变量指向它 → 动态 import mcp/server.mjs 直调 callTool 逐工具断言；
+ * 另一条 stdio e2e（spawn server.mjs 走 JSON-RPC）守卫入口形态与 tools/list 计数。
+ *
+ * 先红后绿锚点：endpoint.call 的 deny → ATR-402 路径（实现前工具未注册，必失败）。
+ * 静态链 fixture（src/contract.ts + endpoints + generated/api.ts + 调用点）按 gen-endpoint.mjs
+ * 扫描器文本形态构造——impactReport 消费的是 grep 级事实。
+ */
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import http from "node:http";
+import { spawn } from "node:child_process";
+import readline from "node:readline";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SERVER_MJS = path.resolve(HERE, "..", "mcp", "server.mjs");
+
+/* ---------- canned server-status（数据源契约：另一分支实现的 dev 面 host，按契约消费） ---------- */
+
+const CHAT_CONTRACT = { type: "object", reqProps: { msg: { type: "string", min: 1 } }, optProps: {} };
+const CHAT_OUTPUT = { type: "object", reqProps: { echo: { type: "string" } }, optProps: {} };
+const ITEM_CONTRACT = { type: "object", reqProps: { title: { type: "string", min: 1 } }, optProps: {} };
+
+const SERVER_STATUS = {
+  ok: true,
+  server: { startedAt: "2026-09-19T08:00:00.000Z", restarts: 2, dbPath: "app.db", host: "127.0.0.1:5173" },
+  endpoints: [
+    {
+      name: "chat.ask", kind: "query", live: true, hasContract: true, hasOutput: true,
+      invalidateKeys: ["key:chat.ask"], timeoutMs: 5000,
+      contract: CHAT_CONTRACT, output: CHAT_OUTPUT,
+    },
+    {
+      name: "items.create", kind: "command", live: false, hasContract: true, hasOutput: false,
+      emits: ["table:items"], idempotent: true, authType: "session", authRole: "editor",
+      contract: ITEM_CONTRACT, output: null,
+    },
+    { name: "health.check", kind: "query", live: false, hasContract: false, hasOutput: false, contract: null, output: null },
+  ],
+  db: {
+    tables: [
+      {
+        name: "items",
+        columns: [
+          { name: "id", type: "INTEGER", notNull: true, pk: true },
+          { name: "title", type: "TEXT", notNull: true, pk: false },
+        ],
+        indexes: [{ name: "items_title_idx", columns: ["title"], unique: false }],
+      },
+    ],
+    migrations: { head: { id: "m2", name: "add-items" }, applied: ["m1_init", "m2_add-items"], pending: ["m3_add-items-idx"] },
+  },
+  journal: [
+    { ts: "2026-09-19T08:01:00.000Z", name: "items.create", kind: "command", input: { title: "a" }, status: "ok", principal: "user-1", durMs: 3 },
+    {
+      ts: "2026-09-19T08:02:00.000Z", name: "items.create", kind: "command", input: { title: "" }, status: "failed", principal: "user-1", durMs: 1,
+      error: { code: "ATR-201", message: "契约校验失败：title", context: { component: "atelier-server" }, fix: "修正输入以匹配契约" },
+    },
+  ],
+  live: { subscriberCount: 3, endpoints: ["chat.ask"] },
+};
+
+/* ---------- 静态链 fixture（impact.mjs 消费的 grep 级事实） ---------- */
+
+function writeApp(root: string, confirm: string) {
+  fs.mkdirSync(path.join(root, "src", "server", "endpoints"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "generated"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "pages"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "atelier.config.json"),
+    JSON.stringify({ agent: { confirm }, tokens: {} }, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "contract.ts"),
+    `export const chatInputSchema = ${JSON.stringify(CHAT_CONTRACT, null, 2)};\n` +
+    `export const chatOutput = ${JSON.stringify(CHAT_OUTPUT, null, 2)};\n` +
+    `export const itemSchema = ${JSON.stringify(ITEM_CONTRACT, null, 2)};\n`,
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "server", "endpoints", "chat.ts"),
+    `import { defineQuery, defineCommand } from "../../../vendor/atelier/server";
+import { chatInputSchema, chatOutput, itemSchema } from "../../contract";
+
+export const chatAsk = defineQuery("chat.ask", {
+  contract: chatInputSchema,
+  output: chatOutput,
+  live: true,
+  handler: async (input: { msg: string }) => ({ echo: input.msg }),
+});
+
+export const itemsCreate = defineCommand("items.create", {
+  contract: itemSchema,
+  emits: ["table:items"],
+  idempotent: true,
+  handler: async () => ({ ok: true }),
+});
+`,
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "generated", "api.ts"),
+    `export const chatAskClient = Object.freeze({
+  name: "chat.ask" as const,
+  call: async (input: { msg: string }) => input,
+});
+export const itemsCreateClient = Object.freeze({
+  name: "items.create" as const,
+  call: async (input: { title: string }) => input,
+});
+`,
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "pages", "chat.atr.ts"),
+    `import { chatAskClient, itemsCreateClient } from "../generated/api";
+
+export async function send(msg: string) {
+  return chatAskClient.call({ msg });
+}
+export async function add(title: string) {
+  return itemsCreateClient.call({ title });
+}
+`,
+  );
+}
+
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-fs6-"));
+const APP_ROOT = path.join(TMP, "app-auto");
+const DENY_ROOT = path.join(TMP, "app-deny");
+const ASK_ROOT = path.join(TMP, "app-ask");
+writeApp(APP_ROOT, "auto");
+writeApp(DENY_ROOT, "deny");
+writeApp(ASK_ROOT, "ask");
+
+/* ---------- 假 dev face：server-status + 端点桩 ---------- */
+
+const hits: { method: string; urlPath: string; body: unknown }[] = [];
+let fake: http.Server;
+let baseUrl = "";
+
+function fakeHandler(req: http.IncomingMessage, res: http.ServerResponse) {
+  const urlPath = (req.url ?? "").split("?")[0];
+  if (req.method === "GET" && urlPath === "/__atelier/server-status") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(SERVER_STATUS));
+    return;
+  }
+  if (req.method === "POST") {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      let body: unknown = null;
+      try { body = raw ? JSON.parse(raw) : null; } catch { body = raw; }
+      hits.push({ method: "POST", urlPath, body });
+      if (urlPath === "/api/chat.ask") {
+        const input = (body ?? {}) as { msg?: string };
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ echo: input.msg ?? "" }));
+      } else if (urlPath === "/api/boom") {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ code: "ATR-500", message: "boom", fix: "看服务端日志" }));
+      } else {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ code: "ATR-404", message: `unknown endpoint ${urlPath}`, fix: "endpoint.list 查注册表" }));
+      }
+    });
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+}
+
+let callTool: (name: string, args?: unknown) => Promise<unknown>;
+
+beforeAll(async () => {
+  fake = http.createServer(fakeHandler);
+  await new Promise<void>((r) => fake.listen(0, "127.0.0.1", r));
+  const addr = fake.address() as { port: number };
+  baseUrl = `http://127.0.0.1:${addr.port}`;
+  process.env.ATELIER_DEV_URL = baseUrl;
+  process.env.ATELIER_PROJECT_ROOT = APP_ROOT;
+  ({ callTool } = await import("../mcp/server.mjs"));
+});
+
+afterAll(async () => {
+  await new Promise<void>((r) => fake.close(() => r()));
+  fs.rmSync(TMP, { recursive: true, force: true });
+});
+
+const atrOf = (e: unknown) => (e as { atr?: { code: string; message: string; fix: string } })?.atr;
+
+/* ---------- 逐工具验收 ---------- */
+
+describe("FS-6 endpoint.list", () => {
+  it("注册表摘要：name/kind/live/失效键/auth/timeout/idempotent；不带 schema 体（token 纪律）", async () => {
+    const res = (await callTool("endpoint.list")) as any;
+    expect(res.count).toBe(3);
+    const chat = res.endpoints.find((e: any) => e.name === "chat.ask");
+    expect(chat).toMatchObject({ kind: "query", live: true, invalidateKeys: ["key:chat.ask"], timeoutMs: 5000 });
+    const create = res.endpoints.find((e: any) => e.name === "items.create");
+    expect(create).toMatchObject({ kind: "command", idempotent: true, authType: "session", authRole: "editor", emits: ["table:items"] });
+    expect(chat.contract).toBeUndefined(); // schema 体归 endpoint.contract
+  });
+});
+
+describe("FS-6 endpoint.contract", () => {
+  it("缺省：FlatSchema 原样直读（contract + output）", async () => {
+    const res = (await callTool("endpoint.contract", { name: "chat.ask" })) as any;
+    expect(res.contract).toEqual(CHAT_CONTRACT);
+    expect(res.output).toEqual(CHAT_OUTPUT);
+  });
+
+  it("target=draft-2020-12：单管线投影（$schema/minLength/required）", async () => {
+    const res = (await callTool("endpoint.contract", { name: "chat.ask", target: "draft-2020-12" })) as any;
+    expect(res.target).toBe("draft-2020-12");
+    expect(res.contract.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(res.contract.properties.msg).toEqual({ type: "string", minLength: 1 });
+    expect(res.contract.required).toEqual(["msg"]);
+  });
+
+  it("target=openapi-3.0：OAS Schema Object（无 $schema）", async () => {
+    const res = (await callTool("endpoint.contract", { name: "chat.ask", target: "openapi-3.0" })) as any;
+    expect(res.contract).toEqual({ type: "object", properties: { msg: { type: "string", minLength: 1 } }, required: ["msg"] });
+    expect(res.contract.$schema).toBeUndefined();
+  });
+
+  it("无契约端点：null + 导航 note，不静默", async () => {
+    const res = (await callTool("endpoint.contract", { name: "health.check" })) as any;
+    expect(res.contract).toBeNull();
+    expect(res.output).toBeNull();
+    expect(String(res.note)).toContain("contract");
+  });
+
+  it("未知端点 → ATR-401（fix 列出已注册名）", async () => {
+    await expect(callTool("endpoint.contract", { name: "nope.dot" })).rejects.toMatchObject({
+      atr: { code: "ATR-401", fix: expect.stringContaining("chat.ask") },
+    });
+  });
+
+  it("未知 target → 结构化报错（可用值导航在 fix）", async () => {
+    await expect(callTool("endpoint.contract", { name: "chat.ask", target: "json-ld" })).rejects.toMatchObject({
+      atr: { code: "ATR-401", fix: expect.stringContaining("draft-2020-12") },
+    });
+  });
+});
+
+describe("FS-6 endpoint.impact（静态，不依赖 dev face）", () => {
+  it("两跳链路：契约 → 端点（roles）→ 前端调用点（file:line）", async () => {
+    const res = (await callTool("endpoint.impact", { contractKey: "chatInputSchema" })) as any;
+    expect(res.knownContract).toBe(true);
+    const ep = res.endpoints.find((e: any) => e.name === "chat.ask");
+    expect(ep).toBeTruthy();
+    expect(ep.roles).toContain("contract");
+    const site = res.callSites.find((c: any) => c.ident === "chatAskClient" && c.usage === "call");
+    expect(site.file).toBe("src/pages/chat.atr.ts");
+    expect(site.line).toBeGreaterThan(0);
+  });
+
+  it("未命中契约：导航报告照常返回（impact 是导航不是门禁）", async () => {
+    const res = (await callTool("endpoint.impact", { contractKey: "notAContract" })) as any;
+    expect(res.knownContract).toBe(false);
+    expect(res.endpoints).toEqual([]);
+    expect(res.notes.length).toBeGreaterThan(0);
+  });
+});
+
+describe("FS-6 db.schema / db.migrations / server.introspect / endpoint.journal", () => {
+  it("db.schema：表/列/索引全量 + table 过滤 + 未知表 ATR-401", async () => {
+    const all = (await callTool("db.schema")) as any;
+    expect(all.count).toBe(1);
+    expect(all.tables[0]).toMatchObject({ name: "items" });
+    expect(all.tables[0].columns[0]).toEqual({ name: "id", type: "INTEGER", notNull: true, pk: true });
+    expect(all.tables[0].indexes[0]).toMatchObject({ name: "items_title_idx", unique: false });
+    const one = (await callTool("db.schema", { table: "items" })) as any;
+    expect(one.table.name).toBe("items");
+    await expect(callTool("db.schema", { table: "nope" })).rejects.toMatchObject({
+      atr: { code: "ATR-401", fix: expect.stringContaining("items") },
+    });
+  });
+
+  it("db.migrations：head/applied/pending 原样", async () => {
+    const res = (await callTool("db.migrations")) as any;
+    expect(res.migrations.head).toEqual({ id: "m2", name: "add-items" });
+    expect(res.migrations.applied).toEqual(["m1_init", "m2_add-items"]);
+    expect(res.migrations.pending).toEqual(["m3_add-items-idx"]);
+  });
+
+  it("server.introspect：server/live/端点计数/journal 尾部", async () => {
+    const res = (await callTool("server.introspect")) as any;
+    expect(res.server).toMatchObject({ restarts: 2, dbPath: "app.db", host: "127.0.0.1:5173" });
+    expect(res.live).toEqual({ subscriberCount: 3, endpoints: ["chat.ask"] });
+    expect(res.endpointCount).toBe(3);
+    expect(res.journal.size).toBe(2);
+    expect(res.journal.tail.length).toBeLessThanOrEqual(10);
+  });
+
+  it("endpoint.journal：含失败条目 + failed 计数 + lines 尾部截取", async () => {
+    const res = (await callTool("endpoint.journal")) as any;
+    expect(res.count).toBe(2);
+    expect(res.failed).toBe(1);
+    expect(res.entries[1].status).toBe("failed");
+    expect(res.entries[1].error.code).toBe("ATR-201");
+    const tail = (await callTool("endpoint.journal", { lines: 1 })) as any;
+    expect(tail.count).toBe(1);
+    expect(tail.entries[0].status).toBe("failed");
+  });
+});
+
+describe("FS-6 endpoint.call（confirm 三档 + 真打假 face）", () => {
+  it("auto：POST <mount>/<name> JSON 体，响应体/状态/耗时原样返回", async () => {
+    hits.length = 0;
+    const res = (await callTool("endpoint.call", { name: "chat.ask", input: { msg: "hi" } })) as any;
+    expect(res).toMatchObject({ ok: true, status: 200, body: { echo: "hi" } });
+    expect(typeof res.durMs).toBe("number");
+    expect(hits[0]).toMatchObject({ method: "POST", urlPath: "/api/chat.ask" });
+    expect(hits[0].body).toEqual({ msg: "hi" });
+  });
+
+  it("deny：ATR-402 结构化拒绝（先红后绿锚点），fix 可行动", async () => {
+    process.env.ATELIER_PROJECT_ROOT = DENY_ROOT;
+    try {
+      await expect(callTool("endpoint.call", { name: "items.create", input: { title: "x" } })).rejects.toMatchObject({
+        atr: { code: "ATR-402", message: expect.stringContaining("endpoint.call"), fix: expect.stringContaining("atelier.config.json") },
+      });
+    } finally {
+      process.env.ATELIER_PROJECT_ROOT = APP_ROOT;
+    }
+    expect(hits.filter((h) => h.urlPath === "/api/items.create").length).toBe(0); // 拒绝必须发生在请求之前
+  });
+
+  it("ask：暂同 auto（诚实边界——stdio 无审批通道），放行且入桩", async () => {
+    process.env.ATELIER_PROJECT_ROOT = ASK_ROOT;
+    try {
+      const res = (await callTool("endpoint.call", { name: "chat.ask", input: { msg: "ask" } })) as any;
+      expect(res.status).toBe(200);
+    } finally {
+      process.env.ATELIER_PROJECT_ROOT = APP_ROOT;
+    }
+  });
+
+  it("端点级错误原样透传为数据（ok=false + body.code），不吞响应体", async () => {
+    const res = (await callTool("endpoint.call", { name: "boom" })) as any;
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(500);
+    expect(res.body.code).toBe("ATR-500");
+  });
+
+  it("非法端点名（路径注入）→ ATR-401", async () => {
+    await expect(callTool("endpoint.call", { name: "../etc" })).rejects.toMatchObject({ atr: { code: "ATR-401" } });
+  });
+});
+
+describe("FS-6 dev face 不在：四段式结构化错误（绝不静默空结果）", () => {
+  it("fetch 失败 → ATR-4xx-dev + fix 指路 pnpm dev", async () => {
+    const dead = http.createServer();
+    await new Promise<void>((r) => dead.listen(0, "127.0.0.1", r));
+    const deadPort = (dead.address() as { port: number }).port;
+    await new Promise<void>((r) => dead.close(() => r())); // 拿一个确定无监听的端口
+    const { callEndpointTool } = await import("../mcp/endpoint-tools.mjs");
+    await expect(
+      callEndpointTool("endpoint.list", {}, { devUrl: `http://127.0.0.1:${deadPort}`, devToken: "", projectRoot: APP_ROOT }),
+    ).rejects.toSatisfy((e: any) => {
+      expect(e.atr.code).toBe("ATR-4xx-dev");
+      expect(e.message).toContain("dev surface unreachable");
+      expect(e.atr.fix).toContain("pnpm dev");
+      return true;
+    });
+  });
+});
+
+/* ---------- stdio e2e：入口形态 + tools/list 计数 ---------- */
+
+describe("stdio e2e（spawn server.mjs）", () => {
+  it("initialize → tools/list 含 8 个新工具（25+8=33）→ tools/call endpoint.list", async () => {
+    const child = spawn(process.execPath, [SERVER_MJS], {
+      env: { ...process.env, ATELIER_DEV_URL: baseUrl, ATELIER_PROJECT_ROOT: APP_ROOT, ATELIER_TOOLSETS: "" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const rl = readline.createInterface({ input: child.stdout!, terminal: false });
+    const pending = new Map<number, (v: any) => void>();
+    rl.on("line", (line) => {
+      try {
+        const msg = JSON.parse(line);
+        const resolve = pending.get(msg.id);
+        if (resolve) { pending.delete(msg.id); resolve(msg); }
+      } catch { /* ignore */ }
+    });
+    const rpc = (id: number, method: string, params?: unknown) =>
+      new Promise<any>((resolve, reject) => {
+        pending.set(id, resolve);
+        child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+        setTimeout(() => (pending.has(id) ? reject(new Error(`rpc timeout: ${method}`)) : undefined), 10000);
+      });
+    try {
+      await rpc(1, "initialize", { protocolVersion: "2025-06-18" });
+      const list = await rpc(2, "tools/list");
+      const names: string[] = list.result.tools.map((t: any) => t.name);
+      expect(names.length).toBe(33);
+      for (const t of ["endpoint.list", "endpoint.contract", "endpoint.impact", "db.schema", "db.migrations", "server.introspect", "endpoint.call", "endpoint.journal"]) {
+        expect(names).toContain(t);
+      }
+      const call = await rpc(3, "tools/call", { name: "endpoint.list", arguments: {} });
+      expect(call.result.isError).toBe(false);
+      const payload = JSON.parse(call.result.content[0].text);
+      expect(payload.count).toBe(3);
+    } finally {
+      child.kill();
+    }
+  }, 20000);
+});

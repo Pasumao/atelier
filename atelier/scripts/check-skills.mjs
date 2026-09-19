@@ -40,13 +40,13 @@ const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const AGENT_SKILLS_FIELDS = new Set(["name", "description", "license", "allowed-tools", "metadata"]);
 const AGENT_SKILLS_NAME_MAX = 64; // 标准：name ≤64 字符 kebab-case
 const AGENT_SKILLS_DESC_MAX = 1024; // 标准：description ≤1024 字符
-const CLI_VERBS = new Set(["init", "dev", "review", "sync", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct", "checkpoint", "mcp", "skills", "compile", "bench", "tokens"]);
+const CLI_VERBS = new Set(["init", "dev", "review", "sync", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct", "checkpoint", "mcp", "skills", "compile", "bench", "tokens", "impact", "migrate"]);
 const FLAGS = new Set([
   "--ai", "--static", "--electron", "--update", "--no-gate", "--json",
   "--target", "--name", "--no-ai", "--open", "--root", "--out", "--stdout", "--quiet",
   "--keep", "--app", "--port", "--no-dsh", "--no-agents", "--no-mcp",
 ]);
-const TOOL_PREFIXES = /^(?:registry|tokens|state|ui|docs|checkpoint|test|snapshot|diff|audit|feedback|structure)\./;
+const TOOL_PREFIXES = /^(?:registry|tokens|state|ui|docs|checkpoint|test|snapshot|diff|audit|feedback|structure|endpoint|db|server)\./;
 const RUNTIME_API = new Set([
   "component", "$state", "$derived", "$effect", "html", "streamValue", "optimisticList",
   "store", "validateFlat", "validateUnknown", "expect", "verify", "initTokens",
@@ -190,7 +190,9 @@ for (const dir of skillDirs) {
   for (const m of stripCode(text).matchAll(/[A-Za-z][\w]*\.[a-z][\w]*/g)) { // 后缀放宽到 \w：ui.a11y 等含数字工具名；误配由 TOOL_PREFIXES 与扩展名排除兜底
     const name = m[0];
     if (!TOOL_PREFIXES.test(name)) continue;
-    if (/\.(json|md|ts|mjs)$/.test(name.slice(name.indexOf(".") + 1))) continue;
+    // 文件名排除：完整提及本身带扩展名（server.mjs / db.ts），或后两段形如 x.json（atelier.config.json）
+    if (/\.(json|md|ts|mjs|txt)$/.test(name)) continue;
+    if (/\.(json|md|ts|mjs|txt)$/.test(name.slice(name.indexOf(".") + 1))) continue;
     scannedTools++;
     if (!definedTools.has(name)) fail("E.tools", `${dir}/SKILL.md references tool "${name}" not in mcp-definitions.json`);
   }
