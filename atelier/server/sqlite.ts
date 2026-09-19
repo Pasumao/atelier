@@ -7,6 +7,9 @@
  * 诚实边界：本环境（Node 24，无 Bun）只能集成测试 node 路径；bun 路径以 API 形状
  * 对照 bun:sqlite 官方文档实现（Database/Statement.run/all/get 同名同义），待 Bun 环境
  * 回归（FS-3 剩余项挂 BACKLOG）。
+ * FS-7 加法（live 写侧失效的自动表名启发式，FS-DESIGN §4.1"薄层即可"）：写捕获槽
+ * （beginWriteCapture/endWriteCapture）——prepare 时轻量正则提取写目标表、run 真执行时记入
+ * 活跃捕获槽；纯加法不改既有四原语语义（无捕获槽时零开销直通）。
  */
 
 export type SqliteRunResult = { changes: number; lastInsertRowid: number | bigint };
@@ -66,6 +69,50 @@ interface RawStatement {
   get(...params: unknown[]): unknown;
 }
 
+/* ---------------- 写捕获槽（FS-7 live 失效广播的写侧自动表名启发式，FS-DESIGN §4.1"薄层即可"） ----------------
+ * 原理：prepare(sql) 时轻量正则提取写目标表（INSERT INTO / REPLACE INTO / UPDATE / DELETE FROM），
+ * run() 真执行时才记入当前活跃捕获槽（prepare 而未 run 不算写）；exec(sql) 同口径扫多语句。
+ * endpoints.ts 分发器在 command 分发期间 beginWriteCapture() 开槽，journal 入账后 endWriteCapture()
+ * 取表名合成 table:<name> 失效键交给 live 引擎广播（显式 emits 声明优先——有 emits 时捕获结果被忽略）。
+ * 诚实边界（宁多勿漏）：并发分发交叉时写记录并入**所有**活跃槽——多触发一次幂等重算无害，
+ * 漏发失效才是 bug；正则不识别 [方括号]/schema 限定名等冷门拼写——这些场景请用显式 emits 声明。 */
+
+export type WriteCapture = { tables: Set<string> };
+
+const WRITE_TABLE_RE =
+  /\b(?:INSERT\s+OR\s+[A-Za-z]+\s+INTO|INSERT\s+INTO|REPLACE\s+INTO|UPDATE(?:\s+OR\s+[A-Za-z]+)?|DELETE\s+FROM)\s+["'`]?([A-Za-z_][A-Za-z0-9_]*)["'`]?/gi;
+
+const captureStack: WriteCapture[] = [];
+
+/** 开一个捕获槽（command 分发期间；栈式——并发分发各持各的槽，写记录并入所有活跃槽） */
+export function beginWriteCapture(): WriteCapture {
+  const c: WriteCapture = { tables: new Set() };
+  captureStack.push(c);
+  return c;
+}
+
+/** 收槽并返回捕获到的表名（排序去重）；槽不存在（重复收/未开）静默幂等 */
+export function endWriteCapture(c: WriteCapture): string[] {
+  const i = captureStack.indexOf(c);
+  if (i >= 0) captureStack.splice(i, 1);
+  return [...c.tables].sort();
+}
+
+function extractWriteTables(sql: string): string[] {
+  const out: string[] = [];
+  for (const m of sql.matchAll(WRITE_TABLE_RE)) {
+    if (m[1]) out.push(m[1]);
+  }
+  return out;
+}
+
+function recordWrite(tables: string[]): void {
+  if (captureStack.length === 0 || tables.length === 0) return;
+  for (const c of captureStack) {
+    for (const t of tables) c.tables.add(t);
+  }
+}
+
 export async function openSqlite(path: string): Promise<SqliteDb> {
   const g = globalThis as { Bun?: unknown };
   if (g.Bun) {
@@ -74,8 +121,11 @@ export async function openSqlite(path: string): Promise<SqliteDb> {
     const db = new mod.Database(path);
     const handle: SqliteDb = {
       host: "bun",
-      prepare: (sql: string) => wrapStatement(db.prepare(sql)),
-      exec: (sql: string) => db.exec(sql),
+      prepare: (sql: string) => wrapStatement(db.prepare(sql), extractWriteTables(sql)),
+      exec: (sql: string) => {
+        recordWrite(extractWriteTables(sql));
+        db.exec(sql);
+      },
       close: () => db.close(),
       tx: <T,>(fn: (tx: SqliteDb) => T | Promise<T>) => runTx(handle, (sql: string) => db.exec(sql), fn),
     };
@@ -90,17 +140,21 @@ export async function openSqlite(path: string): Promise<SqliteDb> {
   }
   const handle: SqliteDb = {
     host: "node",
-    prepare: (sql: string) => wrapStatement(nodeDb.prepare(sql)),
-    exec: (sql: string) => nodeDb.exec(sql),
+    prepare: (sql: string) => wrapStatement(nodeDb.prepare(sql), extractWriteTables(sql)),
+    exec: (sql: string) => {
+      recordWrite(extractWriteTables(sql));
+      nodeDb.exec(sql);
+    },
     close: () => nodeDb.close(),
     tx: <T,>(fn: (tx: SqliteDb) => T | Promise<T>) => runTx(handle, (sql: string) => nodeDb.exec(sql), fn),
   };
   return handle;
 }
 
-function wrapStatement(raw: RawStatement): SqliteStatement {
+function wrapStatement(raw: RawStatement, writeTables: string[]): SqliteStatement {
   return {
     run: (...params: unknown[]) => {
+      recordWrite(writeTables); // prepare 而未 run 不算写；真执行时才记入活跃捕获槽
       const r = raw.run(...params);
       return { changes: Number(r.changes ?? 0), lastInsertRowid: (r.lastInsertRowid ?? 0) as number | bigint };
     },

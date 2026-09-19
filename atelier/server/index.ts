@@ -38,3 +38,5 @@ export {
   type MigrateStatus,
   type MigrateVerifyResult,
 } from "./migrate.ts";
+/* FS-7 live 引擎追加（只加不改——既有行不动，api-diff 盯兼容性） */
+export { LiveEngine, type LiveEngineHost, type LiveEngineOptions } from "./live.ts";
