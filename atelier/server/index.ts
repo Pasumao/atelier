@@ -44,3 +44,5 @@ export {
 export { LiveEngine, type LiveEngineHost, type LiveEngineOptions } from "./live.ts";
 /* FS-M2(m2d) 种子面追加（只加不改——既有行不动，api-diff 盯兼容性） */
 export { seedAll, SEEDS_TABLE_DDL, type SeedResult, type SeedStep } from "./seed.ts";
+/* FS-7 dev 托管追加（只加不改——既有行不动，api-diff 盯兼容性） */
+export { createNodeServer, serve, type NodeHostOptions, type WebHandler } from "./node-host.ts";
