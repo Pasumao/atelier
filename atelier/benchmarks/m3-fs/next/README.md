@@ -154,3 +154,49 @@ attempt 的 `data/` 并落盘 `m3fs-grade.json`。
    brief 已声明处理，不算评分器误判；
 5. `next dev`（webpack）为 R 类运行时形态；生产构建（`next build`/`next start`）在基线
    可用但评分未走（dev 对全部 attempt 同值，公平性不受影响；构建产物差异列为潜在威胁）。
+
+## 8. 参考解冻结记录（FS-10 收尾半批追加，2026-09-20）
+
+> 本节为收尾半批在文末追加（既有内容零改动）。正控参考解 ×3 入库后，protocol §4.3 的
+> "正控先于任何出数存在"前提在本臂闭环；`reference/` 的组织方式照抄 atelier 臂
+> （`overlay/` = 按 next 应用根相对路径摆放的解题后文件全集 + `solution.md` = 命令序列 /
+> 关键决策 / 逐条判据自查 / 诚实边界）。
+
+### 8.1 交付清单
+
+| 目录 | 起点变体 | overlay 内容 |
+|---|---|---|
+| [reference/task1-column-change/](reference/task1-column-change/) | baseline | 002 迁移对（up 侧与冻结种子同文）+ schema + 契约 + route + 组件 + 守卫测试 |
+| [reference/task2-live-reconcile/](reference/task2-live-reconcile/) | baseline | 契约（id 客户端生成钉死 number 正整数）+ `src/lib/notes-bus.ts`（订阅表模块级单例）+ SSE stream route + route 幂等 upsert + after() 失效触发 + 组件五步乐观对账 + 守卫测试 |
+| [reference/task3-fullstack-rescue/](reference/task3-fullstack-rescue/) | task3 变体 | 仅补 002 down 侧（up 侧逐字节不动 = D1 本体）+ task1∪task2 合成态（id 契约为可选——task1 语义 M4 省略式创建与 task2 语义 R2/R3 驱动的并集解）+ notes-bus/stream route/组件/守卫测试 |
+
+### 8.2 自证证据（2026-09-20，本 worktree 实跑，attempt 全部在系统临时目录，逐任务独立目录）
+
+| 步骤 | 命令 / 操作 | 结果 |
+|---|---|---|
+| 基线装配 ×2 | `setup-baseline-next.mjs --target <tmp>/base` 与 `--variant task3 --target <tmp>/t3base` | 双 exit 0：装配 + install + tsc ✓ + dev 起 + `GET /api/notes` == 种子 2 行；task3 变体另验"缺陷在位：verify 红（缺 down 侧）✓" |
+| task1 正控 | overlay → `grade-next.mjs --task task1-column-change` | exit 0，**PASS 8/8**（S/R/C/T 全类绿；首轮 M1 假红为参考解注释踩探针窗口，见 §8.3-1） |
+| task2 正控 | overlay → `grade-next.mjs --task task2-live-reconcile` | exit 0，**PASS 8/8**；恢复态复跑再 PASS 8/8（R2 时序两轮稳定） |
+| task3 正控 | task3 变体 + overlay → `grade-next.mjs --task task3-fullstack-rescue` | exit 0，**PASS 18/18**（task1∪task2 并集 + D1 sha 对表/往返数据面等价 + D2） |
+| 红证 ①（S 类对面） | task1 完成态删 `002_add_priority.down.sql` → 重评 | exit 1，**恰好 M2/M3/M8 三条红**（成对/影子干跑/全绿门），R/C 与其余判据不误伤 |
+| 红证 ②（R 类对面） | task2 完成态删除 route 的 after() 失效广播 → 重评 | exit 1，**恰好 R2/R3 两条红**（写后无推送/订阅保持失效），S/C 与其余判据不误伤 |
+
+### 8.3 参考解实跑沉淀的判据观察（评审输入，非本批改动）
+
+1. **task1 M1 探针窗口脆弱**：M1 从 schema 文本第一个 "priority" 出现处切 220 字符做
+   integer/notNull/default 三要素正则——参考解首版把 "priority" 一词写在列声明上方的
+   注释里，窗口被注释消耗 → 假红（修正 = 注释避开该词）。属实现细节脆弱性而非语义错；
+   是否回填转译件陷阱节由评审裁决。
+2. **task1 M2 实现口径严于 brief 文面**：brief 只要求"新成对迁移 + 001 零改动"，实现
+   （migration002Check）还以冻结 manifest 对表 002 up 侧 sha256——002 up 内容实际被钉死。
+   参考解按种子同文处理无障碍；语义等价但字节不同的 up 侧会被判红，提请评审确认口径。
+3. **R2 窗口与 after()**：写侧若在 handler 内同步广播，帧可能先于 POST 2xx 到达评分器
+   SSE 客户端而被 `from: t2resp` 窗口过滤 → 偶发假红（两本地 socket 到达序竞态）。
+   参考解用 next/server 内建 `after()`（响应落定后广播）取得稳定序——属框架正规解法、
+   非绕判据；"同步广播偶发假红"是否作为陷阱回填转译件（或评分器放宽为"最近一帧"
+   口径），由评审裁决。
+
+### 8.4 版本与依赖
+
+三份参考解**零新增依赖**（全部落在 §2.1 冻结钉版内；`after` 为 next 15.5.25 内建
+`next/server` 导出）。版本表与 §2.1 冻结口径无出入。
