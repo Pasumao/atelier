@@ -11,6 +11,11 @@
         "reqProps": { "title": { "type": "string" }, "level": { "type": "number" } },
         "optProps": { "note": { "type": "string" } }
       }
+    },
+    { "name": "LiveNotes", "file": "components/LiveNotes.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" } }
+      }
     }
   ],
   "primitives": [
