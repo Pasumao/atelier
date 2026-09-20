@@ -31,11 +31,12 @@ function writeFixtureFiles(root: string): void {
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(f, text, "utf8");
   };
-  w(
-    "src/contract.ts",
-    `import type { FlatSchema } from "./vendor/atelier/server/index.ts";
-
-// 契约单源——扁平字面量 + satisfies（字面量推断保持 + 契约形状校验）
+  // 契约单源追加（模板自带的 src/contract.ts 持有 app.* 契约——门禁追加 chat.* 而非覆写，
+  // 与 gen 产物「追加式永不重写」同一纪律；FlatSchema import 随模板自带）
+  fs.appendFileSync(
+    path.join(root, "src", "contract.ts"),
+    `
+// —— 门禁追加夹具（chat.*）：契约单源——扁平字面量 + satisfies（字面量推断保持 + 契约形状校验）——
 export const chatInputSchema = {
   type: "object",
   reqProps: { chatId: { type: "number" }, content: { type: "string", min: 1 } },

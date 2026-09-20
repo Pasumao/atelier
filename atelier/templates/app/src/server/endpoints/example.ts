@@ -1,25 +1,14 @@
 /**
  * example.ts — starter 内置端点示例（FS-7 dev 托管最小全栈路径，零 db 依赖）。
  * app.ping：最简 query——无契约无状态，探活/冒烟用（端点面统一 POST，GET → ATR-311 405）。
- * app.echo：command 全形态演示——内联扁平输入契约（违规 → ATR-201 400）+ output 契约
+ * app.echo：command 全形态演示——输入契约（违规 → ATR-201 400）+ output 契约
  *   （dev 态校验，违规 → ATR-215）+ ctx.audit 业务备注（并入 command journal）。
  * 端点命名惯例：app. 前缀点分命名空间（同 gen endpoint 产物 chat.ask 形态）；
- * 注册去哪？见 ../main-server.ts 装配点。接 db 后契约挪 src/contract.ts 单源
+ * 注册去哪？见 ../main-server.ts 装配点。契约在 src/contract.ts 单源
  * （gen endpoint 扫描端点与契约常量，生成 src/generated/api.ts 类型化客户端）。
  */
-import { defineCommand, defineQuery, type FlatSchema } from "../../vendor/atelier/server/index.ts";
-
-/** app.echo 输入契约（决策 6 扁平 schema 单源；示例取内联形态，扩面后挪 src/contract.ts） */
-const echoInput = {
-  type: "object",
-  reqProps: { message: { type: "string", min: 1 } },
-} satisfies FlatSchema;
-
-/** app.echo 输出契约（§2.3）：客户端 FlatOf 投影 + dev 态运行时校验 + OpenAPI 响应 schema 三用 */
-const echoOutput = {
-  type: "object",
-  reqProps: { echoed: { type: "string" }, length: { type: "number" }, time: { type: "string" } },
-} satisfies FlatSchema;
+import { defineCommand, defineQuery } from "../../vendor/atelier/server/index.ts";
+import { echoInput, echoOutput } from "../../contract.ts";
 
 /** 探活端点：POST <mount>/app.ping（体缺省 {}）→ { ok: true, time } */
 export const ping = defineQuery("app.ping", {

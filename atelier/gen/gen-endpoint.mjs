@@ -60,6 +60,36 @@ function skipString(src, i) {
   return i;
 }
 
+/**
+ * 匹配平衡的 <…> 泛型类型实参段（defineCommand<Input, Output>(…) 的类型标注——
+ * 模板 example.ts / gen-compile-gate 的应用规范形态）。状态感知：字符串/行块注释/嵌套 <>
+ * 不误判，`=>`（箭头类型）不当闭合符；返回闭 > 下标，不闭合 = -1（诚实跳过该 match）。
+ * （与 export-openapi.mjs 同款——两扫描器同构同源修法，2026-09-20 泛型盲区红绿修复）
+ */
+export function matchAngle(src, openPos) {
+  let depth = 0;
+  let state = "code";
+  let q = "";
+  for (let i = openPos; i < src.length; i++) {
+    const c = src[i];
+    if (state === "str") {
+      if (c === "\\") { i++; continue; }
+      if (c === q) state = "code";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { state = "str"; q = c; continue; }
+    if (c === "/" && src[i + 1] === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
+    if (c === "/" && src[i + 1] === "*") { i += 2; while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++; continue; }
+    if (c === "<") { depth++; continue; }
+    if (c === ">") {
+      if (src[i - 1] === "=") continue; // => 箭头类型：不是层级闭合
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
 /** src[openPos] ∈ { ( [ { —— 返回配对闭括号下标（字符串/注释感知）；不配平 = -1 */
 export function matchDelim(src, openPos) {
   const closer = { "(": ")", "[": "]", "{": "}" }[src[openPos]];
@@ -207,10 +237,21 @@ export function* walkTsFiles(dir, depth = 0) {
 /** 扫一个端点源文件的 defineQuery/defineCommand 调用（扁平字面量形态） */
 export function scanEndpointSource(src) {
   const out = [];
-  const re = /\bdefine(Query|Command)\s*\(/g;
+  const re = /\bdefine(Query|Command)\b/g;
   for (let m; (m = re.exec(src));) {
     const kind = m[1] === "Query" ? "query" : "command";
     let i = m.index + m[0].length;
+    while (i < src.length && /\s/.test(src[i])) i++;
+    // 泛型标注形态 defineCommand<Input, Output>(…)（模板 example.ts / 门禁的应用规范形态）：
+    // 跳过平衡的 <…> 类型实参段再找 (——类型段不参与生成面，扁平字面量纪律不受影响
+    if (src[i] === "<") {
+      const closeAngle = matchAngle(src, i);
+      if (closeAngle < 0) continue; // 不闭合——诚实跳过（TS 本身编译不过）
+      i = closeAngle + 1;
+      while (i < src.length && /\s/.test(src[i])) i++;
+    }
+    if (src[i] !== "(") continue; // 形态不符——诚实跳过
+    i++;
     while (i < src.length && /\s/.test(src[i])) i++;
     if (src[i] !== '"' && src[i] !== "'" && src[i] !== "`") continue; // 非字面量名——诚实跳过
     const q = src[i];

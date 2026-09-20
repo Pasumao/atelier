@@ -41,9 +41,9 @@ class MElement {
   childNodes: AnyNode[] = [];
   parentNode: AnyNode = null;
   listeners = new Map<string, ((e: unknown) => void)[]>();
-  style: Record<string, string> & { setProperty: (k: string, v: string) => void } = {
+  style = {
     setProperty: (k: string, v: string) => this.setAttribute(k, v),
-  };
+  } as Record<string, string> & { setProperty: (k: string, v: string) => void };
   constructor(tag: string, type: "element" | "fragment" = "element") {
     this.tag = tag;
     this.type = type;
@@ -174,7 +174,7 @@ const { LiveNotes } = await import("./LiveNotes.atr.ts");
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 6; i++) {
     await new Promise((r) => setTimeout(r, 0));
-    await new Promise((r) => queueMicrotask(r));
+    await new Promise<void>((r) => queueMicrotask(() => r()));
   }
 };
 

@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { scanContracts, scanEndpoints, scanSpecIntents, generateApi, generateSkeletons, writeApi } from "../gen/gen-endpoint.mjs";
+import { scanContracts, scanEndpoints, scanEndpointSource, scanSpecIntents, generateApi, generateSkeletons, writeApi } from "../gen/gen-endpoint.mjs";
 import { impactReport } from "../gen/impact.mjs";
 
 const GEN_SCRIPT = fileURLToPath(new URL("../gen/gen-endpoint.mjs", import.meta.url));
@@ -106,6 +106,20 @@ describe("gen endpoint 生成器（§7.1-7.2：静态扫描 / api.ts / 骨架 / 
     expect(intents.find((i) => i.name === "chat.list")).toMatchObject({ kind: "query", live: true });
     expect(intents.find((i) => i.name === "auth.login")).toMatchObject({ kind: "command", live: false });
     expect(intents.some((i) => i.name === "fake.call")).toBe(false); // 段外行不收（## 边界生效）
+  });
+
+  it("扫描器：泛型标注形态 defineCommand<In, Out>(…) 必须被扫到（模板 example.ts 的应用规范形态，泛型≠盲区）", () => {
+    const src = `import { defineCommand, defineQuery } from "../../vendor/atelier/server/index.ts";
+export const echo = defineCommand<{ message: string }, { echoed: string; length: number; time: string }>("app.echo", {
+  contract: echoInput,
+  output: echoOutput,
+  handler: (input) => ({ echoed: input.message, length: 1, time: "" }),
+});
+export const ping = defineQuery("app.ping", { handler: () => ({ ok: true }) });
+`;
+    const eps = scanEndpointSource(src);
+    expect(eps.map((e) => e.name)).toEqual(["app.echo", "app.ping"]);
+    expect(eps[0]).toMatchObject({ kind: "command", contract: "echoInput", output: "echoOutput" });
   });
 
   it("api.ts 产物形态（§4.4）：name as const / POST 路径 / EventSource / 类型 import 自 contract + FlatOf / streamValue 自 vendor", () => {
