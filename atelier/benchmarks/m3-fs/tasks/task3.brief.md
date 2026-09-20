@@ -1,9 +1,11 @@
 # task3-fullstack-rescue — 加难组合：缺陷自救 + 全链贯通 + live 对账（三臂同一任务书 · 北极星层）
 
-> **草案 v1，待评审，未武装**（FS-10 设计先行稿；评分 harness 未实现，本任务书不可出数）。
-> 基线 = 协议 §2 预接线全栈应用的 **task3 变体**：setup 注入了一处**半途状态**——`002` 迁移
+> **v2（2026-09-20 评审）**——消歧记录：按参考解实做发现的歧义修订（详见文末"评审消歧清单"）；
+> 新增"评分驱动约定"节（评分 harness 按此驱动）；判据编号与语义不变。基线 = 协议 §2
+> 预接线全栈应用的 **task3 变体**：setup 注入了一处**半途状态**——`002` 迁移
 > 只有 up 侧且**已应用**（库已有 priority 列、schema.ts 已声明），down 侧缺失；端点与前端
-> **尚未**消费 priority，也没有 live/乐观对账。你的起点是一个带已知缺陷、迁移半途的应用。
+> **尚未**消费 priority，也没有 live/乐观对账。你的起点是一个带已知缺陷、迁移半途的应用
+> （attempt 已 `pnpm install`）。
 > 只描述目标状态；实现路径由你自己决定。**两处推送时序语义与 task2 相同（异步到达，
 > 轮询窗口断言）**。
 
@@ -24,7 +26,7 @@ task2 判据表（M1-M3、R1-R3、C1-C2），另加：
 
 | # | 判据 |
 |---|---|
-| D1 | 种子缺陷已修复而非绕过：`002` 迁移 up 侧文件内容与基线种子逐字节一致（sha256 对得上状态表）；down 侧存在且 `migrate down --to 001` → `migrate up` 往返后数据面与修复前等价；`migrate verify` exit 0 |
+| D1 | 种子缺陷已修复而非绕过：`002` 迁移 up 侧文件与基线注入件**逐字节一致**（口径：sha256(当前 up 侧字节) == `atelier_migrations` 表中 002 记录的 checksum == setup 注入件的 sha256——down 侧不在 checksum 口径内）；down 侧存在且 `migrate down --to 001` → `migrate up` 往返后数据面与修复前等价（口径：notes 行集（id/body/createdAt）一致，列存在性由 up/down 往返保证）；`migrate verify` exit 0 |
 | D2 | 全部完成态下 `struct check` exit 0（含数据契约层与 server 边界层）且应用 `pnpm test` 全绿 |
 
 ## 已知陷阱（真实边界取材，非虚构）
@@ -38,6 +40,32 @@ task2 判据表（M1-M3、R1-R3、C1-C2），另加：
   task2（ATR-314/321/311、真相源规则）相同，不重复罗列；
 - 边界注记（不要求做）：源码锚点回滚若跨迁移 head，联动规则是**先 `migrate down` 再
   rollback**（checkpoint 会拒绝并指路，绝不自动执行——决策 21-③）。
+
+## 评分驱动约定（评分 harness 按此驱动，三臂同值）
+
+- **C 类 DOM 钩子**：列表行携带 `data-note-id="<id>"`；待定行另带 `data-pending="true"`；
+  提交入口 = 一个文本 `<input>`（body）+ 一个提交按钮；回滚名单 = 带 `data-rollbacked` 的
+  元素，内容含被回滚 id；错误信息（含 fix 提示）DOM 可见；**priority 在行内可见文本中出现**。
+- **R 类场景形状**（mount=/api）：live 通道 = GET `/api/notes.list/live`，SSE 首连全量即时
+  （首帧不计推送窗口）；创建 = POST `/api/notes.create`，成功载荷
+  `{id:"<客户端id>", body:"..."}`，另带可选 `priority:0-9` 整数；**id = 客户端生成的正整数
+  （JSON number，如 Date.now()）**——基线 notes 表主键为 INTEGER（自增），字符串 id 无法
+  落库；违规载荷 `{id:"x", body:""}` → ATR-201 四段式；写后推送断言窗口 ≤1s（自 POST 收到
+  2xx 起计；task1/task2 同值）。
+- **attempt 口径**：attempt = `setup-baseline-atelier.mjs --variant task3` 产物（应用根目录，
+  已 `pnpm install`，dev.db 迁移/种子在账、002 已应用且 down 缺失）；评分前核验 D1 的
+  sha256 前提（RUNBOOK 红线：缺陷被提前修掉 = 该 run 作废）。基线含 runtime 单实例化 shim
+  （生成物与组件面同一 runtime 实例——否则信号跨实例不追踪，C 类评分假阴性）。
+
+## 评审消歧清单（v1→v2）
+
+1. **D1 校验口径落到可机检**：v1 的"与基线种子逐字节一致（sha256 对得上状态表）"歧义在
+   "基线种子"（易误读为数据库种子行）——v2 钉死三方一致：当前 up 侧字节 sha256 ==
+   atelier_migrations 的 002 checksum == setup 注入件 sha256；"数据面等价"落到行集口径。
+2. attempt 起点口径显式化（`--variant task3` 产物、已 install、评分前 sha256 前提核验）。
+3. 继承 task2 v2 的 id 类型钉死（number 正整数）与推送窗口起算点（本任务判据 = task1 ∪
+   task2，id/priority 载荷形状以本节"评分驱动约定"为单一口径）。
+4. 新增"评分驱动约定"节（DOM 钩子 + R 类载荷/窗口 + attempt 口径）。
 
 ## 产出布局（attempt 目录，相对路径）
 
