@@ -1,0 +1,10 @@
+{
+  "note": "基线冻结 manifest——grade-next 用它做 001 零改动（task1 M2）与 task3 D1 的 sha256 对表。由 setup-baseline-next.mjs --emit-manifest 从内嵌模板生成；改模板必须重新生成并评审（公平性红线）。",
+  "files": {
+    "drizzle/migrations/001_create_notes.up.sql": "e772e123bc39028fdb8245cc475d516d5396148c60ba75231ab32dd2d8953143",
+    "drizzle/migrations/001_create_notes.down.sql": "068c1c84be323a06b9266faa0bd9d65341b37f00a7bdbf08e056dd197c2cc888",
+    "drizzle/migrations/002_add_priority.up.sql": "5e0c10d7641769bc85623722c405c1d90effedf00d2ee0295a2216c5977333d5",
+    "drizzle/migrations/002_add_priority.down.sql": "a391f6aa065fe95fda806ae72b649e78601ef00c6f5227e7ef0c88d68a3298de",
+    "drizzle/seeds/001_seed_notes.sql": "624a1bf1be52de121df0fe3b2be9b86ba15a1f1fe19752aa0fd19681e8e17916"
+  }
+}
