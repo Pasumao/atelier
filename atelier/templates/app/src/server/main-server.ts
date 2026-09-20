@@ -14,10 +14,13 @@
  */
 import { EndpointRegistry, serve } from "../vendor/atelier/server/index.ts";
 import { echo, ping } from "./endpoints/example.ts";
+import { addNote, noteList } from "./endpoints/notes.ts";
 
 // 显式注册表（决策 18：无编译器魔法——端点一个一个 register，重复名 = ATR-313 直接红）
 const registry = new EndpointRegistry();
 registry.register(ping).register(echo);
+// FS-7 live 直通示例对：noteList（live query，SSE 订阅）+ addNote（command，emits 失效广播）
+registry.register(noteList).register(addNote);
 
 // 装配点（§3.2）：无 DI 容器，依赖在入口明文注入；不传 db = ctx.db 为 undefined（诚实呈现）。
 //

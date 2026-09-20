@@ -16,6 +16,7 @@ import {
 } from "./runtime";
 import { HelloCard } from "./components/HelloCard.atr.ts";
 import { ContractProbe } from "./components/ContractProbe.atr.ts"; // P1-9 契约路径演示
+import { LiveNotes } from "./components/LiveNotes.atr.ts"; // FS-7 live 直通 + §4.5 乐观对账演示
 
 initTokens(config as { tokens: Record<string, Record<string, string>> });
 
@@ -31,6 +32,14 @@ app.appendChild(probeSection);
 const validate = (schema: unknown, data: Record<string, unknown>) => validateFlat(schema as never, data);
 mountComponent(ContractProbe, { title: "契约 OK 实例", level: 2, note: "reqProps 齐全" }, probeSection, registry, validate);
 mountComponent(ContractProbe, { title: "契约违规实例（缺 reqProps: level）" } as never, probeSection, registry, validate);
+
+// FS-7 live 直通演示：streamValue + EventSource 手写直通（§4.4，与 gen endpoint 生成物同型）
+// + optimisticList 乐观对账（§4.5 协议）。server 面对端：src/server/endpoints/notes.ts
+//（app.notes live query + app.addNote command）；pnpm dev 已把 /api/* 托管到 server 子进程。
+const liveSection = document.createElement("section");
+liveSection.id = "live-demo";
+app.appendChild(liveSection);
+mountComponent(LiveNotes, { title: "Live Notes — live 直通 + 乐观对账" }, liveSection, registry, validate);
 
 // dev 状态桥（决策 7）：$state 图 → dev 面 → MCP `state.snapshot`。须在挂载后安装以捕获既有信号集。
 installStateBridge();
