@@ -346,6 +346,8 @@ FS-11 方向一致）。
 
 对账规则：live 推送是**真相源**，optimistic 状态只是其先行渲染；id 冲突时服务端值胜出。
 此协议写入 starter 模板示例（三元共置规格的 server 版示例），M3-FS 任务臂直接考它（§14.3）。
+**落地（2026-09-20，FS-M4 批）**：模板 `LiveNotes` 三元共置（.atr.ts/.atr.md/.atr.spec.ts）+
+`app.notes`/`app.addNote` 端点对（客户端 id 上行 + 幂等 upsert）即本协议 server 版示例。
 
 ### 4.6 诚实边界汇总
 
@@ -735,6 +737,14 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 - **api-diff 纳管**：openapi 面进 `.atelier/api-surface.json` 快照（决策 23-④ 服务端公共面的
   落地载体）——端点增删改 = 漂移可见，`--strict` 下新增也红（对外契约面从严）。
 
+> **落地注记（2026-09-20，FS-M4 批）**：golden 判据已机检化——`tests/openapi-golden.test.ts`：
+> 导出文档落盘 → 从文档逐 path×method 构造请求（扁平 schema→示例值生成器）→ 打 node-host
+> `serve()` 真实 server 全端点通（live 端点读 SSE 首 `data` 帧过输出契约）；漂移双红证 =
+> 端点集双向比对 + 篡改文档必填字段 → server ATR-201 显式断言（文档骗客户端也被抓）。
+> 本批顺手红绿修复：扫描器对 `define*<…>(…)` 泛型形态整端点漏导出（export-openapi 与
+> gen-endpoint 同款同修，matchAngle 平衡跳过）。诚实边界：auth 端点联测/journal 子进程
+> 内省/bun 宿主桥不在此测（各自挂账既有）。
+
 ---
 
 ## 14. 测试与验证矩阵
@@ -763,6 +773,15 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
   待设计：Next 或 SvelteKit remote functions——语料量与公平性权衡后定〕）；
 - 评分器开放协议对外可比（决策 21-④；Supabase Evals 先例）——评分器/任务书/RUNBOOK 三件
   开源化，口径注记纪律照旧（n、Wilson 区间限定语强制）。
+
+> **设计先行半落地（2026-09-20，`atelier/benchmarks/m3-fs/`）**：三臂协议书 v0.1 + 任务书
+> 草案×3 + RUNBOOK 骨架成稿（未武装，出数前置 = 执行半交付件 + 拍板项清零）。对照臂对表
+> 论证：建议 Next.js（live 对账须 agent 手工装配 = 检验「给协议 vs 给零件」；语料与官方
+> agent 工具链最强对照；SvelteKit remote functions 结构同构但语料截止薄、内建消解考点，
+> 留候补）〔议：D-F21〕。任务硬性构成新增**预接线全栈基线**（「改」须发生在已有链路上才
+> 考得到增量迁移与影响面——对 m3 init 产物直考的显式 setup 偏离）。评分开放协议细化：判据
+> 语义三臂全同的机械评分（S/R/C/T 类别表）、rubric 降诊断件〔议：D-F23〕、四角分离、pilot
+> 先行天花板护栏（Wave-7 教训成文）。
 
 ### 14.4 SPEC v0.2 全站段增补要点（FS 线后并入，此处立规格位）
 
@@ -969,6 +988,10 @@ FS-6 MCP 工具族（依赖 M2 注册表稳定）+ 2026-07-28 无状态对齐 + 
 | D-F18 | tsgo 双跑 | 类型守卫测试 tsc/tsgo 双跑钉住行为差 | ✅ 建议采纳（CI 条件作业） | S |
 | D-F19 | 表单渐进增强 | no-JS form 原语列 B 队不进 M2/M3（桌面一级分发下低优先） | ✅ 建议维持 B 队 | — |
 | D-F20 | ask 档审批接线 | MCP InputRequiredResult 多轮审批接 confirm=ask（历史诚实边界关闭） | ✅ 建议采纳（归 FS-6） | M |
+| D-F21 | M3-FS 对照臂选择 | 建议 Next.js（App Router+Server Actions+Drizzle/SQLite）：live 对账无内建原语 = 检验「给协议 vs 给零件」；语料与官方 agent 工具链最强对照；SvelteKit 留候补 | 待拍板（m3-fs/protocol.md §臂设计） | — |
+| D-F22 | M3-FS 判据阈值 | 相对 ≥+15pt 为主 + 绝对 ≥60% 副之（Wave-7 天花板教训：相对差可为 0 而绝对口径仍可判） | ✅ 建议照此 | — |
+| D-F23 | rubric 定位降级 | 盲评 rubric 从 pass 判定降为诊断件（修正 m3 机械/主观评分不对称的已知偏置） | ✅ 建议照此 | — |
+| D-F24 | task3 考点叠加 | 种子缺陷自救（ATR-331/332 分层）为基础考点；gen auth 变体列观察位，执行半定 | 执行半定 | — |
 
 ---
 
