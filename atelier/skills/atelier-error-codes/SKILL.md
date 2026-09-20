@@ -53,6 +53,7 @@ description: Atelier error code reference. ATR-1xx compile / 2xx contract / 3xx 
 |---|---|---|---|
 | ATR-401 | Component not registered in registry | `<ModelCard/>` but file not imported | Import the component file; verify `opts.name` (pass explicitly — esbuild may rename fn) |
 | ATR-402 | MCP operation denied by confirm tier | `rollback` under `deny` | Raise tier in `atelier.config.json agent.confirm`, or run CLI with human approval |
+| ATR-403 | Dev-hosted server face unavailable (not hosted / handshake pending / hot-restarting / child connection refused — proxied as HTTP 503) | `fetch /api/...` while the server child is restarting, crashed, or hosting was skipped | Read the `[server] ` prefixed console lines for the child's own error (EADDRINUSE → free the port or change the app's server `port` in atelier.config.json); ensure `src/server/main-server.ts` exists and Node ≥ 22.6; retry shortly — hot restarts recover on their own |
 | ATR-4xx-dev | Dev server not running / port busy | MCP tools unavailable | `atelier dev` (tools live with dev lifecycle) |
 
 > New codes: register here first + in `docs/SPEC`; errors without a code entry are developer bugs.
