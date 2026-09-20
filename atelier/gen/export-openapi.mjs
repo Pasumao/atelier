@@ -10,6 +10,9 @@
  * stringArrayOf/matchDelim/walkTsFiles 加法导出，gen-endpoint 行为零改动、生成产物字节不变）。
  * 本文件自己的 define* walk 提取 OpenAPI 需要的超集元数据（auth/restful/timeoutMs 值），
  * live/invalidate/emits/idempotent 语义与 scanEndpointSource 同构（同一原语、同一测试钉住）。
+ * 泛型标注形态 defineCommand<Input, Output>(…)（模板 example.ts / gen-compile-gate 的应用
+ * 规范形态）与裸调用形态 defineCommand(…) 都认——golden 机检（tests/openapi-golden.test.ts）
+ * 先红后绿钉住：泛型形态曾整端点漏导出（文档漏端点 = naive 文档驱动的机检盲区）。
  *
  * 契约取值：src/contract.ts 契约单源（`export const X = {…}` 形态，兼容 `: FlatSchema =` 注解
  * 与 `satisfies FlatSchema` 后缀）——纯文本扫描 + parseLiteral 字面量解析（gen-db.mjs 同款纪律：
@@ -186,7 +189,36 @@ export function scanContractSchemas(root) {
 
 /* ---------- ② 端点文件扫描（超集元数据：auth/restful/timeoutMs 值） ---------- */
 
-const DEFINE_RE = /\bdefine(Query|Command)\s*\(/g;
+const DEFINE_RE = /\bdefine(Query|Command)\b/g;
+
+/**
+ * 匹配平衡的 &lt;…&gt; 泛型类型实参段（defineCommand&lt;Input, Output&gt;(…) 的类型标注——
+ * 模板 example.ts / gen-compile-gate 的应用规范形态）。状态感知：字符串/行块注释/嵌套 &lt;&gt;
+ * 不误判，`=>`（箭头类型）不当闭合符；返回闭 &gt; 下标，不闭合 = -1（诚实跳过该 match）。
+ */
+function matchAngle(src, openPos) {
+  let depth = 0;
+  let state = "code";
+  let q = "";
+  for (let i = openPos; i < src.length; i++) {
+    const c = src[i];
+    if (state === "str") {
+      if (c === "\\") { i++; continue; }
+      if (c === q) state = "code";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { state = "str"; q = c; continue; }
+    if (c === "/" && src[i + 1] === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
+    if (c === "/" && src[i + 1] === "*") { i += 2; while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++; continue; }
+    if (c === "<") { depth++; continue; }
+    if (c === ">") {
+      if (src[i - 1] === "=") continue; // => 箭头类型：不是层级闭合
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
 
 /** 数字值文本解析（timeoutMs：允许 10_000 数值分隔符；非数字字面量 → 显式错） */
 function parseNumberMeta(valueText, what) {
@@ -226,6 +258,17 @@ export function scanOpenApiEndpoints(src) {
   for (let m; (m = DEFINE_RE.exec(src));) {
     const kind = m[1] === "Query" ? "query" : "command";
     let i = m.index + m[0].length;
+    while (i < src.length && /\s/.test(src[i])) i++;
+    // 泛型标注形态 defineCommand<Input, Output>(…)（模板/门禁的应用规范形态）：跳过平衡的
+    // <…> 类型实参段再找 (——类型段不参与文档投影，扁平字面量纪律不受影响
+    if (src[i] === "<") {
+      const closeAngle = matchAngle(src, i);
+      if (closeAngle < 0) continue; // 不闭合——诚实跳过（TS 本身编译不过）
+      i = closeAngle + 1;
+      while (i < src.length && /\s/.test(src[i])) i++;
+    }
+    if (src[i] !== "(") continue;
+    i++;
     while (i < src.length && /\s/.test(src[i])) i++;
     if (src[i] !== '"' && src[i] !== "'" && src[i] !== "`") continue; // 非字面量名——诚实跳过（同 gen-endpoint）
     const q = src[i];
