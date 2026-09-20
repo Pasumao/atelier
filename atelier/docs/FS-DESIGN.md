@@ -681,6 +681,21 @@ review UI 的 server 位；`/__atelier/server-status`（JSON：journal 尾部/li
   （决策 16 事故记录）不允许重演）；
 - SQLite dev 库路径约定：`.atelier/dev.db`（gitignore；`--prod-db <path>` 覆盖位）。
 
+> **落地（2026-09-20，dev 托管批）**：形态细化为 dev 插件父进程托管 + **子进程隔离**（spawn
+> `src/server/main-server.ts` 直跑 .ts——Node ≥23.6 原生 strip-types，<22.6 诚实告警跳过；
+> 子进程隔离即上条 watch 要求的 SQLite 句柄隔离，server 面重启不牵连 Vite）。协议面：
+> ① 就绪握手 `ATELIER_SERVER_READY {"port":N}`——stdout 恰一行，框架 `serve()` 单源打印，
+>   应用/监督器/测试三方同源；② env 三件 `ATELIER_SERVER_PORT`（缺省 5174，0=自动）/
+>   `ATELIER_SERVER_MOUNT`（缺省 /api）/`ATELIER_DB_PATH`（缺省 .atelier/dev.db）；
+> ③ `<mount>/*` 经 Vite 中间件流式反代（SSE live 端点靠不缓冲自然直通；未就绪 503+ATR-403；
+>   固定端口被占子进程诚实退出不静默换口——固定端口的意义就是可配置性）；
+> ④ 热重启 debounce 150ms，SIGTERM 1.5s 兜底 SIGKILL；vite close 双路径幂等收尾。
+> 框架单源：`server/node-host.ts`（createNodeServer/serve——D-F14 `atelier build --target=node`
+> 启动壳同用）；`dev/dev-server-host.mjs`（监督器，init vendor 四件之一）。模板示范
+> `src/server/main-server.ts` 装配点 + app.ping/app.echo（init 即跑全栈，db 是 opt-in 注释指路）。
+> 诚实边界：Windows kill=即终止（优雅关停兜底窗口形同保障）；WebSocket 升级不代理（live 走
+> SSE）；请求体缓冲读取（JSON 端点为主）；Bun.serve 桥随 Bun 宿主路径一并挂账。
+
 ### 11.2 review 扩展（L5）
 
 - 迁移时间轴：migration 历史 + checkpoint head 对齐状态（"这个锚点在 schema 哪个版本"可答）；

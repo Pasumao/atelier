@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-19T11:08:51.103Z",
-  "root": "m3b-openapi",
+  "generatedAt": "2026-09-20T04:36:55.767Z",
+  "root": "Agentic",
   "layout": "framework",
   "surfaces": {
     "runtime-exports": [
@@ -320,10 +320,31 @@
         "id": "checkpoint.source_rollback"
       },
       {
+        "id": "db.migrations"
+      },
+      {
+        "id": "db.schema"
+      },
+      {
         "id": "diff.report"
       },
       {
         "id": "docs.search"
+      },
+      {
+        "id": "endpoint.call"
+      },
+      {
+        "id": "endpoint.contract"
+      },
+      {
+        "id": "endpoint.impact"
+      },
+      {
+        "id": "endpoint.journal"
+      },
+      {
+        "id": "endpoint.list"
       },
       {
         "id": "feedback.read"
@@ -336,6 +357,9 @@
       },
       {
         "id": "registry.list_components"
+      },
+      {
+        "id": "server.introspect"
       },
       {
         "id": "snapshot.diff"

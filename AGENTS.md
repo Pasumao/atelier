@@ -15,8 +15,8 @@
 | `atelier/gen/` | FS-M2 生成器族（产物显式 import 闭合 + regen 字节幂等 + 纯文本扫描禁 TS 解析器）：`gen-db.mjs`（schema.ts → tables/crud + 迁移骨架 + seeds 示例，追加式永不重写已应用迁移）、`gen-endpoint.mjs`（端点定义 → src/generated/api.ts 类型化客户端 + specs 意图段可编译骨架）、`gen-auth.mjs`（M2-d：users+sessions 表契约/迁移对/auth.ts 会话原语（scrypt 差异锁死单文件）/auth 端点三件套/cookie.ts）、`export-openapi.mjs`（FS-9：端点面 → openapi-3.0.3 文档，契约经 §2.4 投影器）、`impact.mjs`（契约→端点→调用点两跳影响面导航）。经 `atelier gen db\|endpoint\|auth` / `atelier export openapi` / `atelier impact` 接线。 |
 | `atelier/compiler/` | 编译器（P0-2）：`dump.mjs`（②：.atr.ts → 模板 AST JSON，与解释器同一解析器）+ `codegen.mjs`（③：AST → 零 import 静态 effect 图模块）+ `project-json.mjs`（FS-9 §2.4：FlatSchema → JSON Schema draft-2020-12 / openapi-3.0 单管线投影器，超扁平能力 = ATR-107 显式 throw）。产物经 `registerCompiled` 注册后该组件走零 tokenize 快路径（语义与解释器同源，golden DOM diff 在 tests/codegen.test.ts）。 |
 | `atelier/benchmarks/m3/` | M3 三臂对照实验台（P0-3）：protocol.md（noskill/skill/react × 首遍正确率）+ 6 任务书（task1-3 冒烟正控层 + task4-6 加难层：流式 keyed each / 跨组件事务 / token 纪律）+ grade.mjs 评分器（acceptance harness，正控参考解在 reference/）+ report.mjs §7 出数 + RUNBOOK.md 逐臂出数操作卡。改评分器后必跑六正控回归。 |
-| `atelier/dev/` | dev 面框架件：`atelier-dev-plugin.mjs`（Vite 插件，/__atelier/* 查询/桥接/审计/token 门禁/SSE 下行）、`dev-screenshot.mjs`（CDP 无头截图）、`gen-tailwind-theme.mjs`（决策 16 token→@theme AOT）、`probe-mount.mjs`（挂载诊断探针，PROBE_URL 可换目标）。init 时 vendor 进应用 `scripts/`。 |
-| `atelier/tests/` | runtime 单测（vitest，<!--@num:tests-->353<!--@/--> 用例：内核/契约/表达式 fuzz/codegen golden DOM 对拍/F-2 静态依赖差分对拍/桥接/HMR/token DTCG/mcp-confirm 闸/server v2 端点面/live SSE 引擎/db 数据契约/迁移器/种子/checkpoint 联动/gen-db/gen-endpoint/gen-auth/openapi 投影与导出/struct 八层守卫；M3 评分 harness 无 env 时整体 skip）。 |
+| `atelier/dev/` | dev 面框架件：`atelier-dev-plugin.mjs`（Vite 插件，/__atelier/* 查询/桥接/审计/token 门禁/SSE 下行）、`dev-server-host.mjs`（FS-7 server 面托管监督器：spawn `src/server/main-server.ts` + 握手 + `/api/*` 反代 + watch 热重启）、`dev-screenshot.mjs`（CDP 无头截图）、`gen-tailwind-theme.mjs`（决策 16 token→@theme AOT）、`probe-mount.mjs`（挂载诊断探针，PROBE_URL 可换目标）。init 时 vendor 进应用 `scripts/`。 |
+| `atelier/tests/` | runtime 单测（vitest，<!--@num:tests-->374<!--@/--> 用例：内核/契约/表达式 fuzz/codegen golden DOM 对拍/F-2 静态依赖差分对拍/桥接/HMR/token DTCG/mcp-confirm 闸/server v2 端点面/live SSE 引擎/db 数据契约/迁移器/种子/checkpoint 联动/gen-db/gen-endpoint/gen-auth/openapi 投影与导出/struct 八层守卫；M3 评分 harness 无 env 时整体 skip）。 |
 | `atelier/templates/app/` | 应用 starter 模板：vite.config / index.html / atelier.config.json（token SSOT）/ src/main.ts + HelloCard 与 ContractProbe 三元共置示例（.atr.ts + .atr.md + .atr.spec.ts）/ manifest.json / llms.txt / atelier-ui.css recipe / styling-discipline + state-discipline 守卫测试。`atelier init` 以此组装自包含应用（specs/ 骨架含 guardrails.md 常驻负例）。 |
 | `atelier/mcp/` | stdio MCP Server（<!--@num:tools-->33<!--@/--> 工具单源生成，live 工具需一个运行中的应用 dev 面）。 |
 | `atelier/skills/` | 多工具兼容技能包（8 个 kebab-case 目录包）。 |
@@ -29,7 +29,7 @@
 | 场景 | 命令 |
 |---|---|
 | 脚手架新应用 | `node atelier/cli.mjs init --target <dir> --name <Name>`（cd && pnpm install && pnpm dev 即跑） |
-| 启动应用 dev server | 应用目录下 `pnpm dev`（或 `atelier dev`；http://127.0.0.1:5173，strictPort） |
+| 启动应用 dev server | 应用目录下 `pnpm dev`（或 `atelier dev [--prod-db <path>]`；http://127.0.0.1:5173，strictPort）。dev 面同时托管 server 面：http://127.0.0.1:5174（缺省，atelier.config.json `server.port` 可配，0=自动），`/api/*` 经 Vite 代理，`src/server/**` 变更热重启 |
 | 框架 runtime 测试 | `atelier/` 目录下 `pnpm test`（vitest；用例数见根 README 标记位） |
 | 编译应用组件（②→③） | `node atelier/compiler/dump.mjs --root <appDir>` 然后 `node atelier/compiler/codegen.mjs --ast <appDir>/.atr/ast`（产物 .atr/compiled/<Component>.mjs，应用侧 registerCompiled 接入） |
 | 应用测试（契约/样式守卫） | 应用目录下 `pnpm test` |

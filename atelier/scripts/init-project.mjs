@@ -101,7 +101,7 @@ fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 /* trust guard (STRUCTURE-RULES): inviting agents in requires isolating machine noise BEFORE first commit */
 const gitignore = path.join(target, ".gitignore");
 if (!fs.existsSync(gitignore)) {
-  fs.writeFileSync(gitignore, ["node_modules/", "dist/", ".atelier/dev-token", ".atelier/audit.jsonl", ".atr/snapshots/current.png", "*.log", ".debug*"].join("\n") + "\n");
+  fs.writeFileSync(gitignore, ["node_modules/", "dist/", ".atelier/dev-token", ".atelier/audit.jsonl", ".atelier/dev.db", ".atr/snapshots/current.png", "*.log", ".debug*"].join("\n") + "\n");
 }
 
 /* report */
