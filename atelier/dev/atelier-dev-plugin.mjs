@@ -21,6 +21,7 @@
  */
 import { createRequire } from "node:module";
 import { capturePagePersistent as capturePage, captureA11yPersistent } from "./dev-screenshot.mjs";
+import { createServerSupervisor, resolveServerConfig } from "./dev-server-host.mjs";
 
 /** P2-4 agent 体检：UA 启发式分类（Astro 7 模式借鉴）。诚实边界：启发式可被伪造——
  * 面向的是检视而非鉴权；页面桥 SSE 连接自报 UA 是最可靠的信号（MCP 工具链调用无 UA）。 */
@@ -53,6 +54,8 @@ export function atelierDevPlugin() {
   let latestBridgeState;
   let screenshotInflight = null;
   let a11yInflight = null;
+  /* FS-7 dev 托管（§11.1）：server 面子进程监督器；挂在这层作用域以便 closeBundle 兜底收尾 */
+  let serverSupervisor = null;
 
   /* ---- P2-4 agent 体检台账：连接分类 + 最近错误（JSON 结构化，/__atelier/agent-health 出口） ---- */
   const agentLedger = {
@@ -93,6 +96,49 @@ export function atelierDevPlugin() {
       };
     },
     configureServer(server) {
+      /* ---------- FS-7 dev 托管（FS-DESIGN §11.1）：server 面 = 子进程 + <mount>/* 反向代理 ----------
+       * 中间件注册在 /__atelier 之前（两者路径不重叠，顺序只为清晰）；src/server/** 与 src/contract.ts
+       * 不在 Vite 前端模块图，watcher 事件只喂本监督器做热重启——前端 HMR 零牵连（决策 16
+       * full-reload 死循环前科不允许重演，实现注记）。入口不存在（纯前端应用）则诚实跳过，
+       * 插件其余功能照旧。 */
+      const serverEntry = path.join(ROOT, "src", "server", "main-server.ts");
+      if (fs.existsSync(serverEntry)) {
+        let appCfg = {};
+        try {
+          appCfg = JSON.parse(fs.readFileSync(path.join(ROOT, "atelier.config.json"), "utf-8"));
+        } catch { /* 读不到/坏 JSON → 全缺省（5174 / /api / .atelier/dev.db） */ }
+        const sc = resolveServerConfig(appCfg, process.env);
+        serverSupervisor = createServerSupervisor({ root: ROOT, port: sc.port, mount: sc.mount, dbPath: sc.dbPath, env: process.env });
+        server.middlewares.use(serverSupervisor.middleware());
+        serverSupervisor.start().catch((e) => console.error(`[atelier] ${e?.message ?? e}`));
+
+        // watch 热重启：change/add/unlink 过滤路径后 debounce 150ms → restart（决策 16 防抖口径）
+        const serverDirPrefix = path.join(ROOT, "src", "server") + path.sep;
+        const contractFile = path.join(ROOT, "src", "contract.ts");
+        let restartTimer = null;
+        const scheduleRestart = (p) => {
+          if (p !== contractFile && !String(p).startsWith(serverDirPrefix)) return;
+          clearTimeout(restartTimer);
+          restartTimer = setTimeout(() => {
+            serverSupervisor?.restart("src/server 面文件变更").catch((e) => console.error(`[atelier] ${e?.message ?? e}`));
+          }, 150);
+        };
+        try {
+          server.watcher.add([path.join(ROOT, "src", "server"), contractFile]);
+          server.watcher.on("change", scheduleRestart);
+          server.watcher.on("add", scheduleRestart);
+          server.watcher.on("unlink", scheduleRestart);
+        } catch { /* watcher 不可用（测试桩等）——热重启降级为手动，托管与代理照常 */ }
+
+        // 收尾主路径：vite httpServer close → stop()（stop 幂等，与 closeBundle 双路径防双杀）
+        server.httpServer?.once("close", () => {
+          serverSupervisor?.stop();
+          serverSupervisor = null;
+        });
+      } else {
+        console.log(`[atelier] dev 托管跳过：src/server/main-server.ts 不存在（纯前端应用——server 面不托管，dev 面其余功能照旧）`);
+      }
+
       server.middlewares.use(async (req, res, next) => {
         const rawUrl = req.url ?? "";
         if (!rawUrl.startsWith("/__atelier/")) return next();
@@ -431,6 +477,11 @@ loadState(); loadImages(); loadHistory();
         }
         next();
       });
+    },
+    closeBundle() {
+      // 收尾兜底：httpServer close 之外的路径（如 --force 关停）；stop 幂等，双调用安全
+      serverSupervisor?.stop();
+      serverSupervisor = null;
     },
   };
 }

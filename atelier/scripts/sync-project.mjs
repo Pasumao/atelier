@@ -6,8 +6,9 @@
  * 用本命令把 vendor 拉到当前时点：
  *   1. runtime/*.ts  → <target>/src/runtime/   全量覆盖（零依赖内核，应用零改动）
  *   1b. runtime+server → <target>/src/vendor/atelier/  全量覆盖（FS 线生成器产物 import 面）
- *   2. dev 面三件    → <target>/scripts/       全量覆盖（atelier-dev-plugin / dev-screenshot /
- *                                               gen-tailwind-theme；vite.config 从 ./scripts/ 引入）
+ *   2. dev 面四件    → <target>/scripts/       全量覆盖（atelier-dev-plugin / dev-server-host /
+ *                                               dev-screenshot / gen-tailwind-theme；vite.config 从
+ *                                               ./scripts/ 引入）
  *   3. specs/ 模板补种（_spec-template.md / guardrails.md，skip-if-exists——不碰用户文件）
  *
  * 不触碰：应用 src 组件 / tests / atelier.config.json / index.html / package.json——
@@ -62,8 +63,8 @@ for (const [srcDir, dstName] of [[RUNTIME, "runtime"], [path.join(PKG, "server")
   }
 }
 
-/* 2) dev 面三件全量覆盖（与 init-project 同一清单） */
-const DEV_FILES = ["atelier-dev-plugin.mjs", "dev-screenshot.mjs", "gen-tailwind-theme.mjs"];
+/* 2) dev 面四件全量覆盖（与 init-project 同一清单） */
+const DEV_FILES = ["atelier-dev-plugin.mjs", "dev-server-host.mjs", "dev-screenshot.mjs", "gen-tailwind-theme.mjs"];
 for (const f of DEV_FILES) fs.copyFileSync(path.join(DEV, f), path.join(target, "scripts", f));
 
 /* 3) specs 模板补种（skip-if-exists） */

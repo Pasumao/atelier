@@ -21,8 +21,10 @@ PROJECT
   atelier init --target <dir> --name <Name> [--no-ai]              FULL  scaffold a self-contained
                                                                          app from framework pieces
                                                                          (+ agent layer)
-  atelier dev                                                      MINI  run the app's dev server
-                                                                         (forwards to package.json dev script)
+  atelier dev [--prod-db <path>]                                   MINI  run the app's dev server
+                                                                         (forwards to package.json dev script;
+                                                                         --prod-db 以 ATELIER_DB_PATH 注入 server
+                                                                         面 dev 库，缺省 .atelier/dev.db)
   atelier build | package | e2e                                    STUB  spec'd, lands with compiler /
                                                                          @atelier/review packages (v0.2+)
   atelier sync [--target <dir>]                                    FULL  re-vendor runtime + dev face into
@@ -130,13 +132,24 @@ switch (cmd) {
   }
   case "dev": {
     // MINI: forward to the nearest package.json dev script (run inside your app dir)
+    // FS-7(dev-host)：--prod-db <path> → env ATELIER_DB_PATH 注入（dev 托管线缺省 .atelier/dev.db；
+    // 既有行为零变化：不带 flag 时 env 原样透传）
     if (!hasDevScript(process.cwd())) {
+      // 修复顺手账：die 第二参是 exit code，fix 文本须并入 msg（原两参误用会 process.exit(字符串) 抛栈）
       die(
-        'error: no dev script here',
-        'fix: run inside an Atelier app dir (create one: atelier init --target . --name <Name>)',
+        'error: no dev script here\nfix: run inside an Atelier app dir (create one: atelier init --target . --name <Name>)',
+        2,
       );
     }
-    const c = spawn("pnpm", ["dev"], { stdio: "inherit", shell: true });
+    const devArgs = process.argv.slice(3);
+    const dbIdx = devArgs.indexOf("--prod-db");
+    let childEnv = process.env;
+    if (dbIdx >= 0) {
+      const prodDb = devArgs[dbIdx + 1];
+      if (!prodDb || prodDb.startsWith("--")) die("error: --prod-db requires a path argument", 2);
+      childEnv = { ...process.env, ATELIER_DB_PATH: prodDb };
+    }
+    const c = spawn("pnpm", ["dev"], { stdio: "inherit", shell: true, env: childEnv });
     c.on("exit", (code) => process.exit(code ?? 0));
     break;
   }
