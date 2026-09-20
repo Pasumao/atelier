@@ -1,0 +1,10 @@
+{
+  "task": "task2-live-reconcile",
+  "expectedFailIds": [
+    "M1",
+    "R1",
+    "R2",
+    "R3"
+  ],
+  "note": "服务端漏 live/emits 声明（组件完整）：M1 抓；/live 通道 404 → R1-R3 红；C 类走 mock 仍绿（客户端职责已尽）"
+}

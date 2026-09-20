@@ -1,0 +1,7 @@
+{
+  "task": "task1-column-change",
+  "expectedFailIds": [
+    "M6"
+  ],
+  "note": "正解但 api.ts 被手改（追加自编导出）——regen 全量重写即覆盖，字节比对抓（诚实注记：扁平契约叶子值变更不改变生成物字节，M6 的机检面 = 生成物手改与端点面陈旧）"
+}

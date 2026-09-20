@@ -1,0 +1,11 @@
+{
+  "task": "task1-column-change",
+  "expectedFailIds": [
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M8"
+  ],
+  "note": "正解缺 002 down 侧：up 被 ATR-331 拒（库无列）→ M2 成对/M3 干跑红，M4/M5 行为面连带红，M8 结构检查 DB_MIGRATION_PAIR 红；M7 客户端渲染不受牵连（预期仍绿）"
+}

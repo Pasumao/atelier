@@ -1,0 +1,8 @@
+{
+  "task": "task3-fullstack-rescue",
+  "expectedFailIds": [
+    "M3",
+    "D1"
+  ],
+  "note": "补的 down 是 DELETE FROM notes（合法 SQL、绕过语义）：down 后列仍在（M3）；往返后数据面不等价/重复加列（D1）"
+}

@@ -1,0 +1,11 @@
+{
+  "task": "task2-live-reconcile",
+  "expectedFailIds": [
+    "M1",
+    "M2",
+    "R1",
+    "R2",
+    "R3"
+  ],
+  "note": "正解但 emits 写成 notes（缺 table: 前缀）：内省 M1/M2 抓；server 注册期 ATR-314 退出 → R1-R3 连带红"
+}
