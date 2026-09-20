@@ -782,6 +782,20 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 > 考得到增量迁移与影响面——对 m3 init 产物直考的显式 setup 偏离）。评分开放协议细化：判据
 > 语义三臂全同的机械评分（S/R/C/T 类别表）、rubric 降诊断件〔议：D-F23〕、四角分离、pilot
 > 先行天花板护栏（Wave-7 教训成文）。
+>
+> **执行半落地（2026-09-20 集成批，主/子智能体 git worktree 协作四分支并行）**：D-F21~24
+> 按建议采纳（对照臂 = Next.js；判据阈值相对 ≥+15pt 为主 + 绝对 ≥60% 副之；rubric 降诊断件；
+> task3 v1 不叠加 gen auth 留观察位）。交付：基线装配脚本×2（atelier 臂含 task3 半途缺陷
+> 变体与 S10b runtime 单实例件；next 臂 drizzle/SQLite 同构 + manifest sha256 冻结）+
+> grade 评分器×2（S/T 直跑 + R=真实 server SSE 黑盒 × C=dom-shim/jsdom 对账；场景规格单一
+> 文档 `harness/scenario-spec.md` 三臂语义同文）+ atelier 臂正控参考解×3（overlay +
+> solution.md 判据自查表）+ 负控×7（冻结参考解 + 单点变异，negative-check 前置门失败集
+> 须与 manifest 恰好一致）+ report.mjs（n<5→N/A、两判据都报、Wilson 限定语强制）+ 任务书
+> 转译件×3 + brief v1→v2 评审消歧。集成认证：官方基线×参考解×评分器 正控 9/9+9/9+16/16
+> 全 PASS、负控 7/7 全红、report 冒烟两态、框架 380 绿 + 8 skip/check-skills/api-diff/
+> docs-numbers 全过。集成批顺手修三类真失配：EOL（autocrlf 检出 CRLF vs 生成物 LF——
+> .gitattributes 基准目录强制 LF + M6 比对归一）、task1 载荷语义（客户端 id 是 task2/task3
+> 对账考点、task1 保持服务端生成 id）、R1 期望集从库副本实读（种子行数不进判据）。
 
 ### 14.4 SPEC v0.2 全站段增补要点（FS 线后并入，此处立规格位）
 
@@ -988,10 +1002,10 @@ FS-6 MCP 工具族（依赖 M2 注册表稳定）+ 2026-07-28 无状态对齐 + 
 | D-F18 | tsgo 双跑 | 类型守卫测试 tsc/tsgo 双跑钉住行为差 | ✅ 建议采纳（CI 条件作业） | S |
 | D-F19 | 表单渐进增强 | no-JS form 原语列 B 队不进 M2/M3（桌面一级分发下低优先） | ✅ 建议维持 B 队 | — |
 | D-F20 | ask 档审批接线 | MCP InputRequiredResult 多轮审批接 confirm=ask（历史诚实边界关闭） | ✅ 建议采纳（归 FS-6） | M |
-| D-F21 | M3-FS 对照臂选择 | 建议 Next.js（App Router+Server Actions+Drizzle/SQLite）：live 对账无内建原语 = 检验「给协议 vs 给零件」；语料与官方 agent 工具链最强对照；SvelteKit 留候补 | 待拍板（m3-fs/protocol.md §臂设计） | — |
-| D-F22 | M3-FS 判据阈值 | 相对 ≥+15pt 为主 + 绝对 ≥60% 副之（Wave-7 天花板教训：相对差可为 0 而绝对口径仍可判） | ✅ 建议照此 | — |
-| D-F23 | rubric 定位降级 | 盲评 rubric 从 pass 判定降为诊断件（修正 m3 机械/主观评分不对称的已知偏置） | ✅ 建议照此 | — |
-| D-F24 | task3 考点叠加 | 种子缺陷自救（ATR-331/332 分层）为基础考点；gen auth 变体列观察位，执行半定 | 执行半定 | — |
+| D-F21 | M3-FS 对照臂选择 | 建议 Next.js（App Router+Server Actions+Drizzle/SQLite）：live 对账无内建原语 = 检验「给协议 vs 给零件」；语料与官方 agent 工具链最强对照；SvelteKit 留候补 | ✅ 采纳（2026-09-20 执行半批，protocol §1.1；换臂条款留痕） | — |
+| D-F22 | M3-FS 判据阈值 | 相对 ≥+15pt 为主 + 绝对 ≥60% 副之（Wave-7 天花板教训：相对差可为 0 而绝对口径仍可判） | ✅ 采纳（同批，report.mjs 两判据都报） | — |
+| D-F23 | rubric 定位降级 | 盲评 rubric 从 pass 判定降为诊断件（修正 m3 机械/主观评分不对称的已知偏置） | ✅ 采纳（同批） | — |
+| D-F24 | task3 考点叠加 | 种子缺陷自救（ATR-331/332 分层）为基础考点；gen auth 变体列观察位，执行半定 | ✅ 执行半裁定：v1 不叠加（判据面已足够大，auth 装配留观察位） | — |
 
 ---
 

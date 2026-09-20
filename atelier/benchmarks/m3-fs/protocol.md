@@ -1,14 +1,21 @@
 # M3-FS 全栈三臂对照实验协议（FS-10 · 设计先行稿 v0.1）
 
-> 状态：**设计稿，未武装**——本协议与 [tasks/](tasks/)、[RUNBOOK.md](RUNBOOK.md) 均为 FS-10
-> 设计先行半的产物；评分 harness、参考解（正控）、负控 fixtures、基线装配脚本**均未实现**，
-> 实现完成前本协议不可出数（武断出数 = Wave 纪律违规）。结构母本 = [../m3/protocol.md](../m3/protocol.md)
+> 状态：**执行半已武装（2026-09-20 集成批）**——本协议与 [tasks/](tasks/)、[RUNBOOK.md](RUNBOOK.md)
+> 的设计先行半交付件 + 执行半交付件（基线装配脚本×2、grade 评分器×2 + S/R/C/T 场景 harness×2、
+> atelier 臂正控参考解×3〔交叉认证 9/9+9/9+16/16〕、负控 fixtures×7〔negative-check 7/7 全红〕、
+> report.mjs、对照臂转译件×3）均已落地；出数仍须先过 RUNBOOK §5 前置门 + §4.4 样本量口径。
+> 拍板记录：D-F21 对照臂 = Next.js（按 §1.1 建议采纳，集成批落地；若 pilot 实证映射不成立，
+> 换臂 = 修订本协议留痕）；D-F22 判据阈值（相对 ≥+15pt 为主 + 绝对 ≥60% 副之）与 D-F23
+> （rubric 降诊断件）按建议采纳；D-F24 task3 v1 不叠加 gen auth（观察位保留，见 tasks/task3 尾注）。
+> 结构母本 = [../m3/protocol.md](../m3/protocol.md)
 > （三臂协议结构照抄，任务域全栈化）；规格出处 = `atelier/docs/FS-DESIGN.md` §14.3。
 > 立项最大假设（FS-10 专属，继承 m3 假设并全栈化）：**「契约单源 + 机器门禁 + 技能包能把
 > 跨端三处改动的首遍正确率抬到可区分于主流全栈栈的水平」**——本实验台把它变成可测量命题。
 > 诚实边界（照抄 m3 并扩两条）：①三臂的 agent 运行由人或独立 AI 会话按本协议逐臂执行，
 > 本仓库无法在会话内部可信地模拟"无技能代理"；②全栈任务含运行时行为判据（SSE/HTTP/DB 态），
-> 其评分 harness 与 m3 的 dom-shim 挂载式 harness 不是同一件东西——未实现即不可出数。
+> 其评分 harness 与 m3 的 dom-shim 挂载式 harness 不是同一件东西——已随执行半实现
+> （`grade.mjs` S/T 直跑 + `harness/acceptance.spec.ts` R=真实 server SSE 黑盒 × C=dom-shim
+> 对账；场景规格单一文档 = `harness/scenario-spec.md`，三臂语义同文）。
 
 ---
 
@@ -206,14 +213,17 @@ firstPass 判定输入（修正 m3 react 臂"机械 vs 主观"不对称偏置）
 
 ---
 
-## 7. 运行（全部未武装）
+## 7. 运行（已武装；逐臂操作卡 = RUNBOOK.md）
 
-    node atelier/benchmarks/m3-fs/grade.mjs --task task1-column-change --attempt <dir>   # 评一个 attempt（执行半实现）
-    node atelier/benchmarks/m3-fs/report.mjs --results atelier/benchmarks/m3-fs/results/runs.json  # 汇总出数 + §6 判定
+    node atelier/benchmarks/m3-fs/grade.mjs --task task1-column-change --attempt <dir>       # atelier 臂评分
+    node atelier/benchmarks/m3-fs/next/grade-next.mjs --task task1-column-change --attempt <dir>  # 对照臂评分
+    node atelier/benchmarks/m3-fs/negative-check.mjs --baseline <基线> --baseline-task3 <task3变体>  # 负控前置门
+    node atelier/benchmarks/m3-fs/report.mjs --results atelier/benchmarks/m3-fs/results/runs.json --tier formal  # 汇总出数 + §6 判定
 
-三臂 run 的逐步执行操作卡 = [RUNBOOK.md](RUNBOOK.md)（骨架已立，逐臂操作细节待 harness 落地后
-武装）。正控参考解（`reference/`）与负控 fixtures（`harness/fixtures/negative/`）由执行半补齐，
-**先于任何出数存在**。
+正控参考解（`reference/`＝atelier 臂已认证；`next/reference/`＝对照臂执行批收尾件）与
+负控 fixtures（`harness/fixtures/negative/`，`negative-check.mjs` 前置门）**先于任何出数存在**
+（2026-09-20 落地）。基线装配：`setup-baseline-atelier.mjs`（`--no-ai`/默认两臂形态 +
+`--variant task3` 缺陷注入）/ `next/setup-baseline-next.mjs`。
 
 ---
 
