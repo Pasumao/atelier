@@ -476,6 +476,25 @@ describe("export openapi 端到端（§13：paths / x-atelier / restful / 注记
 });
 
 describe("export-openapi 扫描器（复用 gen-endpoint 原语：超集元数据 / 契约字面量纪律）", () => {
+  it("泛型标注形态 defineCommand<Input, Output>(…)（模板 example.ts 规范形态）整提取——golden 先红后绿钉住", () => {
+    const src = `export const echo = defineCommand<{ message: string }, { echoed: string; time: string }>("app.echo", {
+  contract: s1,
+  output: s2,
+  live: { invalidate: ["table:messages"] },
+  timeoutMs: 10_000,
+  auth: { type: "session" },
+  handler: () => ({}),
+});
+export const call = defineCommand("app.call", { handler: () => ({}) });
+`;
+    const eps = scanOpenApiEndpoints(src);
+    expect(eps.map((e) => e.name)).toEqual(["app.echo", "app.call"]);
+    expect(eps[0]).toMatchObject({ kind: "command", contract: "s1", output: "s2", live: true, invalidate: ["table:messages"], timeoutMs: 10000, auth: { type: "session" } });
+    // 泛型段内的引号/箭头类型不干扰扫描（字符串字面量联合、箭头类型不当 <…> 闭合）
+    const tricky = `export const t = defineQuery<Input = { kind: "a" | "b" }, Fn = (x: string) => Promise<number>>("app.tricky", { handler: () => ({}) });`;
+    expect(scanOpenApiEndpoints(tricky).map((e) => e.name)).toEqual(["app.tricky"]);
+  });
+
   it("scanOpenApiEndpoints：name/kind/contract/output/live/invalidate/emits/idempotent/timeoutMs(10_000)/auth/restful 全提取", () => {
     const src = `export const a = defineQuery("x.y", {
   contract: s1,
