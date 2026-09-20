@@ -7,5 +7,5 @@
     "R2",
     "R3"
   ],
-  "note": "正解但 emits 写成 notes（缺 table: 前缀）：内省 M1/M2 抓；server 注册期 ATR-314 退出 → R1-R3 连带红"
+  "note": "底座 = task2 冻结参考解 overlay，变异 = emits 缺 table: 前缀：注册期 ATR-314 拒绝 → server 起不来 → R1-R3 连带红；M1/M2 内省抓。集成批重校准（原夹具引用自搓契约导出，已重建为冻结参考解派生）。"
 }

@@ -20,23 +20,32 @@ export const echoOutput = {
   reqProps: { echoed: { type: "string" }, length: { type: "number" }, time: { type: "string" } },
 } satisfies FlatSchema;
 
-/* ---------- notes.ts：notes.list / notes.create（M3-FS 基线链路） ---------- */
+/* ---------- notes 域：notes.list / notes.create（task1：priority 全链路贯通） ---------- */
 
-/** notes.create 输入契约：id 为客户端生成正整数（brief v2：JSON number，如 Date.now()——§4.5 对账前提）+ body 非空 */
+/** note 行契约（扁平 schema 单源）：notes 表行形状口径——notes.create 的输出契约直接引用
+ *  本常量（存什么返什么）。priority 列为 002 迁移新增（NOT NULL DEFAULT 0）→ 行内必有该字段。
+ *  数组元素级的结构契约 v1 不表（扁平红线：约束只挂叶子），列表行形状由 notes.list handler
+ *  单点构造保证。 */
+export const noteSchema = {
+  type: "object",
+  reqProps: {
+    id: { type: "number" },
+    body: { type: "string", min: 1 },
+    createdAt: { type: "number" },
+    priority: { type: "number" },
+  },
+} satisfies FlatSchema;
+
+/** notes.create 输入契约：body 非空（违规 → ATR-201 400）；priority 可省略、省略按 0，
+ *  传入须在 0-9（含）内——越界 = ATR-201；整数性由 handler 归一（Math.trunc，扁平 schema
+ *  无整数类型——最小约束挂契约、归一在边界）。id 由服务端生成（自增主键）。 */
 export const noteCreateInput = {
   type: "object",
-  reqProps: { id: { type: "number", min: 1 }, body: { type: "string", min: 1 } },
+  reqProps: { body: { type: "string", min: 1 } },
   optProps: { priority: { type: "number", min: 0, max: 9 } },
 } satisfies FlatSchema;
 
-/** notes.create 输出契约：回显存后的行（createdAt 服务端钟为准） */
-export const noteRowOutput = {
-  type: "object",
-  reqProps: { id: { type: "number" }, body: { type: "string" }, createdAt: { type: "number" }, priority: { type: "number" } },
-} satisfies FlatSchema;
-
-/** notes.list 输出契约（§2.3 扁平 schema）：顶层必须是对象，列表收在 notes 数组属性里；
- *  array 元素为对象的元素级结构契约 v1 不表——元素结构由 notes.ts 单点构造保证。 */
+/** notes.list 输出契约：顶层必须是对象（checkEndpointOutput 红线），列表收在 notes 数组属性里 */
 export const noteListOutput = {
   type: "object",
   reqProps: { notes: { type: "array" } },

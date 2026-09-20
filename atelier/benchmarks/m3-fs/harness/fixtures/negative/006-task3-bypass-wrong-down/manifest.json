@@ -4,5 +4,5 @@
     "M3",
     "D1"
   ],
-  "note": "补的 down 是 DELETE FROM notes（合法 SQL、绕过语义）：down 后列仍在（M3）；往返后数据面不等价/重复加列（D1）"
+  "note": "底座 = task3 缺陷变体基线，变异 = 补的 down 是 DELETE FROM notes（合法 SQL、绕过语义）：down 后列仍在（M3）；往返后数据面不等价/重复加列（D1）。down 文件名 stem 已对齐官方 002_add_priority（原 002_notes_priority 与官方 up 不配对）。集成批重校准。"
 }

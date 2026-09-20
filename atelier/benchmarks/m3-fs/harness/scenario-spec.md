@@ -21,7 +21,7 @@
 | 列表端点 | `notes.list`（query） | 响应恒为 `{ "notes": [行…] }`（§2.3 扁平 schema 顶层对象红线） |
 | 创建端点 | `notes.create`（command） | 幂等 upsert（客户端 id 同 id 重放 = 更新）；成功载荷 = 存后行 |
 | notes 表 | `id INTEGER PRIMARY KEY, body TEXT NOT NULL, createdAt INTEGER NOT NULL` | **id = 客户端生成的 JSON number**（正整数，如 `Date.now()`；brief v2 钉死——§4.5「同 id 幂等合并」的前提）；001 迁移已应用 |
-| 基线种子 | 3 行：`1`/"first note"、`2`/"second note"、`3`/"third note" | `migrate seed` 已入；R1 首连全量帧必须含全部三个 id |
+| 基线种子 | `migrate seed` 已入（≥2 行；**行数与具体 id 不进判据**） | R1 期望 id 集从库副本实读（`readSeedIds`），对任意种子数成立（集成批修订：原硬编码 3 行与 B 基线 2 行失配） |
 | server 启动壳 | `src/server/main-server.ts` | `node` 直跑（node ≥22.18 类型剥离）；env 契约见下 |
 | 握手行 | stdout 恰好一行 `ATELIER_SERVER_READY {"port":<port>}` | harness 探活唯一依据（openapi-golden 同源） |
 | runtime 单实例化 | `src/vendor/atelier/runtime/index.ts` = 对 `src/runtime` 的纯转发 shim（基线装配件 S10b） | 两份 vendored runtime 不单实例化 → live 帧 push 与组件 $state 跨实例不追踪 → C 类假阴性（RUNBOOK §1 红线） |
@@ -108,20 +108,23 @@ harness 在挂载后经 mock 通道馈送的列表载荷恒为 `{ "notes": [行�
 
 ### 5.1 task1（M4、M5）
 
-- **M4**：
+- **M4**（载荷 id 按判据语义分任务——task1 服务端生成 id〔brief 判据无客户端 id 考点，基线即
+  服务端 id〕；task3 合成 task2 半 → 客户端生成 id，同 §4.5 对账前提）：
   1. 内省 `src/server/endpoints/notes.ts`：`notes.create` 的 contract 含
      `optProps.priority = {type:"number", min:0, max:9}` 且 `reqProps` 无 priority；
-  2. `POST /api/notes.create {"id":20250920101,"body":"m4 note","priority":7}` → 200，
-     载荷 `priority===7`；
-  3. `POST /api/notes.create {"id":20250920102,"body":"m4b note"}` → 200；
-  4. 库副本检查：`20250920101` 行 `priority=7`；`20250920102` 行 `priority=0`（省略按 0）。
+  2. `POST /api/notes.create` task1 载荷 `{"body":"m4 note","priority":7}`（task3 加
+     `"id":20250920101`）→ 200，载荷 `priority===7`；
+  3. `POST /api/notes.create` task1 载荷 `{"body":"m4b note"}`（task3 加 `"id":20250920102`）→ 200；
+  4. 库副本检查：以成功载荷回显的 id（task1 = 服务端生成 id；task3 = 客户端 id）取证——
+     前者行 `priority=7`、后者 `priority=0`（省略按 0）。
 - **M5**：`POST /api/notes.list {}` → 200（200 即 dev 态输出校验不红——ATR-215 会以 500
-  显形），`notes` 数组中 `id===20250920101` 行携带 `priority===7`。
+  显形），`notes` 数组中 M4 首笔创建行（按回显 id 取）携带 `priority===7`。
 
 ### 5.2 task2 / task3（R1-R3，场景续）
 
 - **R1**：`GET /api/notes.list/live?input=%7B%7D` 订阅 → 5s 内收到首个 `event: data` 帧：
-  ①流以 `retry: 3000` 起始；②帧 JSON `notes` 数组含全部三个种子 id（1/2/3——首连=全量）。
+  ①流以 `retry: 3000` 起始；②帧 JSON `notes` 数组含订阅时刻在库的全部行 id（期望集从库
+  副本实读——首连=全量，种子行数不进判据）。
 - **R2**：`POST /api/notes.create {"id":20250920001,"body":"push me"}` → 200 且载荷含
   `id===20250920001`（客户端 id 回显）；**同一订阅**自 2xx 应答起 ≤1s 收到 data 帧，其
   `notes` 含 `id===20250920001` 的行。
@@ -245,7 +248,7 @@ harness 在挂载后经 mock 通道馈送的列表载荷恒为 `{ "notes": [行�
    事件时序）不在 C 类断言面内。
 4. **R 类窗口是轮询语义**：`next(1000)` 超时返回 null = 判据输入，不是对实现性能的度量；
    窗口值见 §4，三臂同值。
-5. **种子行 id 是规格的一部分**：R1 依赖 §1 三行种子；setup 脚本换种子 = 违反本文 = 该批
-   数据作废。
+5. **基线种子须存在且非空**（R1 期望集从库副本实读，行数/id 不进判据）；setup 脚本把种子
+   改成空集或换表名 = 违反本文 = 该批数据作废。
 6. task3 的 D2 与 M8 同源取证（同一组命令跑一遍，两行各自记账）——不是重复跑，也不是
    豁免：语义上是"过程门"与"完成态门"两问，取证同源。

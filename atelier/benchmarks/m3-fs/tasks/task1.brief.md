@@ -63,10 +63,10 @@ src/components/NotesPage.atr.ts            # 前端消费
   （本任务与 task3）。基线列表行已带 `data-note-id`，提交入口与待定/回滚钩子是本任务之后
   的任务才引入——本任务 C 类只挂载断言列表渲染与 priority 可见。
 - **R 类场景形状**（mount=/api）：live 通道 = GET `/api/notes.list/live`（task2/task3 才有）；
-  创建 = POST `/api/notes.create`，成功载荷 `{id:"<客户端id>", body:"..."}`；**id = 客户端
-  生成的正整数（JSON number，如 Date.now()）**——基线 notes 表主键为 INTEGER（自增），
-  字符串 id 无法落库；违规载荷 `{id:"x", body:""}` → ATR-201 四段式；本任务创建另带可选
-  `priority:0-9` 整数；写后推送断言窗口 ≤1s（task2/task3 场景）。
+  创建 = POST `/api/notes.create`，本任务载荷 `{"body":"...", "priority":7}`（**不带客户端
+  id——本任务 id 仍由服务端生成**，客户端 id 是 task2/task3 对账考点才引入；基线 notes 表
+  主键为 INTEGER 自增）；违规形状 `{body:""}` → ATR-201 四段式；`priority:0-9` 整数可省略
+  按 0；写后推送断言窗口 ≤1s（task2/task3 场景）。
 - **attempt 口径**：attempt = 应用根目录（基线装配脚本产物，已 `pnpm install`，dev.db 迁移/
   种子在账）；返工中新加依赖须自行 install。基线含 runtime 单实例化 shim（生成物与组件面
   同一 runtime 实例——否则信号跨实例不追踪，评分假阴性）。

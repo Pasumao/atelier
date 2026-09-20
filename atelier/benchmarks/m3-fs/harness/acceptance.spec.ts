@@ -42,7 +42,6 @@ const CREATE_NAME = "notes.create";
  * 基线种子行 id（scenario-spec「基线形态」钉死；R1 首连全量必须含全部三个）。
  * brief v2：id = 客户端生成的 JSON number（正整数）——比较一律 String() 化，类型无关。
  */
-const SEED_IDS = ["1", "2", "3"];
 /** C 类挂载馈送行：task1/task3 行内含 priority（M7 要求行内可见）；task2 无 priority */
 const C_ROWS = (task: string): Record<string, unknown>[] =>
   task === "task2-live-reconcile"
@@ -397,6 +396,7 @@ async function driveSubmit(container: AnyNode, text: string): Promise<void> {
 /* ---------------- 判据实现 ---------------- */
 
 let sharedReader: SseReader | null = null;
+let m4Id7: unknown = null; // M4 首笔创建行 id（task1=服务端回显 id；task3=客户端 id），M5 以它取证
 
 /** task1/task3 M4：契约可选 priority（0-9）+ 行为（带 priority 落库一致；省略按 0） */
 async function checkM4(): Promise<void> {
@@ -409,18 +409,29 @@ async function checkM4(): Promise<void> {
   if (!opt || req || opt.type !== "number" || opt.min !== 0 || opt.max !== 9) {
     throw new Error(`notes.create 输入契约 optProps.priority 须为 {type:"number", min:0, max:9}（可选），实际 optProps=${JSON.stringify(opt ?? null)} reqProps=${JSON.stringify(req ?? null)}`);
   }
-  const withP = await post(CREATE_NAME, { id: 20250920101, body: "m4 note", priority: 7 });
+  // 载荷 id 按判据语义分任务（集成批钉死）：task1 服务端生成 id（brief 判据无客户端 id 考点，
+  // 基线即服务端 id）；task3 合成 task2 半 → 客户端生成 id（§4.5 同 id 幂等合并前提）
+  const clientIds = TASK === "task3-fullstack-rescue";
+  const ID7 = 20250920101;
+  const ID0 = 20250920102;
+  const withP = await post(CREATE_NAME, clientIds ? { id: ID7, body: "m4 note", priority: 7 } : { body: "m4 note", priority: 7 });
   if (withP.status !== 200) throw new Error(`带 priority 的创建被拒：HTTP ${withP.status} ${withP.text.slice(0, 160)}`);
   if (String(withP.json?.priority) !== "7") throw new Error(`成功载荷应回显 priority=7，实际 ${JSON.stringify(withP.json)}`);
-  const noP = await post(CREATE_NAME, { id: 20250920102, body: "m4b note" });
+  const noP = await post(CREATE_NAME, clientIds ? { id: ID0, body: "m4b note" } : { body: "m4b note" });
   if (noP.status !== 200) throw new Error(`省略 priority 的创建被拒：HTTP ${noP.status} ${noP.text.slice(0, 160)}`);
+  // task1 以成功载荷回显的服务端 id 取证（task3 回显即客户端 id 本身）
+  m4Id7 = clientIds ? ID7 : withP.json?.id;
+  const stored0 = clientIds ? ID0 : noP.json?.id;
+  if (m4Id7 === undefined || stored0 === undefined) {
+    throw new Error(`成功载荷缺 id 回显（落库取证锚）：${JSON.stringify(withP.json)} / ${JSON.stringify(noP.json)}`);
+  }
   // 落库检查打在库副本上（R 场景 db = .atelier/dev.db 的临时副本，server 经 ATELIER_DB_PATH 打开它）
   await sleep(50); // SQLite 同步写，宽限一次调度
   const db = new DatabaseSync(dbCopyFile!, { readOnly: true });
   try {
-    const rows = db.prepare("SELECT id, body, priority FROM notes WHERE id IN (20250920101, 20250920102)").all() as any[];
-    const r7 = rows.find((r) => String(r.id) === "20250920101");
-    const r0 = rows.find((r) => String(r.id) === "20250920102");
+    const rows = db.prepare("SELECT id, body, priority FROM notes WHERE id IN (?, ?)").all(m4Id7, stored0) as any[];
+    const r7 = rows.find((r) => String(r.id) === String(m4Id7));
+    const r0 = rows.find((r) => String(r.id) === String(stored0));
     if (!r7 || Number(r7.priority) !== 7) throw new Error(`带 priority=7 的调用落库值不一致：${JSON.stringify(rows)}`);
     if (!r0 || Number(r0.priority) !== 0) throw new Error(`省略 priority 应按 0 落库：${JSON.stringify(rows)}`);
   } finally {
@@ -435,14 +446,27 @@ async function checkM5(): Promise<void> {
   if (res.status !== 200) throw new Error(`notes.list 非 200（dev 态输出校验红 = ATR-215 面）：HTTP ${res.status} ${res.text.slice(0, 160)}`);
   const rows = res.json?.notes;
   if (!Array.isArray(rows)) throw new Error(`notes.list 响应缺 notes 数组：${res.text.slice(0, 160)}`);
-  const hit = rows.find((r: any) => String(r?.id) === "20250920101");
-  if (!hit) throw new Error(`列表行缺 20250920101（R 场景内创建的行应可读出）：${JSON.stringify(rows).slice(0, 200)}`);
+  if (m4Id7 === undefined || m4Id7 === null) throw new Error("M5 依赖 M4 创建行 id（M4 未先行或载荷未回显 id）");
+  const hit = rows.find((r: any) => String(r?.id) === String(m4Id7));
+  if (!hit) throw new Error(`列表行缺 M4 创建行 id=${m4Id7}（R 场景内创建的行应可读出）：${JSON.stringify(rows).slice(0, 200)}`);
   if (hit.priority === undefined || Number(hit.priority) !== 7) throw new Error(`列表行未携带/不一致 priority：${JSON.stringify(hit)}`);
 }
 
-/** task2/task3 R1：SSE 首连全量 data 帧（retry 先行 + 三个种子 id 俱全） */
+/** 从库副本实读当前全部行 id（首连全量的期望集——种子行数不进判据，任意基线成立） */
+function readSeedIds(): string[] {
+  const db = new DatabaseSync(dbCopyFile!, { readOnly: true });
+  try {
+    return (db.prepare("SELECT id FROM notes ORDER BY id ASC").all() as any[]).map((r) => String(r.id));
+  } finally {
+    db.close();
+  }
+}
+
+/** task2/task3 R1：SSE 首连全量 data 帧（retry 先行 + 在库行 id 俱全） */
 async function checkR1(): Promise<void> {
   await ensureServer();
+  const seedIds = readSeedIds();
+  if (seedIds.length === 0) throw new Error("库副本无任何 notes 行（基线种子缺席？）");
   const reader = new SseReader(`${baseUrl}${MOUNT}/${LIST_NAME}/live`);
   sharedReader = reader;
   const frame = await reader.next(FIRST_FRAME_TIMEOUT_MS);
@@ -452,8 +476,8 @@ async function checkR1(): Promise<void> {
   if (!reader.sawRetryFirst) throw new Error("SSE 流未以 retry: 3000 起始（§4.3 线协议违例）");
   const parsed = JSON.parse(frame.data);
   const ids = (parsed?.notes ?? []).map((n: any) => String(n?.id));
-  const missing = SEED_IDS.filter((s) => !ids.includes(s));
-  if (missing.length > 0) throw new Error(`首连全量帧缺种子行 ${missing.join(",")}（首连=全量重算）：${JSON.stringify(ids)}`);
+  const missing = seedIds.filter((s) => !ids.includes(s));
+  if (missing.length > 0) throw new Error(`首连全量帧缺在库行 ${missing.join(",")}（首连=全量重算）：${JSON.stringify(ids)}`);
 }
 
 /** task2/task3 R2：POST 成功（客户端 id）→ ≤1s 同一订阅收到含该 id 的 data 帧 */

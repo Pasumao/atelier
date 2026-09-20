@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-20T13:32:47.460Z",
+  "root": "final1",
+  "layout": "app",
+  "surfaces": {
+    "component-contracts": [
+      {
+        "id": "ContractProbe.level",
+        "kind": "req",
+        "type": "number"
+      },
+      {
+        "id": "ContractProbe.note",
+        "kind": "opt",
+        "type": "string"
+      },
+      {
+        "id": "ContractProbe.title",
+        "kind": "req",
+        "type": "string"
+      },
+      {
+        "id": "HelloCard.start",
+        "kind": "opt",
+        "type": "number"
+      },
+      {
+        "id": "HelloCard.title",
+        "kind": "req",
+        "type": "string"
+      },
+      {
+        "id": "NotesPage.title",
+        "kind": "req",
+        "type": "string"
+      }
+    ],
+    "token-keys": [
+      {
+        "id": "color.bg",
+        "value": "#0E1117"
+      },
+      {
+        "id": "color.danger",
+        "value": "#E5484D"
+      },
+      {
+        "id": "color.muted",
+        "value": "#98A2B3"
+      },
+      {
+        "id": "color.ok",
+        "value": "#3FB968"
+      },
+      {
+        "id": "color.primary",
+        "value": "#4D6BFE"
+      },
+      {
+        "id": "color.primary-soft",
+        "value": "#2B3A7A"
+      },
+      {
+        "id": "color.surface",
+        "value": "#171C28"
+      },
+      {
+        "id": "color.surface-2",
+        "value": "#1F2634"
+      },
+      {
+        "id": "color.text",
+        "value": "#E6E9F0"
+      },
+      {
+        "id": "color.warn",
+        "value": "#F0A93B"
+      },
+      {
+        "id": "font.lg",
+        "value": "1.1rem"
+      },
+      {
+        "id": "font.md",
+        "value": "0.95rem"
+      },
+      {
+        "id": "font.sm",
+        "value": "0.85rem"
+      },
+      {
+        "id": "font.xl",
+        "value": "1.65rem"
+      },
+      {
+        "id": "font.xs",
+        "value": "0.72rem"
+      },
+      {
+        "id": "radius.lg",
+        "value": "16px"
+      },
+      {
+        "id": "radius.md",
+        "value": "10px"
+      },
+      {
+        "id": "radius.pill",
+        "value": "999px"
+      },
+      {
+        "id": "radius.sm",
+        "value": "6px"
+      },
+      {
+        "id": "space.lg",
+        "value": "24px"
+      },
+      {
+        "id": "space.md",
+        "value": "16px"
+      },
+      {
+        "id": "space.sm",
+        "value": "8px"
+      },
+      {
+        "id": "space.xl",
+        "value": "40px"
+      },
+      {
+        "id": "space.xs",
+        "value": "4px"
+      }
+    ],
+    "openapi": []
+  }
+}

@@ -1,0 +1,4 @@
+# 基准/实验台目录强制 LF：评分判据含内容比对与 sha256 冻结（m3-fs 基线 manifest、D1 口径），
+# Windows core.autocrlf 检出转 CRLF 会让第三方复现与冻结参照错位（协议 §4.1 逐字节复现要求）。
+# 范围仅 benchmarks/**——仓库其余文本维持开发者本地 autocrlf 习惯。
+atelier/benchmarks/** text eol=lf

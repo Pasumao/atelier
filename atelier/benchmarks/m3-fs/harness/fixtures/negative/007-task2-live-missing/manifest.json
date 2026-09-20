@@ -6,5 +6,5 @@
     "R2",
     "R3"
   ],
-  "note": "服务端漏 live/emits 声明（组件完整）：M1 抓；/live 通道 404 → R1-R3 红；C 类走 mock 仍绿（客户端职责已尽）"
+  "note": "底座 = task2 冻结参考解 overlay，变异 = notes.ts 删 live/emits 声明（服务端半缺失、客户端半完整）：M1 内省抓；/live 404 → R1-R3 连带红；C 类走 mock 仍绿（客户端职责已尽）。集成批重校准（同上重建）。"
 }

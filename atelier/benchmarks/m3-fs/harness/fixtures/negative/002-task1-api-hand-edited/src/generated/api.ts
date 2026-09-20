@@ -3,13 +3,13 @@
 // 诚实边界：call 只做传输与错误透传（非 2xx 直接抛响应体 = ATR 四段式，fix 可执行）；
 // live 失效-重算-推送的服务端引擎归 FS-7——本客户端按 §4.3 SSE 线协议消费。
 
-import { echoInput, echoOutput, noteCreateInput, noteListOutput, noteRowOutput } from "../contract.ts";
+import { echoInput, echoOutput, noteCreateInput, noteListOutput, noteSchema } from "../contract.ts";
 import type { FlatOf } from "../vendor/atelier/server/index.ts";
 
 type AppEchoInput = FlatOf<typeof echoInput>;
 type AppEchoOutput = FlatOf<typeof echoOutput>;
 type NotesCreateInput = FlatOf<typeof noteCreateInput>;
-type NotesCreateOutput = FlatOf<typeof noteRowOutput>;
+type NotesCreateOutput = FlatOf<typeof noteSchema>;
 type NotesListOutput = FlatOf<typeof noteListOutput>;
 
 /** app.echo（command）—— POST /api/app.echo */
@@ -68,5 +68,5 @@ export const notesList = Object.freeze({
   },
 });
 
-// （手改补丁——负控变异：生成物零手改纪律被破坏）
-export const notesCreateUrl = "/api/notes.create";
+// （负控变异：手改生成物——追加自编导出，regen 全量重写即覆盖：M6 考点）
+export const handMadeNoteCount = (): number => 42;
