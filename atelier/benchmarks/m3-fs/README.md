@@ -2,12 +2,15 @@
 
 > FS-10 两半均已落地（2026-09-20 集成批）：设计先行半（协议/任务书/RUNBOOK）+ 执行半
 > （基线装配脚本×2、grade 评分器×2 + S/R/C/T 场景 harness×2、atelier 臂正控参考解×3、
-> 负控 fixtures×7 与 negative-check 前置门、report.mjs、对照臂转译件×3）。
-> 集成认证：官方基线×参考解×评分器 正控 9/9 + 9/9 + 16/16 全 PASS，负控 7/7 全红；
+> 负控 fixtures×7 与 negative-check 前置门、report.mjs、对照臂转译件×3、对照臂正控参考解×3）。
+> 集成认证：官方基线×参考解×评分器 正控 9/9 + 9/9 + 16/16 全 PASS（atelier 臂）、
+> 8/8 + 8/8×2 + 18/18 全 PASS（next 臂，红证 M2/M3/M8 与 R2/R3 定向不误伤）、负控 7/7 全红；
 > 框架回归 380 绿 + 8 skip、check-skills 56/0、api-diff PASS、docs-numbers PASS。
 > 拍板记录：D-F21 对照臂 = Next.js（按 protocol §1.1 建议采纳）；D-F22 相对 ≥+15pt 为主 +
 > 绝对 ≥60% 副之；D-F23 rubric 降诊断件；D-F24 task3 v1 不叠加 gen auth（观察位保留）。
-> 对照臂正控参考解（`next/reference/`）为执行批最后收尾件，merge 后本页状态行同步置 ✅。
+> 判据观察留档（不阻断出数，引用判据时须知）：next/README §8.3 三枚（M1 探针脆弱窗口/
+> M2 冻结 manifest 严于 brief 文面/R2 from:2xx 口径下同步广播竞态——参考解以 next `after()`
+> 稳定通过）。
 
 ## 导航
 
@@ -22,7 +25,7 @@
 | [grade.mjs](grade.mjs) / [next/grade-next.mjs](next/grade-next.mjs) | 评分 CLI（S/R/C/T 全类；grade.json 落 attempt 目录） | ✅ 执行半 |
 | [setup-baseline-atelier.mjs](setup-baseline-atelier.mjs) / [next/setup-baseline-next.mjs](next/setup-baseline-next.mjs) | 预接线基线装配（`--variant task3` 缺陷注入；`--no-ai` noskill 形态） | ✅ 执行半 |
 | [reference/](reference/) | atelier 臂正控参考解×3（overlay + solution.md 判据自查表） | ✅ 已认证 |
-| [next/reference/](next/reference/) | 对照臂正控参考解×3 | 执行批收尾件 |
+| [next/reference/](next/reference/) | 对照臂正控参考解×3 | ✅ 已认证（8/8+8/8×2+18/18；判据观察留档 README §8.3） |
 | [harness/fixtures/negative/](harness/fixtures/negative/) + [negative-check.mjs](negative-check.mjs) | 负控×7（冻结参考解 + 单点变异）+ 前置门（失败集须与 manifest 恰好一致） | ✅ 7/7 全红 |
 | [report.mjs](report.mjs) | 三臂出数 + §6 判定（n<5→N/A；相对主判据+绝对副判据；Wilson 限定语强制） | ✅ 执行半 |
 | [RUNBOOK.md](RUNBOOK.md) | 逐臂出数操作卡（setup/单 run 循环/判定/红线清单） | ✅ 武装版 |

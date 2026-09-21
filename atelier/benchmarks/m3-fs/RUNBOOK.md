@@ -84,6 +84,8 @@ skill 首遍 ≥ 60%；两判据都报；n<5 → N/A 诚实拒绝。**无论正�
 - **负控前置门 ✅ 已武装**：`node atelier/benchmarks/m3-fs/negative-check.mjs --baseline <基线副本> --baseline-task3 <task3变体副本>`——7 枚负控（每枚 = 冻结参考解 + 单点变异）评分器必须全数判 FAIL 且失败判据集与 manifest 恰好一致。2026-09-20 集成认证 7/7 全红（正控只证明"对的能给过"，负控才证明"错的抓得住"）。**改判据后必跑**（m3 同款纪律）。
 - **正控参考解**：
   - atelier 臂 ✅ 已武装并认证：`reference/task{1,2,3}/`（overlay + solution.md；官方基线×参考解×评分器交叉认证 9/9 + 9/9 + 16/16 全 PASS，2026-09-20）；与 brief 作者分离（四角分离，协议 §4.3——brief v1 作者 = 设计批，参考解作者 = 执行批另一会话）。
-  - next 臂：`next/reference/task{1,2,3}/`（执行批收尾件——merge 后本行置 ✅ 并补认证记录）。
+  - next 臂 ✅ 已武装并认证：`next/reference/task{1,2,3}/`（对照臂正控 8/8 + 8/8×2 + 18/18 全 PASS；
+    红证两枚——删 down 侧 = M2/M3/M8 恰好红、删 after() 失效广播 = R2/R3 恰好红；判据观察
+    留档 `next/README.md` §8.3；2026-09-20，合并后于 main 复核）。
 - **外部第三方执行**：三臂 run 由非编排者的独立会话执行；编排者不担任任何一臂的代理会话
   （m3 RUNBOOK §5 原口径照抄）。

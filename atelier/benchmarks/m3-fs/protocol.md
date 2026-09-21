@@ -220,7 +220,8 @@ firstPass 判定输入（修正 m3 react 臂"机械 vs 主观"不对称偏置）
     node atelier/benchmarks/m3-fs/negative-check.mjs --baseline <基线> --baseline-task3 <task3变体>  # 负控前置门
     node atelier/benchmarks/m3-fs/report.mjs --results atelier/benchmarks/m3-fs/results/runs.json --tier formal  # 汇总出数 + §6 判定
 
-正控参考解（`reference/`＝atelier 臂已认证；`next/reference/`＝对照臂执行批收尾件）与
+正控参考解（`reference/`＝atelier 臂已认证 9/9+9/9+16/16；`next/reference/`＝对照臂已认证
+8/8+8/8×2+18/18，红证 M2/M3/M8 与 R2/R3 定向）与
 负控 fixtures（`harness/fixtures/negative/`，`negative-check.mjs` 前置门）**先于任何出数存在**
 （2026-09-20 落地）。基线装配：`setup-baseline-atelier.mjs`（`--no-ai`/默认两臂形态 +
 `--variant task3` 缺陷注入）/ `next/setup-baseline-next.mjs`。
