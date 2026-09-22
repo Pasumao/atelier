@@ -55,7 +55,7 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 | FS-7 | dev 面集成：atelier dev 托管 server 面 watch/重启 + live 端点 SSE→streamValue 直通信号图 | ✅ 全链收口：live 引擎（`server/live.ts` 第二批）+ dev 托管（dev-server-host.mjs/node-host.ts 09-20 批）+ 前端直通模板接线（本批：LiveNotes 三元 × §4.5 对账协议 server 版示例） | 无 |
 | FS-8 | 边界守卫：src/server import 越界 = ATR-1xx 红错 | ✅ M2 第一批（SERVER_IMPORT_LEAK/IMPORT_ALLOWLIST struct 接线，红绿双证） | 无（动态 import() 不查=诚实边界记 B 队） |
 | FS-9 | `atelier export openapi`（挂 ~standard JSON Schema 投影，内建一等） | ✅ 第二批（`compiler/project-json.mjs` §2.4 投影器 draft-2020-12/openapi-3.0 单管线 + ATR-107 超扁平显式 throw + CLI 导出 + api-diff openapi face；golden fixtures 快照）+ ✅ §13 golden 判据机检（本批：文档即真相打真实 server 全端点通 + 泛型形态漏导出红绿修复） | 无 |
-| FS-10 | M3-FS 全栈任务臂（跨端三处改动+迁移+live 对账）+ 评分器开放协议对外可比（决策 21-④） | ✅ 武装完成（2026-09-20 执行半批：协议/任务书 v2/RUNBOOK 武装版 + 基线脚本×2 + 评分 harness×2 + 双臂正控参考解×3×2 + 负控×7 前置门 7/7 + report；D-F21~24 采纳；正控负控认证全过，见归档行） | 三臂出数：pilot（n=1/cell，天花板护栏）→ formal（≥45 run）——须非编排者独立会话按 RUNBOOK 逐臂执行（外部执行，本仓不可自跑） |
+| FS-10 | M3-FS 全栈任务臂（跨端三处改动+迁移+live 对账）+ 评分器开放协议对外可比（决策 21-④） | ✅ 武装完成（2026-09-20 执行半批：协议/任务书 v2/RUNBOOK 武装版 + 基线脚本×2 + 评分 harness×2 + 双臂正控参考解×3×2 + 负控×7 前置门 7/7 + report；D-F21~24 采纳；正控负控认证全过，见归档行） | 无——出数裁定跳过（2026-09-22 用户拍板：Wave-7 天花板前科同构 + n=5/cell Wilson 区间宽于判据间距，预期无结论力，不值数天级独立会话串行成本）；实验台保持武装与全套纪律留档，任何第三方可按 RUNBOOK 自行出数——决策 21-④ 兑现口径随之定为「交付可复现评测台本身，不出自营数字」 |
 | FS-11 | 异步表达式策略原型验证（D-F9：显式拒绝，异步收敛在三态原语/live 端点边界） | ✅（FS-M3 批 `772c22a`/`e57717a`：ATR-323 显式拒绝，evalExpr 出口单点双路径同源 + 反例实证；定稿回写决策 24） | 无 |
 
 ### 候选池（锐评衍生 + 既有候选，按需触发，未排期）
