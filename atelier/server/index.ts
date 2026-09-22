@@ -46,3 +46,11 @@ export { LiveEngine, type LiveEngineHost, type LiveEngineOptions } from "./live.
 export { seedAll, SEEDS_TABLE_DDL, type SeedResult, type SeedStep } from "./seed.ts";
 /* FS-7 dev 托管追加（只加不改——既有行不动，api-diff 盯兼容性） */
 export { createNodeServer, serve, type NodeHostOptions, type WebHandler } from "./node-host.ts";
+/* FS-M6 尾件批追加（D-F16/§11.2/§11.3，只加不改——既有行不动）：server 面运行时内省快照 */
+export {
+  INTROSPECT_NAME,
+  introspectResponse,
+  serverStatusSnapshot,
+  type ServerStatusEndpoint,
+  type ServerStatusSnapshot,
+} from "./introspect.ts";
