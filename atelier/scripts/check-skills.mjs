@@ -40,7 +40,7 @@ const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const AGENT_SKILLS_FIELDS = new Set(["name", "description", "license", "allowed-tools", "metadata"]);
 const AGENT_SKILLS_NAME_MAX = 64; // 标准：name ≤64 字符 kebab-case
 const AGENT_SKILLS_DESC_MAX = 1024; // 标准：description ≤1024 字符
-const CLI_VERBS = new Set(["init", "dev", "review", "sync", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct", "checkpoint", "mcp", "skills", "compile", "bench", "tokens", "impact", "migrate"]);
+const CLI_VERBS = new Set(["init", "dev", "review", "sync", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct", "checkpoint", "mcp", "skills", "compile", "bench", "tokens", "impact", "migrate", "call"]); // call = D-F15 端点直调 CLI 通道（技能后续引用不再误报幻觉）
 const FLAGS = new Set([
   "--ai", "--static", "--electron", "--update", "--no-gate", "--json",
   "--target", "--name", "--no-ai", "--open", "--root", "--out", "--stdout", "--quiet",

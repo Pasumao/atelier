@@ -25,7 +25,11 @@ PROJECT
                                                                          (forwards to package.json dev script;
                                                                          --prod-db 以 ATELIER_DB_PATH 注入 server
                                                                          面 dev 库，缺省 .atelier/dev.db)
-  atelier build | package | e2e                                    STUB  spec'd, lands with compiler /
+  atelier build --target=node|bun [--root <dir>] [--out <dir>]     MINI  自托管单容器产线（D-F14，§12）：
+                                            [--no-smoke]                前端 vite build + 产物启动壳
+                                                                         （装配/serve 单源）+ 冒烟自证；
+                                                                         edge = 不做清单显式拒绝
+  atelier package | e2e                                            STUB  spec'd, lands with compiler /
                                                                          @atelier/review packages (v0.2+)
   atelier sync [--target <dir>]                                    FULL  re-vendor runtime + dev face into
                                                                          an existing app (拉齐到框架当前时点)
@@ -72,6 +76,13 @@ GENERATE / DATA (FS-M2 全站化)
                                                                           幂等重跑，库缺失不静默建库）
   atelier impact <contractKey> [--root <dir>]                      MINI* 契约 → 端点 → 前端调用点 两跳影响面导航
                                                                           （导航不是门禁——exit 恒 0）
+  atelier call <endpoint> ['<json>'] [--root <dir>] [--mount /api]  MINI  端点直调 CLI 通道（D-F15，§14.4
+                                       [--port N] [--timeout <ms>]        工作循环的验证环）：POST <mount>/
+                                                                          <name>（§3.4 query/command 同一
+                                                                          POST 纪律）；响应 JSON 上 stdout，
+                                                                          ATR 结构化错误上 stderr + exit 1；
+                                                                          server 不可达指路 pnpm dev（不静默
+                                                                          spawn——验收环不是托管环）
   atelier export openapi [--root <dir>] [--out openapi.json]       MINI* 端点面 → openapi-3.0.3 文档（FS-9：§2.4
                                        [--mount /api] [--name <T>]        投影器单管线；restful GET 映射 §3.4）
 
@@ -86,7 +97,6 @@ Examples:
 `;
 
 const STUB_NOTES = {
-  build: ["compiles .atr.ts contracts/templates", "see ARCHITECTURE §4 compile pipeline"],
   package: ["Tauri 2 desktop packaging", "see ARCHITECTURE §10"],
   e2e: ["browser loop: structure assertions + visual diff", "meanwhile: snapshot check covers the regression half"],
   lint: ["soft-constraint ruleset (@atelier/eslint)", "meanwhile: skills docs carry the rules; check carries the hard gate"],
@@ -243,6 +253,16 @@ switch (cmd) {
     if (sub !== "openapi") die("usage: atelier export openapi [--root <dir>] [--out openapi.json] [--mount /api] [--name <Title>]", 2);
     runFile(path.join(PKG, "gen", "export-openapi.mjs"), rest);
     break;
+  case "call":
+    // D-F15：端点直调 CLI 通道（§14.4 工作循环的验证环）——POST <mount>/<name>（§3.4 同一 POST 纪律）；
+    // 结构化错误贯通（§15）与用法守卫（exit 2）在脚本内
+    runFile(path.join(PKG, "scripts", "call.mjs"), process.argv.slice(3));
+    break;
+  case "build":
+    // D-F14：自托管单容器产线（§12 v1 两 target）——前端 vite build + 产物启动壳（装配/serve 单源）
+    // + 冒烟自证；edge/serverless = 不做清单显式拒绝（拒绝位即文档）
+    runFile(path.join(PKG, "scripts", "build.mjs"), process.argv.slice(3));
+    break;
   case "bench": {
     // P0-4: SPEC §7 four-metric baseline bench (needs an init'd app with deps installed)
     const child = spawnSync(process.execPath, [path.join(PKG, "scripts", "bench.mjs"), ...process.argv.slice(3)], { stdio: "inherit" });
@@ -273,7 +293,6 @@ switch (cmd) {
   }
 
   /* ---------- stubs (honest) ---------- */
-  case "build":
   case "package":
   case "review":
   case "e2e":
