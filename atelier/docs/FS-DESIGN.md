@@ -664,10 +664,29 @@ CLI `struct check` / MCP `structure.check` / 技能包文本——单份引擎 `
   归 FS-6 批次〕）；
 - Roots/Sampling/Logging 废弃面：现有 25 工具未依赖，迁移成本 ≈ 0（调研已核）。
 
+> **落地（2026-09-22，M6 尾件批）**：三件全落地——① 无状态 HTTP 直连 `/__atelier/mcp`（dev 面）：
+> `mcp/http.mjs` 单源（`handleMcpHttp(request, deps)` 永不 throw，stdio/HTTP 共用分发核），
+> `Mcp-Method`/`Mcp-Name` 头路由 + initialize/notifications/tasks/list 随无状态形态诚实移除 +
+> `_meta` 携 `2026-07-28` 版本；② ask 档多轮审批（D-F20）：`requestState` = HMAC 签名显式句柄
+> （密钥 `.atelier/dev-token` 三方同源；签名/有效期 5min/工具绑定/参数绑定四重校验），首轮
+> `InputRequiredResult` 只发句柄不执行，二轮携 `_approval` 放行/ATR-402 拒绝，审批四事件入
+> audit——「ask 暂同 auto」诚实边界关闭（stdio 无人工通道的历史限制由多轮原语解除，双通道跑通）；
+> ③ Tasks：`mcp/tasks.mjs` 进程内任务存储（生命周期 + ttl 保留窗 + 容量上限），`tasks/get|
+> update|cancel` 协议方法 + 同名点工具双形态（33→36），服务端主导创建 = HTTP 通道 × 长操作清单
+> （structure.check/test.run）。诚实边界：任务态进程内 + 显式句柄仅创建实例可解析（dev 面单实例
+> 成立）；vendored 应用未 vendor mcp 族 → 桥 503 诚实指路 stdio（vendor 依赖树挂候选池）；零新增
+> 错误码（复用 ATR-401/402/4xx-dev 段）。
+
 ### 10.3 dev 面 HTTP 端点补齐（/`__atelier/*` 服务端面）
 
 `/__atelier/endpoints`（人可读调试页：端点表 + try-it 调用 + schema 展示）〔议：D-F16〕——
 review UI 的 server 位；`/__atelier/server-status`（JSON：journal 尾部/live 订阅/迁移状态）。
+
+> **落地（2026-09-22，M6 尾件批，D-F16 采纳）**：`server/introspect.ts` = server 面运行时内省
+> 快照单源（端点全表含契约体/emits/idempotent/timeoutMs + journal 尾部 + live 订阅 + 迁移行；
+> prod 旗标下隐身不进生产 API 面），dev 面代理并补父进程侧事实（restarts/dbPath/host）；
+> `/__atelier/endpoints` 人可读调试页 = 端点表 + try-it + schema 展开（query/command 同走 POST
+> 与 §3.4 D-F11 同口径，页面内注明）。
 
 ---
 
@@ -709,6 +728,16 @@ review UI 的 server 位；`/__atelier/server-status`（JSON：journal 尾部/li
 command journal、MCP 操作审计、迁移审计——三源同构（ts/name/principal/duration）归
 review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可验证性基建的呈现层）。
 
+> **落地（2026-09-22，M6 尾件批，§11.2+§11.3 同批）**：`dev/dev-review-data.mjs`（数据归一）+
+> `dev-review-pages.mjs`（页面/脚本，注入既有 review 页不重写它）——迁移时间轴 =
+> `atelier_migrations`（server-status 优先；server 面不在时 `node:sqlite` 只读兜底〔实验性标注〕）
+> × checkpoint 台账 `migrationHead` 四态对齐（behind 即决策 21-③ rollback 会拒的锚）；端点行为
+> diff = anchor 前后 journal 窗口 `(prevAt,anchorAt]`/`(anchorAt,now]` 对比；三源归一
+> `{ts,name,principal,durMs,status,source}` 单视图（command journal + MCP/dev audit.jsonl +
+> 迁移状态表=决策 19「迁移即审计对象」现成源，未做埋点）。诚实边界：journal 内存环形重启清零；
+> 状态表只记 applied（down 成功删行，down 历史无处可记——持久 journal 挂账）；principal/durMs
+> 无持久化诚实置 null；台账/库缺失一律 ok:false 降级，零假数据。
+
 ---
 
 ## 12. 部署形态（决策 0/13/18 已定，此处收口细节）
@@ -719,10 +748,23 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 | 产线 | 产物 | 实现 | 状态 |
 |---|---|---|---|
 | 桌面（一级） | sidecar 单文件 exe + 静态 dist | `bun build --compile` → Tauri 2 sidecar + 显式 capabilities | M3-FS 后接 `atelier package` 既有位 |
-| 自托管单容器 | node/bun 单入口 + SQLite 卷 | `atelier build --target=node\|bun`（v1 两 target；差异=启动壳 30 行） | M2 尾〔议：D-F14〕 |
+| 自托管单容器 | node/bun 单入口 + SQLite 卷 | `atelier build --target=node\|bun`（v1 两 target；差异=启动壳 30 行） | ✅ 落地（2026-09-22 M6 尾件批） |
 | edge/serverless | — | **编译期 target 观察位**（不做清单维持：SQLite 数据层与 serverless 天然错配；Turso/D1 适配出现真实需求再议） | 不做 |
 
 `atelier deploy`（Kamal 式一条命令）：后置不预投（不做清单维持）。
+
+> **落地（2026-09-22，M6 尾件批，D-F14/D-F15 采纳）**：`atelier build --target=node|bun`（
+> `scripts/build.mjs`）= vite 静态面 + `dist/server.mjs` 启动壳（装配单源 = 模板
+> `main-server.createAppHandler` 导出 + 框架 `serve()` 与 `server/static-host.ts` 静态托管单源；
+> env 三件与 `ATELIER_SERVER_READY` 握手全复用 §11.1）+ 产物冒烟自证（spawn→握手→app.ping+静态
+> index 双面探活，`--no-smoke` 逃生口）；target 门 = node/bun 之外显式拒绝（edge = 不做清单红证）。
+> `atelier call <endpoint> '<json>'`（`scripts/call.mjs`）= CLI 验证环，直调运行中 server 面
+> （不可达 ATR-403 指路 `pnpm dev`，不静默 spawn）；**全 POST**（§3.4 D-F11 端点面统一 POST 同
+> 口径，dev registry 无 kind 位），ATR 结构化错误上 stderr + exit 1。诚实边界：产物 = 单容器
+> **整目录部署**语义（dist 与 src/vendor 相对引用不拆件，单文件 exe 归桌面线 package）；bun
+> target 产物同构生成、本机无 bun 未实测（挂账既有口径，有 bun 宿主跑 build 即内建自证）；
+> TLS/压缩/缓存归反代；存量应用 main-server 未重构为 createAppHandler 形态时 build 诚实报错
+> 指路对照模板或重 init（`sync` 不碰应用 src）。
 
 ---
 
@@ -807,6 +849,12 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 端点开发工作循环（代理视角）：读 specs 端点段 → `endpoint.list`/`db.schema` 查现状 → 改契约
 单源 → `gen --regen` → 实现 handler → `atelier check`（含 impact）→ `atelier call`/try-it 验证
 → test → checkpoint。错误导航表补 ATR-1xx/2xx/3xx 新码段（§15）。
+
+> **落地注记（2026-09-22，M6 尾件批）**：循环全件就位，本节即 SPEC v0.2 全站段增补底稿——
+> 查询环 = `endpoint.list`/`db.schema`/`server.introspect`（stdio + dev 面 `/__atelier/mcp`
+> HTTP 直连双通道，§10.2）；验证环 = `atelier call`（D-F15，agent 位）× try-it（D-F16，人位）；
+> 锚定环 = checkpoint（save 门禁自带测试/快照/API 面三闸 + migrationHead 进台账）。错误导航表
+> = §15 全表 + `skills/atelier-error-codes`（ERR_CATALOG 机检既有纪律）。
 
 ---
 
@@ -1000,13 +1048,13 @@ FS-6 MCP 工具族（依赖 M2 注册表稳定）+ 2026-07-28 无状态对齐 + 
 | D-F11 | 传输面收敛 | POST-only + live GET/SSE；batch 不做 v1（显式 batch 端点替代）；OpenAPI `restful` GET 映射默认关 | ✅ 建议照此 | — |
 | D-F12 | 审计强化 | command journal 记失败条目（status/principal/durMs）；落盘列 B 队 | ✅ 建议采纳（内存态 v1） | S |
 | D-F13 | 输出契约 | `output` 元数据 + ATR-215/216 + prod 剥离口径（§3.7 表） | ✅ 建议采纳（五用贯通必需件） | S-M |
-| D-F14 | build target | `atelier build --target=node\|bun` 两 target（edge 观察位维持不做） | ✅ 建议采纳（M2 尾） | S |
-| D-F15 | CLI 通道 | `atelier call <endpoint> '<json>'`（Builder.io 四通道对表的 CLI 位；specs 验收命令直接可执行） | ✅ 建议采纳 | S |
-| D-F16 | 端点调试页 | dev 面 `/__atelier/endpoints`（表+try-it+schema） | ✅ 建议采纳（M3-FS） | S |
+| D-F14 | build target | `atelier build --target=node\|bun` 两 target（edge 观察位维持不做） | ✅ 采纳（2026-09-22 M6 尾件批落地，§12 注记） | S |
+| D-F15 | CLI 通道 | `atelier call <endpoint> '<json>'`（Builder.io 四通道对表的 CLI 位；specs 验收命令直接可执行） | ✅ 采纳（2026-09-22 同批落地；v1 全 POST=D-F11 同口径） | S |
+| D-F16 | 端点调试页 | dev 面 `/__atelier/endpoints`（表+try-it+schema） | ✅ 采纳（2026-09-22 同批落地，§10.3 注记） | S |
 | D-F17 | seed 命令 | `atelier migrate seed`（幂等种子明文） | ✅ 建议采纳（随 M2-d） | S |
 | D-F18 | tsgo 双跑 | 类型守卫测试 tsc/tsgo 双跑钉住行为差 | ✅ 建议采纳（CI 条件作业） | S |
 | D-F19 | 表单渐进增强 | no-JS form 原语列 B 队不进 M2/M3（桌面一级分发下低优先） | ✅ 建议维持 B 队 | — |
-| D-F20 | ask 档审批接线 | MCP InputRequiredResult 多轮审批接 confirm=ask（历史诚实边界关闭） | ✅ 建议采纳（归 FS-6） | M |
+| D-F20 | ask 档审批接线 | MCP InputRequiredResult 多轮审批接 confirm=ask（历史诚实边界关闭） | ✅ 采纳（2026-09-22 M6 尾件批落地：requestState HMAC 句柄 stdio/HTTP 双通道，§10.2 注记） | M |
 | D-F21 | M3-FS 对照臂选择 | 建议 Next.js（App Router+Server Actions+Drizzle/SQLite）：live 对账无内建原语 = 检验「给协议 vs 给零件」；语料与官方 agent 工具链最强对照；SvelteKit 留候补 | ✅ 采纳（2026-09-20 执行半批，protocol §1.1；换臂条款留痕） | — |
 | D-F22 | M3-FS 判据阈值 | 相对 ≥+15pt 为主 + 绝对 ≥60% 副之（Wave-7 天花板教训：相对差可为 0 而绝对口径仍可判） | ✅ 采纳（同批，report.mjs 两判据都报） | — |
 | D-F23 | rubric 定位降级 | 盲评 rubric 从 pass 判定降为诊断件（修正 m3 机械/主观评分不对称的已知偏置） | ✅ 采纳（同批） | — |
