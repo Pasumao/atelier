@@ -13,7 +13,8 @@
  * 扁平语义之外的结构由投影器显式 ATR-107，绝不静默降级。
  *
  * confirm 闸：endpoint.call 三档（auto/ask/deny）在 mcp/confirm.mjs 收口，server.mjs callTool
- * 统一先过闸——本模块不重复判档；ask 档暂同 auto（stdio 无审批通道的诚实边界，见 confirm.mjs 头）。
+ * 统一先过闸——本模块不重复判档；ask 档 = 多轮审批（InputRequiredResult + requestState，
+ * FS-M6 §10.2），见 confirm.mjs 头。
  */
 import { impactReport } from "../gen/impact.mjs";
 import { projectJsonSchema, PROJECT_TARGETS } from "../compiler/project-json.mjs";
