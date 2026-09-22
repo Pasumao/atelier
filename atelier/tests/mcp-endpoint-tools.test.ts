@@ -332,11 +332,21 @@ describe("FS-6 endpoint.call（confirm 三档 + 真打假 face）", () => {
     expect(hits.filter((h) => h.urlPath === "/api/items.create").length).toBe(0); // 拒绝必须发生在请求之前
   });
 
-  it("ask：暂同 auto（诚实边界——stdio 无审批通道），放行且入桩", async () => {
+  it("ask：多轮审批（FS-M6 §10.2）——首轮不执行，返回 inputRequired + requestState（红证锚：无审批绝不入桩）", async () => {
     process.env.ATELIER_PROJECT_ROOT = ASK_ROOT;
     try {
+      hits.length = 0;
       const res = (await callTool("endpoint.call", { name: "chat.ask", input: { msg: "ask" } })) as any;
-      expect(res.status).toBe(200);
+      expect(res.__atelierInputRequired).toBe(true);
+      expect(res.context.tool).toBe("endpoint.call");
+      expect(typeof res.requestState).toBe("string");
+      // 二次提交 approve → 放行执行（同一 callTool 面，stdio/HTTP 双通道共用）
+      const done = (await callTool("endpoint.call", {
+        name: "chat.ask", input: { msg: "ask" },
+        _approval: { requestState: res.requestState, decision: "approve" },
+      })) as any;
+      expect(done.status).toBe(200);
+      expect(hits.filter((h) => h.urlPath === "/api/chat.ask").length).toBe(1);
     } finally {
       process.env.ATELIER_PROJECT_ROOT = APP_ROOT;
     }
@@ -375,7 +385,7 @@ describe("FS-6 dev face 不在：四段式结构化错误（绝不静默空结�
 /* ---------- stdio e2e：入口形态 + tools/list 计数 ---------- */
 
 describe("stdio e2e（spawn server.mjs）", () => {
-  it("initialize → tools/list 含 8 个新工具（25+8=33）→ tools/call endpoint.list", async () => {
+  it("initialize → tools/list 含 8 个新工具 + tasks 扩展 3 工具（33+3=36）→ tools/call endpoint.list", async () => {
     const child = spawn(process.execPath, [SERVER_MJS], {
       env: { ...process.env, ATELIER_DEV_URL: baseUrl, ATELIER_PROJECT_ROOT: APP_ROOT, ATELIER_TOOLSETS: "" },
       stdio: ["pipe", "pipe", "pipe"],
@@ -399,14 +409,60 @@ describe("stdio e2e（spawn server.mjs）", () => {
       await rpc(1, "initialize", { protocolVersion: "2025-06-18" });
       const list = await rpc(2, "tools/list");
       const names: string[] = list.result.tools.map((t: any) => t.name);
-      expect(names.length).toBe(33);
-      for (const t of ["endpoint.list", "endpoint.contract", "endpoint.impact", "db.schema", "db.migrations", "server.introspect", "endpoint.call", "endpoint.journal"]) {
+      expect(names.length).toBe(36);
+      for (const t of ["endpoint.list", "endpoint.contract", "endpoint.impact", "db.schema", "db.migrations", "server.introspect", "endpoint.call", "endpoint.journal", "tasks.get", "tasks.update", "tasks.cancel"]) {
         expect(names).toContain(t);
       }
       const call = await rpc(3, "tools/call", { name: "endpoint.list", arguments: {} });
       expect(call.result.isError).toBe(false);
       const payload = JSON.parse(call.result.content[0].text);
       expect(payload.count).toBe(3);
+    } finally {
+      child.kill();
+    }
+  }, 20000);
+
+  it("ask 档 stdio 全链（FS-M6②）：首轮 InputRequiredResult + requestState → 携 _approval 二次提交放行；tasks/list 方法诚实移除", async () => {
+    hits.length = 0;
+    const child = spawn(process.execPath, [SERVER_MJS], {
+      env: { ...process.env, ATELIER_DEV_URL: baseUrl, ATELIER_PROJECT_ROOT: ASK_ROOT, ATELIER_TOOLSETS: "" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const rl = readline.createInterface({ input: child.stdout!, terminal: false });
+    const pending = new Map<number, (v: any) => void>();
+    rl.on("line", (line) => {
+      try {
+        const msg = JSON.parse(line);
+        const resolve = pending.get(msg.id);
+        if (resolve) { pending.delete(msg.id); resolve(msg); }
+      } catch { /* ignore */ }
+    });
+    const rpc = (id: number, method: string, params?: unknown) =>
+      new Promise<any>((resolve, reject) => {
+        pending.set(id, resolve);
+        child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+        setTimeout(() => (pending.has(id) ? reject(new Error(`rpc timeout: ${method}`)) : undefined), 10000);
+      });
+    try {
+      await rpc(1, "initialize", { protocolVersion: "2025-06-18" });
+      // tasks/list：2026-07-28 已移除（SEP-2133，无会话无法安全定界）——协议级诚实错误
+      const removed = await rpc(2, "tasks/list");
+      expect(removed.error).toBeTruthy();
+
+      const first = await rpc(3, "tools/call", { name: "endpoint.call", arguments: { name: "chat.ask", input: { msg: "stdio-ask" } } });
+      expect(first.result.isError).toBe(false);
+      expect(first.result.inputRequired.tool).toBe("endpoint.call");
+      const requestState = first.result.requestState;
+      expect(typeof requestState).toBe("string");
+      expect(hits.filter((h) => h.urlPath === "/api/chat.ask").length).toBe(0); // 无审批不执行
+
+      const second = await rpc(4, "tools/call", {
+        name: "endpoint.call",
+        arguments: { name: "chat.ask", input: { msg: "stdio-ask" }, _approval: { requestState, decision: "approve" } },
+      });
+      expect(second.result.isError).toBe(false);
+      expect(JSON.parse(second.result.content[0].text).body.echo).toBe("stdio-ask");
+      expect(hits.filter((h) => h.urlPath === "/api/chat.ask").length).toBe(1); // 审批后才入桩
     } finally {
       child.kill();
     }

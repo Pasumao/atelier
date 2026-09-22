@@ -16,6 +16,9 @@
  *  - POST /__atelier/bridge/enqueue        MCP/CLI 下发命令 {op,args} → SSE 广播
  *  - POST /__atelier/bridge/ack            页面执行结果回执
  *  - GET  /__atelier/bridge/cmd-status     命令执行状态轮询（done/pending）
+ *  - POST /__atelier/mcp                   MCP 2026-07-28 无状态 HTTP 直连（FS-M6 §10.2：
+ *                                          Mcp-Method/Mcp-Name 头路由；逻辑单源 mcp/http.mjs，
+ *                                          这里只接线）
  * 安全：/__atelier/* 一律校验 token（页面经 transformIndexHtml 注入；工具从 .atelier/dev-token 读取）。
  * 审计：非 GET 的 /__atelier/* 与命令回执均追加 .atelier/audit.jsonl。
  */
@@ -159,6 +162,49 @@ export function atelierDevPlugin() {
 
         const url = rawUrl.split("?")[0];
         res.setHeader("Content-Type", "application/json; charset=utf-8");
+
+        /* ---------- FS-M6（§10.2）：/__atelier/mcp —— MCP 2026-07-28 无状态 HTTP 直连端点 ----------
+         * 逻辑单源 = atelier/mcp/http.mjs（handleMcpHttp，与 stdio server.mjs 同一 callTool 核心）；
+         * 这里只接线：token 门之后桥接。桥模块按框架仓布局解析（dev/ 与 mcp/ 同级）；应用 vendor
+         * 未含 mcp/ 族时诚实降级指路 stdio 通道，绝不静默。 */
+        if (url === "/__atelier/mcp") {
+          const body = await readBody(req);
+          let out;
+          try {
+            const bridge = await import(new URL("../mcp/http.mjs", import.meta.url).href);
+            const mcpRequest = new Request(`http://127.0.0.1${rawUrl}`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "mcp-method": String(req.headers["mcp-method"] ?? ""),
+                "mcp-name": String(req.headers["mcp-name"] ?? ""),
+              },
+              body: body || "{}",
+            });
+            out = await bridge.handleMcpHttp(mcpRequest, {
+              projectRoot: ROOT,
+              devUrl: `http://127.0.0.1:${server.config.server.port ?? 5173}`,
+              devToken: TOKEN,
+            });
+          } catch (e) {
+            out = {
+              status: 503,
+              contentType: "application/json; charset=utf-8",
+              body: JSON.stringify({
+                ok: false,
+                error: {
+                  code: "ATR-4xx-dev",
+                  message: `MCP HTTP bridge not available in this install (${e?.message ?? e})`,
+                  fix: "走 stdio 通道（node <repo>/atelier/mcp/server.mjs，env ATELIER_PROJECT_ROOT=<appDir>），或在框架仓内跑 dev 面；应用内补齐 vendor 待集成拍板",
+                },
+              }),
+            };
+          }
+          res.statusCode = out.status;
+          res.setHeader("Content-Type", out.contentType ?? "application/json; charset=utf-8");
+          res.end(out.body);
+          return;
+        }
 
         // P2-4：agent 体检出口（token 门内，JSON 结构化）
         if (url === "/__atelier/agent-health") {

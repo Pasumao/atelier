@@ -552,7 +552,7 @@
    "face": "operation",
    "priority": "P1",
    "status": "implemented",
-   "summary": "Invoke an app endpoint: POST <mount|/api>/<name> with JSON input. confirm tier applies (agent.confirm): deny = ATR-402 structured refusal; ask currently behaves as auto (honest boundary — no approval channel over stdio yet). Response body/status/latency returned; endpoint-level ATR errors stay in body as data.",
+   "summary": "Invoke an app endpoint: POST <mount|/api>/<name> with JSON input. confirm tier applies (agent.confirm): deny = ATR-402 structured refusal; ask = multi-round approval (first response returns InputRequiredResult + requestState; resubmit same args plus _approval {requestState, decision: approve|deny} — invalid/expired handle = ATR-401). Response body/status/latency returned; endpoint-level ATR errors stay in body as data.",
    "params": {
     "type": "object",
     "reqProps": {
@@ -566,12 +566,77 @@
      },
      "mount": {
       "type": "string"
+     },
+     "_approval": {
+      "type": "object"
      }
     }
    },
    "confirmDefault": "auto",
    "errors": [
     "ATR-402",
+    "ATR-401"
+   ]
+  },
+  {
+   "name": "tasks.get",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Tasks extension (MCP 2026-07-28 SEP-2133): read one server-created background task by explicit handle — status queued|running|completed|failed|cancelled plus result/error when finished. Handles live on the instance that created them (dev face = single instance); expired handles answer ATR-401 — rerun the tool. No tasks/list (removed in 2026-07-28: no session, cannot scope safely).",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "taskId": {
+      "type": "string"
+     }
+    },
+    "optProps": {}
+   },
+   "errors": [
+    "ATR-401"
+   ]
+  },
+  {
+   "name": "tasks.update",
+   "face": "operation",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Tasks extension (SEP-2133): update one task's client-settable field — ttlMs (retention window after the task finishes; swept afterwards, handle then expires with ATR-401). Unknown fields rejected ATR-401.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "taskId": {
+      "type": "string"
+     }
+    },
+    "optProps": {
+     "ttlMs": {
+      "type": "number",
+      "min": 1
+     }
+    }
+   },
+   "errors": [
+    "ATR-401"
+   ]
+  },
+  {
+   "name": "tasks.cancel",
+   "face": "operation",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Tasks extension (SEP-2133): cancel a queued/running task — lands the cancelled terminal state immediately (cooperative abort; result arrival after cancel never overwrites it). Finished tasks are returned unchanged.",
+   "params": {
+    "type": "object",
+    "reqProps": {
+     "taskId": {
+      "type": "string"
+     }
+    },
+    "optProps": {}
+   },
+   "errors": [
     "ATR-401"
    ]
   },
