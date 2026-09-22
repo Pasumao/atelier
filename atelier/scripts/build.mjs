@@ -1,0 +1,211 @@
+#!/usr/bin/env node
+/**
+ * build.mjs — `atelier build`：自托管单容器产线（D-F14，FS-DESIGN §12 v1 两 target）。
+ *
+ *   atelier build --root <dir> --target=node|bun [--out <dir>] [--no-smoke]
+ *
+ * 产物（§12：node/bun 单入口 + SQLite 卷；差异 = 启动壳 30 行——壳本身，框架侧零差异）：
+ *   <out>/index.html + assets/   前端静态产物（应用自身 vite build——devDependency 零新增依赖）
+ *   <out>/server.mjs             服务端启动壳（生成物）：env 三件解析 + withStaticHost 合成
+ *                                静态/端点双面 + serve()（node-host 单源）监听握手
+ * 装配单源 = 应用 src/server/main-server.ts 的 createAppHandler()（dev 托管与产物同一份端点
+ * 注册——绝不生成第二份注册表）。vendor 单源 = src/vendor/atelier/server/{node-host,static-host}.ts。
+ *
+ * target 语义：
+ *   node  产物壳由 node 直跑（.ts import 走原生 strip-types，Node ≥22.6）；
+ *   bun   产物同构生成；探测 bun——本机有 bun → spawn 产物冒烟自证跑通；无 bun → 产物照出 +
+ *         输出诚实标注「未实测」（挂账既有口径，绝不假绿称实测）；
+ *   edge/serverless 等 → **显式拒绝 exit 2**（§12 不做清单：SQLite 数据层与 serverless 天然错配
+ *         ——拒绝位即文档，绝不静默产出跑不起来的产物）。
+ *
+ * 产物冒烟自证（--no-smoke 跳过）：PORT=0 spawn 产物入口 → 收 ATELIER_SERVER_READY 握手 →
+ * POST <mount>/app.ping（模板自带探活端点）+ GET / 静态 index → 杀进程。失败 exit 1 诚实红
+ * （无探活端点的应用用 --no-smoke 显式跳过——不静默跳过）。
+ *
+ * 诚实边界（随手记）：
+ * - 产物非自包含：server.mjs 相对引用 ../src/vendor（单容器**整目录部署**语义——目录整体进镜像/
+ *   卷，不拆件拷贝；单文件 exe 归 package/桌面线 `bun build --compile`）；
+ * - 前端走 `pnpm exec vite build --outDir <out> --emptyOutDir` 直调（模板 build script 即 vite
+ *   build 等价；应用自定义 build 管线——tailwind 后处理等——不在此执行，挂账）；token 主题 AOT
+ *   经 vite.config 的 generateThemeFile() 照常触发；
+ * - 接库应用先迁移再起服（迁移器不在此自动执行——`atelier migrate up` 的活绝不静默代办）；
+ * - TLS/压缩/缓存 CDN 化归反代（node-host §11.1 既有口径）。
+ */
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { spawn, spawnSync } from "node:child_process";
+import readline from "node:readline";
+import url from "node:url";
+
+const PKG = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), ".."); // atelier/
+
+function die(msg, code = 2, fix) {
+  console.error(msg);
+  if (fix) console.error(`fix: ${fix}`);
+  process.exit(code);
+}
+
+/* ---------------- 用法与 target 门 ---------------- */
+
+const rest = process.argv.slice(2);
+// --k v 与 --k=v 两种形态都认（CLI 惯例两写法；门禁测试即用 = 形态抓过这里）
+const argOf = (k) => {
+  const i = rest.indexOf(k);
+  if (i >= 0) return rest[i + 1];
+  const hit = rest.find((a) => a.startsWith(`${k}=`));
+  return hit === undefined ? undefined : hit.slice(k.length + 1);
+};
+const root = path.resolve(argOf("--root") ?? process.cwd());
+const target = argOf("--target");
+const noSmoke = rest.includes("--no-smoke");
+const outDir = path.resolve(argOf("--out") ?? path.join(root, "dist"));
+
+if (!target) die("usage: atelier build --root <dir> --target=node|bun [--out <dir>] [--no-smoke]", 2);
+if (target !== "node" && target !== "bun") {
+  die(
+    `error: 不支持的 build target "${target}"`,
+    2,
+    "§12 不做清单：edge/serverless 是编译期观察位（SQLite 数据层与 serverless 天然错配，适配出现真实需求再议）——v1 两 target = node | bun",
+  );
+}
+
+/* ---------------- 应用前提检查（诚实红：缺件指路，绝不猜） ---------------- */
+
+if (!fs.existsSync(path.join(root, "package.json"))) {
+  die(`error: ${root} 不是 Atelier 应用（缺 package.json）`, 2, "node atelier/cli.mjs init --target <dir> --name <Name>");
+}
+const mainServerFile = path.join(root, "src", "server", "main-server.ts");
+if (!fs.existsSync(mainServerFile)) {
+  die(`error: 缺 ${path.relative(root, mainServerFile)}（server 面装配点）`, 2, "init 产物自带；自定义布局请补装配点文件");
+}
+const mainServerSrc = fs.readFileSync(mainServerFile, "utf8");
+if (!/createAppHandler/.test(mainServerSrc)) {
+  die(
+    `error: ${path.relative(root, mainServerFile)} 未导出 createAppHandler()（D-F14 build 装配单源——本应用先于该形态）`,
+    2,
+    "对照框架模板 templates/app/src/server/main-server.ts 重构：导出 createAppHandler()（createHandler 装配收口）+ 主模块判定才 serve；或重 init",
+  );
+}
+for (const f of ["node-host.ts", "static-host.ts"]) {
+  if (!fs.existsSync(path.join(root, "src", "vendor", "atelier", "server", f))) {
+    die(`error: vendor 缺 src/vendor/atelier/server/${f}（应用 vendor 落后于框架时点）`, 2, `node atelier/cli.mjs sync --target ${root}`);
+  }
+}
+
+/* ---------------- ① 前端静态产物：应用自身 vite build（零新增依赖） ---------------- */
+
+console.log(`[atelier build] target=${target} → ${outDir}`);
+console.log("[atelier build] ① vite build（前端静态面）…");
+const viteArgs = ["exec", "vite", "build", "--outDir", outDir, "--emptyOutDir"];
+// win32 单字符串命令（args 数组 + shell:true 触发 Node 24 DEP0190 警告污染 stderr——零噪声纪律）
+const vite =
+  process.platform === "win32"
+    ? spawnSync(`pnpm ${viteArgs.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ")}`, { cwd: root, shell: true, stdio: "inherit", windowsHide: true })
+    : spawnSync("pnpm", viteArgs, { cwd: root, stdio: "inherit", windowsHide: true });
+if (vite.status !== 0) {
+  die(`error: vite build 失败（exit ${vite.status}）——上方为原样输出`, 1);
+}
+if (!fs.existsSync(path.join(outDir, "index.html"))) {
+  die(`error: 产物缺 ${outDir}/index.html（vite outDir 与 --out 错配？）`, 1, "应用自定义了 outDir 时，--out 传同一目录");
+}
+
+/* ---------------- ② 服务端启动壳（生成物勿手改；重跑 build 再生） ---------------- */
+
+console.log("[atelier build] ② 产物启动壳 server.mjs（装配单源 createAppHandler + vendor serve 单源）…");
+const shell = `/**
+ * server.mjs — \`atelier build --target=${target}\` 产物启动壳（D-F14；生成物勿手改，重跑 build 再生）。
+ * 单容器双面：静态前端（本目录）+ <mount>/* 端点面——装配单源 = ../src/server/main-server.ts 的
+ * createAppHandler()，监听/握手单源 = vendor node-host.ts serve()（§11.1 三方契约）。
+ * env：ATELIER_SERVER_PORT（缺省 5174，0=自动）/ ATELIER_SERVER_MOUNT（缺省 /api）；
+ * ATELIER_DB_PATH 归应用装配侧读取（gen db 接线后同一 env）。诚实边界：本目录须与 src/ 整体
+ * 部署（相对引用 vendor 单源——单文件打包归 package/桌面线）；TLS/压缩归反代。
+ */
+import { fileURLToPath } from "node:url";
+import { serve } from "../src/vendor/atelier/server/node-host.ts";
+import { withStaticHost } from "../src/vendor/atelier/server/static-host.ts";
+import { createAppHandler } from "../src/server/main-server.ts";
+
+const port = Number(process.env.ATELIER_SERVER_PORT ?? 5174);
+const mount = process.env.ATELIER_SERVER_MOUNT ?? "/api";
+const handler = withStaticHost(await createAppHandler(), { dir: fileURLToPath(new URL("./", import.meta.url)), mount });
+serve(handler, { port, host: "127.0.0.1" }).catch((e) => {
+  console.error(\`[atelier] 产物 server 启动失败：127.0.0.1:\${port} —— \${e?.message ?? e}\`);
+  console.error("[atelier] fix：设 ATELIER_SERVER_PORT 换端口，或释放被占端口后重跑（固定端口不静默换口）。");
+  process.exit(1);
+});
+`;
+fs.mkdirSync(outDir, { recursive: true });
+fs.writeFileSync(path.join(outDir, "server.mjs"), shell, "utf8"); // utf8 显式 + 源码字面 LF（无 \r 注入）
+
+/* ---------------- ③ 产物冒烟自证：PORT=0 spawn → 握手 → 双面探活 → 收尸 ---------------- */
+
+const bunMissing = target === "bun" && spawnSync("bun", ["--version"], { encoding: "utf8", windowsHide: true }).status !== 0;
+let smoke = "skipped (--no-smoke)";
+if (!noSmoke && bunMissing) {
+  smoke = "未实测（本机无 bun——产物照出，挂账既有口径；有 bun 的宿主直接跑下述运行命令即可）";
+} else if (!noSmoke) {
+  console.log(`[atelier build] ③ 冒烟自证（${target} runtime，PORT=0 → 握手 → app.ping + 静态 index）…`);
+  const entry = path.join(outDir, "server.mjs");
+  const smokeMount = process.env.ATELIER_SERVER_MOUNT ?? "/api"; // 与产物壳同读一份 env（壳缺省同值）
+  const proc = spawn(target === "bun" ? "bun" : process.execPath, [entry], {
+    cwd: outDir,
+    env: { ...process.env, ATELIER_SERVER_PORT: "0" },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let out = "";
+  proc.stdout?.on("data", (c) => (out += c.toString("utf8")));
+  proc.stderr?.on("data", (c) => (out += c.toString("utf8")));
+  const ready = await new Promise((resolve) => {
+    const rl = readline.createInterface({ input: proc.stdout });
+    const timer = setTimeout(() => settle(null), 15_000);
+    function settle(v) {
+      clearTimeout(timer);
+      rl.close();
+      resolve(v);
+    }
+    rl.on("line", (line) => {
+      const m = line.match(/^ATELIER_SERVER_READY \{"port":(\d+)\}\s*$/);
+      if (m) settle(Number(m[1]));
+    });
+    proc.on("exit", () => settle(null));
+  });
+  let ok = false;
+  let note = "";
+  if (ready != null) {
+    try {
+      const ping = await fetch(`http://127.0.0.1:${ready}${smokeMount}/app.ping`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(5_000),
+      });
+      const index = await fetch(`http://127.0.0.1:${ready}/`, { signal: AbortSignal.timeout(5_000) });
+      ok = ping.status === 200 && index.status === 200;
+      note = `app.ping ${ping.status} · index ${index.status}`;
+    } catch (e) {
+      note = `探活请求失败：${e?.message ?? e}`;
+    }
+  } else {
+    note = "15s 未收到 ATELIER_SERVER_READY 握手行（或入口提前退出）";
+  }
+  if (proc.exitCode === null && !proc.killed) proc.kill(); // Windows kill=即终止；握手失败也不留孤儿
+  await new Promise((r) => (proc.exitCode !== null ? r() : proc.once("exit", r)));
+  if (!ok) {
+    die(`error: 产物冒烟自证未通过（${note}）\n子进程原样输出：\n${out.trim()}`, 1, "产物已生成可人工复查；无 app.ping 探活端点的应用可用 --no-smoke 显式跳过（不静默跳过）");
+  }
+  smoke = `app.ping 200 · index 200（${target} runtime）`;
+}
+
+/* ---------------- 出账：产物清单 + 运行指引 + 诚实边界 ---------------- */
+
+const runCmd = target === "bun" ? `bun ${path.relative(root, path.join(outDir, "server.mjs"))}` : `node ${path.relative(root, path.join(outDir, "server.mjs"))}`;
+console.log(`[atelier build] 产物齐备 → ${outDir}`);
+console.log(`  前端静态面: ${path.relative(root, path.join(outDir, "index.html"))} (+assets/，vite 产物)`);
+console.log(`  服务端入口: ${path.relative(root, path.join(outDir, "server.mjs"))}（装配单源 main-server.createAppHandler）`);
+console.log(`  冒烟自证: ${smoke}`);
+console.log("\n运行（单容器整目录部署——dist 与 src/ 相对引用不拆件）：");
+console.log(`  ATELIER_DB_PATH=<sqlite 卷路径> ${runCmd}   # 监听 127.0.0.1:5174（ATELIER_SERVER_PORT 可换，0=自动）`);
+console.log(`接库应用先迁移再起服：ATELIER_DB_PATH=<卷> node ${path.relative(root, path.join(PKG, "cli.mjs"))} migrate up --root ${root}`);
+console.log("诚实边界：TLS/压缩/缓存 CDN 化归反代；产物非单文件（单文件 exe 归 package/桌面线）；edge/serverless = §12 不做清单。");
