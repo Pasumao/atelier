@@ -7,7 +7,7 @@
  *   1. templates/app/  → target/             app skeleton（config/index/main/components/tests/vite.config）
  *   2. runtime/*.ts    → target/src/runtime/ vendored 零依赖内核（应用不依赖框架目录即可跑）
  *   2b. runtime+server → target/src/vendor/atelier/  FS 线规范布局（生成器产物 import 面，§4.4/§7.2）
- *   3. dev/*.mjs       → target/scripts/     dev 面四件：插件 + 无头截图 + tailwind 主题生成 + server 监督器
+ *   3. dev/*.mjs       → target/scripts/     dev 面六件：插件 + 无头截图 + tailwind 主题生成 + server 监督器 + review 扩展两件（FS-M6）
  *   4. init-ai（除非 --no-ai）：skills 双落点 + AGENTS.md/llms.txt + specs/ + MCP 客户端配置
  */
 import fs from "node:fs";
@@ -84,10 +84,10 @@ for (const [srcDir, dstName] of [[RUNTIME, "runtime"], [path.join(PKG, "server")
   }
 }
 
-/* 4) vendored dev face — vite.config 从 ./scripts/ 引入 */
+/* 4) vendored dev face 六件 — vite.config 从 ./scripts/ 引入（FS-M6 起含 review 扩展两件） */
 const targetScripts = path.join(target, "scripts");
 fs.mkdirSync(targetScripts, { recursive: true });
-for (const f of ["atelier-dev-plugin.mjs", "dev-server-host.mjs", "dev-screenshot.mjs", "gen-tailwind-theme.mjs"]) {
+for (const f of ["atelier-dev-plugin.mjs", "dev-server-host.mjs", "dev-screenshot.mjs", "gen-tailwind-theme.mjs", "dev-review-data.mjs", "dev-review-pages.mjs"]) {
   fs.copyFileSync(path.join(DEV, f), path.join(targetScripts, f));
 }
 

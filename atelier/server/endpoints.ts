@@ -21,6 +21,7 @@
 import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contract.ts";
 import { LiveEngine, type LiveEngineOptions } from "./live.ts";
 import { beginWriteCapture, endWriteCapture, type WriteCapture } from "./sqlite.ts";
+import { INTROSPECT_NAME, introspectResponse } from "./introspect.ts";
 
 export type EndpointKind = "query" | "command";
 
@@ -376,6 +377,14 @@ export class EndpointRegistry {
             this.names()
           )
         );
+      }
+
+      // ---- D-F16 保留内省路由（§10.3）：GET <mount>/__atelier/server-status → 运行时事实 JSON。
+      //      dev 面 server-status（父进程代理）与 MCP endpoint.* 族、调试页三处同源；prod 旗下
+      //      introspectResponse 返回 null，落回下方既有 ATR 路径（调试面不进生产 API 面）。 ----
+      if (req.method === "GET" && name === INTROSPECT_NAME) {
+        const res = introspectResponse(this, { db, mount: mount || "/" });
+        if (res) return res;
       }
 
       if (req.method !== "POST") {

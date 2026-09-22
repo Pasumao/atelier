@@ -10,6 +10,14 @@
  *  - /__atelier/a11y                       无障碍树文本化（P2-2③：agent 检视语义优先于像素）
  *  - /__atelier/agent-health               agent 体检（P2-4：UA 分类台账 + 最近错误，JSON 结构化）
  *  - /__atelier/audit?lines=N              审计日志尾读
+ *  - /__atelier/server-status              server 面运行时内省代理（FS-M6 D-F16/§10.3：端点全表含契约体
+ *                                          + journal + live 订阅 + 迁移状态；子进程保留路由 + 父进程补充
+ *                                          restarts/dbPath/host——MCP endpoint.* 族与调试页三处同源）
+ *  - /__atelier/endpoints                  人可读端点调试页（D-F16：端点表 + try-it + schema 展示）
+ *  - /__atelier/review-data[?anchor=<id>]  review 扩展数据（§11.2/§11.3：checkpoint 台账 × 迁移审计 ×
+ *                                          command journal 窗口 diff + 三源统一时间轴；逻辑在
+ *                                          dev-review-data.mjs，台账/库缺失诚实降级）
+ *  - /__atelier/review-ext.js              review 页扩展脚本（注入既有 review 页，不重写它）
  *  - /__atelier/bridge/commands?token=     SSE 命令下行流（页面 EventSource 订阅；连接自报 UA → 体检入账）
  * 桥接
  *  - POST /__atelier/bridge/state          页面状态推送（缓存给 state.snapshot）
@@ -22,6 +30,9 @@
 import { createRequire } from "node:module";
 import { capturePagePersistent as capturePage, captureA11yPersistent } from "./dev-screenshot.mjs";
 import { createServerSupervisor, resolveServerConfig } from "./dev-server-host.mjs";
+/* FS-M6 尾件批（D-F16/§11.2/§11.3）：路由逻辑在独立模块——本文件只做接线注册 */
+import { buildReviewDataAsync } from "./dev-review-data.mjs";
+import { endpointsPageHtml, reviewExtScript } from "./dev-review-pages.mjs";
 
 /** P2-4 agent 体检：UA 启发式分类（Astro 7 模式借鉴）。诚实边界：启发式可被伪造——
  * 面向的是检视而非鉴权；页面桥 SSE 连接自报 UA 是最可靠的信号（MCP 工具链调用无 UA）。 */
@@ -56,6 +67,9 @@ export function atelierDevPlugin() {
   let a11yInflight = null;
   /* FS-7 dev 托管（§11.1）：server 面子进程监督器；挂在这层作用域以便 closeBundle 兜底收尾 */
   let serverSupervisor = null;
+  /* FS-M6（D-F16 server-status 的父进程侧补充事实）：热重启计数 + 解析出的库路径（未托管 = null） */
+  let serverRestarts = 0;
+  let serverDbPath = null;
 
   /* ---- P2-4 agent 体检台账：连接分类 + 最近错误（JSON 结构化，/__atelier/agent-health 出口） ---- */
   const agentLedger = {
@@ -108,6 +122,7 @@ export function atelierDevPlugin() {
           appCfg = JSON.parse(fs.readFileSync(path.join(ROOT, "atelier.config.json"), "utf-8"));
         } catch { /* 读不到/坏 JSON → 全缺省（5174 / /api / .atelier/dev.db） */ }
         const sc = resolveServerConfig(appCfg, process.env);
+        serverDbPath = sc.dbPath; // server-status 父进程侧补充事实（review-data 的 sqlite 兜底也用它）
         serverSupervisor = createServerSupervisor({ root: ROOT, port: sc.port, mount: sc.mount, dbPath: sc.dbPath, env: process.env });
         server.middlewares.use(serverSupervisor.middleware());
         serverSupervisor.start().catch((e) => console.error(`[atelier] ${e?.message ?? e}`));
@@ -120,6 +135,7 @@ export function atelierDevPlugin() {
           if (p !== contractFile && !String(p).startsWith(serverDirPrefix)) return;
           clearTimeout(restartTimer);
           restartTimer = setTimeout(() => {
+            serverRestarts += 1; // server-status 的 restarts 位（§10.3 运行时事实）
             serverSupervisor?.restart("src/server 面文件变更").catch((e) => console.error(`[atelier] ${e?.message ?? e}`));
           }, 150);
         };
@@ -138,6 +154,31 @@ export function atelierDevPlugin() {
       } else {
         console.log(`[atelier] dev 托管跳过：src/server/main-server.ts 不存在（纯前端应用——server 面不托管，dev 面其余功能照旧）`);
       }
+
+      /* ---------- FS-M6（D-F16/§10.3）：server 面内省代理 ----------
+       * 子进程保留路由 GET <mount>/__atelier/server-status（server/introspect.ts 产出）经此代理 +
+       * 补充父进程侧事实（restarts/dbPath/host）。child null = 未托管/热重启窗口/握手中——诚实
+       * ok:false，绝不假数据（MCP 消费侧契约：ok!==true 即结构化报错，见 endpoint-tools.mjs）。 */
+      const fetchChildStatus = async () => {
+        const port = serverSupervisor?.targetPort?.() ?? null;
+        if (!port) return null;
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}/__atelier/server-status`, { signal: AbortSignal.timeout(4000) });
+          if (!r.ok) return null;
+          const child = await r.json();
+          return {
+            ...child,
+            server: {
+              ...(child.server ?? {}),
+              restarts: serverRestarts,
+              dbPath: serverDbPath,
+              host: `127.0.0.1:${server.config.server.port ?? 5173}`, // 公共入口 = dev 面端口（/api 反代）
+            },
+          };
+        } catch {
+          return null; // 握手窗口/子进程刚退出——按未就绪处理
+        }
+      };
 
       server.middlewares.use(async (req, res, next) => {
         const rawUrl = req.url ?? "";
@@ -178,6 +219,45 @@ export function atelierDevPlugin() {
         }
 
         /* ---------- query face ---------- */
+        /* ---------- FS-M6（D-F16/§11.2/§11.3）：server 内省代理 + 调试页 + review 扩展数据 ---------- */
+        if (url === "/__atelier/server-status") {
+          const status = await fetchChildStatus();
+          if (status) res.end(JSON.stringify(status));
+          else
+            res.end(
+              JSON.stringify({
+                ok: false,
+                note:
+                  "server 面未托管/未就绪（src/server/main-server.ts 不存在，或监督器握手/热重启中）——端点注册表/journal/live 是子进程内存态，父进程无事实可报；fix：应用目录 pnpm dev（托管自动拉起）并确认 main-server.ts 装配了端点",
+              }),
+            );
+          return;
+        }
+        if (url === "/__atelier/endpoints") {
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.end(endpointsPageHtml(TOKEN));
+          return;
+        }
+        if (url === "/__atelier/review-data") {
+          const anchor = new URL(rawUrl, "http://x").searchParams.get("anchor");
+          let childStatus = null;
+          try {
+            childStatus = await fetchChildStatus();
+          } catch {
+            childStatus = null;
+          }
+          // 迁移审计兜底（server-status 不带迁移行时）：node:sqlite 只读直开 dev 库（诚实标注实验性，
+          // 见 dev-review-data.mjs readMigrationsSqlite）——dbPath 用托管装配解析出的同一个
+          const payload = await buildReviewDataAsync({ root: ROOT, serverStatus: childStatus, anchorId: anchor, dbPath: serverDbPath });
+          res.end(JSON.stringify(payload));
+          return;
+        }
+        if (url === "/__atelier/review-ext.js") {
+          // review 页 <script src> 注入件（token 经 query——EventSource/脚本标签无自定义头，同页面既有约定）
+          res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+          res.end(reviewExtScript(TOKEN));
+          return;
+        }
         if (url === "/__atelier/registry") {
           const manifest = JSON.parse(fs.readFileSync(`${ROOT}/src/manifest.json`, "utf-8"));
           res.end(JSON.stringify({ ok: true, meta: { atelier: "v0.2", server: "dev" }, ...manifest }));
@@ -398,7 +478,9 @@ $("fresh").onclick = async () => {
   }catch(e){ $("msg").textContent = String(e); }
 };
 loadState(); loadImages(); loadHistory();
-</script></body></html>`);
+</script>
+<script src="/__atelier/review-ext.js?token=${TOKEN}"></script>
+</body></html>`);
           return;
         }
         if (url === "/__atelier/feedback-history") {
