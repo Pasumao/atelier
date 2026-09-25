@@ -16,12 +16,15 @@
  *   绝不编造空表假象；
  * - journal 为内存环形（journalLimit 上限、server 重启清零）——跨重启的历史归 dev 面
  *   audit.jsonl 时间轴（§11.3 统一时间轴的另一来源）；
- * - 迁移审计现状（§11.3 挂账说明）：状态表即审计对象（决策 19"迁移即 checkpoint 审计对象"），
- *   只有 applied 时刻（applied_at）与名字；down 成功即删状态行 → down 历史无处可记
- *   （决策 21 台账形状预留位）——durMs/principal 无持久化，归一层诚实置 null。
+ * - 迁移审计（§11.3）：状态表即审计对象（决策 19"迁移即 checkpoint 审计对象"），只有
+ *   applied 时刻（applied_at）与名字；down 历史/ principal /durMs 持久于
+ *   atelier_migration_journal（决策 21 台账预留位关闭，M6 挂账候选池第二枚——追加式审计史，
+ *   migrate.ts 单源写入）；快照只携 journal 尾部（MIGRATION_JOURNAL_TAIL_LIMIT，有界），
+ *   全量走库直读（readMigrationJournal / dev-review-data node:sqlite 兜底）。journal 表
+ *   不存在（旧库）= ok:false 诚实降级，绝不假数据。
  */
 import type { EndpointDef, EndpointRegistry, EndpointSummary } from "./endpoints.ts";
-import { migrateStatus } from "./migrate.ts";
+import { MIGRATION_JOURNAL_TAIL_LIMIT, migrateStatus } from "./migrate.ts";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -85,14 +88,42 @@ function introspectTables(db: ReadableDb): unknown[] {
 }
 
 /**
- * 迁移状态行（§11.3 迁移审计的现成数据源）：状态表行全量（id 序）+ head + applied/pending 名单。
- * rows = 审计呈现面（appliedAt/downVerified 原样）；applied/pending/head = MCP db.migrations 契约位。
- * 目录扫描复用 migrateStatus（完整性体检位 fileMissing/checksumOk 顺带可用）；目录缺省 = pending 空。
+ * 迁移 journal 尾部（决策 21 台账预留位关闭——down 历史出口）：id 降序取尾再反转为时间升序
+ * （快照有界，全量走库直读）。表不存在（journal 时代之前的旧库）= ok:false 诚实降级。
+ * 行形状与 migrate.ts readMigrationJournal 同源（camelCase 投影，两处注释互指）。
+ */
+function introspectJournalTail(db: ReadableDb): { ok: boolean; rows: unknown[]; note: string | null } {
+  const has = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'atelier_migration_journal'").get();
+  if (!has) {
+    return { ok: false, rows: [], note: "no atelier_migration_journal table (pre-journal db; created on next migrate up/down)" };
+  }
+  const rows = db
+    .prepare("SELECT id, ts, name, action, status, principal, dur_ms, checksum FROM atelier_migration_journal ORDER BY id DESC LIMIT ?")
+    .all(MIGRATION_JOURNAL_TAIL_LIMIT)
+    .reverse()
+    .map((r) => ({
+      id: Number(r.id),
+      ts: Number(r.ts),
+      name: String(r.name),
+      action: r.action === "down" ? "down" : "up",
+      status: r.status === "failed" ? "failed" : "ok",
+      principal: r.principal == null ? null : String(r.principal),
+      durMs: r.dur_ms == null ? null : Number(r.dur_ms),
+      checksum: r.checksum == null ? null : String(r.checksum),
+    }));
+  return { ok: true, rows, note: null };
+}
+
+/**
+ * 迁移状态行（§11.3 迁移审计的现成数据源）：状态表行全量（id 序）+ head + applied/pending 名单
+ * + journal 尾部（down 历史出口）。rows = 审计呈现面（appliedAt/downVerified 原样）；
+ * applied/pending/head = MCP db.migrations 契约位。目录扫描复用 migrateStatus（完整性体检位
+ * fileMissing/checksumOk 顺带可用）；目录缺省 = pending 空。
  */
 function introspectMigrations(db: ReadableDb, migrationsDir: string | null) {
   const has = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'atelier_migrations'").get();
   if (!has) {
-    return { head: null, applied: [], pending: [], rows: [], note: "no atelier_migrations table (migrate up first)" };
+    return { head: null, applied: [], pending: [], rows: [], journal: { ok: false, rows: [], note: "no atelier_migrations table (migrate up first)" }, note: "no atelier_migrations table (migrate up first)" };
   }
   const rows = db.prepare("SELECT id, name, checksum, applied_at, down_verified FROM atelier_migrations ORDER BY id").all().map((r) => ({
     id: Number(r.id),
@@ -113,7 +144,7 @@ function introspectMigrations(db: ReadableDb, migrationsDir: string | null) {
       pending = []; // 目录畸形 = CLI migrate 会显式报错；内省面不重复炸，pending 如实为空
     }
   }
-  return { head, applied, pending, rows, note: null };
+  return { head, applied, pending, rows, journal: introspectJournalTail(db), note: null };
 }
 
 /**

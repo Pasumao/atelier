@@ -135,7 +135,7 @@ describe("gen auth 生成器（FS-DESIGN §6.1，FS-M2(m2d)；产物形态 + reg
     const names = (
       db1.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]
     ).map((r) => r.name);
-    expect(names).toEqual(["atelier_migrations", "sessions", "users"]); // 绿：成对迁移真实可逆应用
+    expect(names).toEqual(["atelier_migration_journal", "atelier_migrations", "sessions", "users"]); // 绿：成对迁移真实可逆应用（journal 惰性建表随首条 up 落地）
     db1.close();
     fs.rmSync(path.join(migDir, "001_auth.down.sql")); // 先红：故意拆掉配对
     const db2 = await openSqlite(":memory:");

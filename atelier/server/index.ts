@@ -36,9 +36,14 @@ export {
   migrateDown,
   migrateVerify,
   MIGRATIONS_TABLE_DDL,
+  readMigrationJournal,
+  MIGRATION_JOURNAL_DDL,
+  MIGRATION_JOURNAL_TAIL_LIMIT,
   type MigrationStep,
   type MigrateStatus,
   type MigrateVerifyResult,
+  type MigrationJournalEntry,
+  type MigrationJournalRead,
 } from "./migrate.ts";
 /* FS-7 live 引擎追加（只加不改——既有行不动，api-diff 盯兼容性） */
 export { LiveEngine, type LiveEngineHost, type LiveEngineOptions } from "./live.ts";

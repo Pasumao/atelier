@@ -1,5 +1,6 @@
 /**
- * 可逆迁移器（FS-DESIGN §5.4 全规格，FS-4，FS-M2(m2b)）。
+ * 可逆迁移器（FS-DESIGN §5.4 全规格，FS-4，FS-M2(m2b)；持久 journal = 决策 21 台账预留位关闭，
+ * M6 尾件批挂账候选池第二枚）。
  * 迁移目录形态：`NNN_<name>.up.sql` / `NNN_<name>.down.sql` 成对（缺 down = ATR-331，
  * 可逆性是硬门槛）；按 NNN 升序应用、逆序回滚；name = 文件 stem（如 `001_create_chats`）。
  *
@@ -9,18 +10,35 @@
  * checksum = sha256(up.sql 文件内容 utf8，node:crypto)；应用前对已应用条目校验，文件被改
  * 或缺失 = ATR-332（完整性域，up/down 两路径同口径）。
  *
+ * 迁移 journal（追加式审计史，决策 21 台账预留位的落地形态——**新表**而非改状态表形状）：
+ *   atelier_migration_journal(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
+ *     name TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('up','down')),
+ *     status TEXT NOT NULL CHECK(status IN ('ok','failed')), principal TEXT,
+ *     dur_ms INTEGER, checksum TEXT)
+ * 每次迁移执行（成功与失败都写 = §3.5 审计失败条目同纪律）追加一行：成功条目与迁移同事务
+ * （journal 与状态表原子一致），失败条目在 ROLLBACK 后独立落（不掩盖原始 ATR-33x）。
+ * CREATE TABLE IF NOT EXISTS 惰性建表——旧库首次 up/down 自动获得，atelier_migrations 形状
+ * 与 sha256 体检/checksum 语义零影响；纯读面（migrateStatus / readMigrationJournal）不建表。
+ * 只追加永不改删（append-only 审计纪律）。
+ *
  * 错误码语义（FS-DESIGN §15，正交切分）：
  *   ATR-331 迁移缺 down 配对（up 拒绝应用不成对迁移）
  *   ATR-332 迁移完整性破坏（已应用文件被改/缺失，sha256 对不上）
  *   ATR-333 down 缺失 / down 失败 / down 标注不可逆且未 force（§18 R7 风险约定：
  *           down 文件含 `-- 不可逆：` 标记注释时必须显式 force:true，无静默默认）
- *   ATR-334 up 失败（事务已回滚；含 up 目标迁移不存在——up 域操作无法执行）
+ *   ATR-334 up 失败（事务已回滚；含 up 目标不存在——up 域操作无法执行）
  * 四段式经 endpoints.ts 的 AtrEndpointError/endpointError 复用（决策 9）。
  *
  * 诚实边界（§5.4）：无自动 diff 生成 down（v1 只生成新表成对骨架，改列迁移手写过 verify）；
- * 单库单线无多环境分支；down_verified 位 v1 恒 0（down 成功即删状态行，无历史可记——
- * 列为决策 21 台账形状预留）；目录畸形（编号冲突/历史空洞）抛普通 Error——那是环境损坏
- * 而非四码契约违约；迁移文件不得自带 BEGIN/COMMIT（事务由迁移器统一逐条包裹）。
+ * 单库单线无多环境分支；down_verified 位恒 0（状态表形状冻结——down 历史改记于
+ * atelier_migration_journal，本列留作兼容位）；journal 只记**执行位**结果（进到事务执行的
+ * up/down），前置拒绝（完整性体检 ATR-332 / 缺 down ATR-331 / 目标不存在 / 不可逆未 force）
+ * 不入 journal——那是拒绝不是执行；seed 动作不入本 journal（种子有自己的 atelier_seeds
+ * 记账，且种子是数据引导不是 schema 迁移）；journal 是库内追加史——库删即史灭，不含
+ * rollback/清库场景的重建；principal 在 CLI 场景恒为缺省值（无服务端主体概念，
+ * ATELIER_PRINCIPAL env 可覆盖）；失败条目的写入自身失败时不掩盖原始迁移错误（诚实缺口：
+ * 该次失败未入史）；目录畸形（编号冲突/历史空洞）抛普通 Error——那是环境损坏而非四码
+ * 契约违约；迁移文件不得自带 BEGIN/COMMIT（事务由迁移器统一逐条包裹）。
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -32,12 +50,39 @@ import { openSqlite, type SqliteDb } from "./sqlite.ts";
 export const MIGRATIONS_TABLE_DDL =
   "CREATE TABLE IF NOT EXISTS atelier_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL, down_verified INTEGER DEFAULT 0)";
 
+/**
+ * 迁移 journal DDL（决策 21 台账预留位关闭）：追加式审计史——只 INSERT 不 UPDATE/DELETE。
+ * 独立新表而非给 atelier_migrations 加列/行：状态表形状被 struct 守卫、checkpoint 联动
+ * （migrationHead = max id）、sha256 体检三面消费，动形状 = 三处联动风险换一个史字段；
+ * 追加表零触碰既有语义且天然承载多轮 up→down→up 历史（状态表一行 = 当前态，journal 一行
+ * = 一次事件，两种真相各司其职）。
+ */
+export const MIGRATION_JOURNAL_DDL =
+  "CREATE TABLE IF NOT EXISTS atelier_migration_journal (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, name TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('up','down')), status TEXT NOT NULL CHECK(status IN ('ok','failed')), principal TEXT, dur_ms INTEGER, checksum TEXT)";
+
 const STATUS_TABLE = "atelier_migrations";
+const JOURNAL_TABLE = "atelier_migration_journal";
+/** journal 尾部上限（introspect server-status 快照携带量——快照有界，全量走库直读） */
+export const MIGRATION_JOURNAL_TAIL_LIMIT = 200;
 const FILE_RE = /^(\d+)_([A-Za-z0-9_-]+)\.(up|down)\.sql$/;
 /** 不可逆标记注释（§18 R7 风险约定）：`-- 不可逆：<说明为何安全/丢弃什么>` */
 const IRREVERSIBLE_RE = /--\s*不可逆：/;
 
 export type MigrationStep = { name: string; checksum: string; durMs: number };
+
+/** 迁移 journal 行（读取面 camelCase；库内列 = ts/name/action/status/principal/dur_ms/checksum） */
+export type MigrationJournalEntry = {
+  id: number;
+  ts: number;
+  name: string;
+  action: "up" | "down";
+  status: "ok" | "failed";
+  principal: string | null;
+  durMs: number | null;
+  checksum: string | null;
+};
+
+export type MigrationJournalRead = { ok: boolean; rows: MigrationJournalEntry[]; note: string | null };
 
 export type MigrateStatus = {
   applied: {
@@ -135,6 +180,78 @@ function readStatusRows(db: SqliteDb): { name: string; checksum: string; applied
     .all() as { name: string; checksum: string; applied_at: number; down_verified: number }[];
 }
 
+/* ---------------- 迁移 journal（追加式审计史：决策 21 台账预留位关闭） ---------------- */
+
+/**
+ * journal 主体解析：显式 opts.principal 优先 → ATELIER_PRINCIPAL env 覆盖 → 'cli' 缺省。
+ * CLI 场景没有服务端主体概念（诚实边界）；server 侧将来装配迁移执行时可显式传入会话主体。
+ */
+function journalPrincipal(explicit?: string): string {
+  return explicit ?? process.env.ATELIER_PRINCIPAL ?? "cli";
+}
+
+type JournalAppend = {
+  name: string;
+  action: "up" | "down";
+  status: "ok" | "failed";
+  principal: string;
+  durMs: number;
+  checksum: string;
+};
+
+/**
+ * journal 追加写（惰性建表——旧库首次 up/down 自动获得 journal，向后兼容零迁移）。
+ * 调用方负责在正确的事务位置写入：成功条目与迁移**同事务**（journal 与状态表原子一致，
+ * 库状态与审计史永不脱节）；失败条目在 ROLLBACK **之后**独立落（事务已不存在）。
+ */
+function appendJournal(db: SqliteDb, entry: JournalAppend): void {
+  db.exec(MIGRATION_JOURNAL_DDL);
+  db.prepare(`INSERT INTO ${JOURNAL_TABLE} (ts, name, action, status, principal, dur_ms, checksum) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+    Date.now(),
+    entry.name,
+    entry.action,
+    entry.status,
+    entry.principal,
+    entry.durMs,
+    entry.checksum
+  );
+}
+
+/** 失败条目落账（ROLLBACK 后调用）：journal 写入失败不掩盖原始迁移错误——原始 ATR-33x 的
+ * 可导航性优先，代价是诚实缺口（该次失败未入史）。静默的只是审计追加，不是迁移失败。 */
+function appendJournalFailedQuietly(db: SqliteDb, entry: JournalAppend): void {
+  try {
+    appendJournal(db, entry);
+  } catch {
+    /* journal 不可写（磁盘满/库锁/只读连接）——原始错误照抛 */
+  }
+}
+
+/**
+ * 迁移 journal 只读（review 面 §11.3 与后续审计消费的单源读取口）：表不存在 = ok:false +
+ * note（journal 时代之前的旧库诚实降级——此前 down 历史无处可考，绝不假数据）。纯读不建表。
+ */
+export function readMigrationJournal(db: SqliteDb): MigrationJournalRead {
+  const has = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(JOURNAL_TABLE);
+  if (!has) {
+    return { ok: false, rows: [], note: "库内无 atelier_migration_journal 表（journal 时代之前的旧库——下次 migrate up/down 惰性建表，此前的 down 历史无处可考）" };
+  }
+  const rows = db
+    .prepare(`SELECT id, ts, name, action, status, principal, dur_ms, checksum FROM ${JOURNAL_TABLE} ORDER BY id`)
+    .all()
+    .map((r) => ({
+      id: Number(r.id),
+      ts: Number(r.ts),
+      name: String(r.name),
+      action: r.action === "down" ? "down" : "up",
+      status: r.status === "failed" ? "failed" : "ok",
+      principal: r.principal == null ? null : String(r.principal),
+      durMs: r.dur_ms == null ? null : Number(r.dur_ms),
+      checksum: r.checksum == null ? null : String(r.checksum),
+    })) as MigrationJournalEntry[];
+  return { ok: true, rows, note: null };
+}
+
 /** 目标解析：纯数字 = NNN 编号；否则 = 完整 stem（`001_create_chats`）。找不到返回 null */
 function resolveTarget(files: MigrationFile[], to: string): MigrationFile | null {
   if (/^\d+$/.test(to)) {
@@ -169,15 +286,18 @@ export function migrateStatus(db: SqliteDb, dir: string): MigrateStatus {
 }
 
 /**
- * 顺序应用待迁移（逐条事务包裹，记 checksum）。opts.to = 目标（编号或 stem），只应用到它。
+ * 顺序应用待迁移（逐条事务包裹，记 checksum）。opts.to = 目标（编号或 stem），只应用到它；
+ * opts.principal = journal 主体（缺省 ATELIER_PRINCIPAL env → 'cli'）。
  * 步骤：先对全部已应用条目做完整性体检（文件缺失/被改 = ATR-332，与是否有待应用无关——
  * 每次都查，漂移不过夜），再逐条 pending：缺 down = ATR-331 → BEGIN IMMEDIATE 应用 +
- * 记账 → COMMIT；失败 ROLLBACK = ATR-334。返回每次应用的 { name, checksum, durMs }。
+ * 记账 + journal ok 行（同事务，原子一致）→ COMMIT；失败 ROLLBACK = ATR-334 + journal
+ * failed 行（回滚后独立落，不掩盖原始错误）。返回每次应用的 { name, checksum, durMs }。
  */
-export function migrateUp(db: SqliteDb, dir: string, opts: { to?: string } = {}): MigrationStep[] {
+export function migrateUp(db: SqliteDb, dir: string, opts: { to?: string; principal?: string } = {}): MigrationStep[] {
   db.exec(MIGRATIONS_TABLE_DDL);
   const files = scanMigrations(dir);
   const fileByName = new Map(files.map((f) => [f.name, f]));
+  const principal = journalPrincipal(opts.principal);
 
   // 完整性体检（ATR-332）：状态表有记录就必须能对上目录里的文件（up 文件是 checksum 对象）
   for (const row of readStatusRows(db)) {
@@ -222,6 +342,8 @@ export function migrateUp(db: SqliteDb, dir: string, opts: { to?: string } = {})
       db.exec("BEGIN IMMEDIATE");
       db.exec(f.upSql);
       db.prepare(`INSERT INTO ${STATUS_TABLE} (name, checksum, applied_at, down_verified) VALUES (?, ?, ?, 0)`).run(f.name, f.checksum, Date.now());
+      // journal ok 行与迁移同事务：状态表记账与审计史原子一致（决策 21 台账预留位关闭）
+      appendJournal(db, { name: f.name, action: "up", status: "ok", principal, durMs: Math.round(performance.now() - t0), checksum: f.checksum });
       db.exec("COMMIT");
     } catch (e) {
       try {
@@ -229,6 +351,8 @@ export function migrateUp(db: SqliteDb, dir: string, opts: { to?: string } = {})
       } catch {
         /* ROLLBACK 本身失败（连接已坏）——不掩盖原始错误 */
       }
+      // 失败条目也在案（§3.5 审计失败条目同纪律）——回滚后事务已不存在，独立落账
+      appendJournalFailedQuietly(db, { name: f.name, action: "up", status: "failed", principal, durMs: Math.round(performance.now() - t0), checksum: f.checksum });
       throw fail("ATR-334", `迁移 ${f.name} up 失败，事务已回滚：${errMsg(e)}`, `修复 ${f.upPath} 中的 SQL 后重跑（失败即整条回滚，库未受影响）；迁移文件不得自带 BEGIN/COMMIT——事务由迁移器统一包裹`, [f.name]);
     }
     steps.push({ name: f.name, checksum: f.checksum, durMs: Math.round(performance.now() - t0) });
@@ -238,14 +362,17 @@ export function migrateUp(db: SqliteDb, dir: string, opts: { to?: string } = {})
 
 /**
  * 逆序回滚。opts.to = 回滚到该目标为止（编号或 stem；目标本身保留）；**无 to = 只回滚
- * 最后一条**（破坏面最小的缺省）。语义：完整性体检（文件被改/缺失 = ATR-332，同 up 口径）
- * → down 缺失 = ATR-333 → 含 `-- 不可逆：` 标记且未 force = ATR-333（fix 指明风险约定）
- * → BEGIN IMMEDIATE 执行 down + 删状态行 → COMMIT；失败 ROLLBACK = ATR-333。
+ * 最后一条**（破坏面最小的缺省）；opts.principal = journal 主体（缺省同 up）。
+ * 语义：完整性体检（文件被改/缺失 = ATR-332，同 up 口径）→ down 缺失 = ATR-333 → 含
+ * `-- 不可逆：` 标记且未 force = ATR-333（fix 指明风险约定）→ BEGIN IMMEDIATE 执行 down +
+ * 删状态行 + journal ok 行（同事务——down 历史自此持久，状态行删了 journal 还在）→ COMMIT；
+ * 失败 ROLLBACK = ATR-333 + journal failed 行（回滚后独立落）。
  */
-export function migrateDown(db: SqliteDb, dir: string, opts: { to?: string; force?: boolean } = {}): MigrationStep[] {
+export function migrateDown(db: SqliteDb, dir: string, opts: { to?: string; force?: boolean; principal?: string } = {}): MigrationStep[] {
   const files = scanMigrations(dir);
   const fileByName = new Map(files.map((f) => [f.name, f]));
   const rows = readStatusRows(db).reverse(); // id 降序 = 应用逆序
+  const principal = journalPrincipal(opts.principal);
 
   let revert: typeof rows;
   if (opts.to != null) {
@@ -275,6 +402,8 @@ export function migrateDown(db: SqliteDb, dir: string, opts: { to?: string; forc
       db.exec("BEGIN IMMEDIATE");
       db.exec(f.downSql);
       db.prepare(`DELETE FROM ${STATUS_TABLE} WHERE name = ?`).run(f.name);
+      // journal ok 行与 down 同事务：状态行删除而 journal 留痕——down 历史不再无处可记
+      appendJournal(db, { name: f.name, action: "down", status: "ok", principal, durMs: Math.round(performance.now() - t0), checksum: row.checksum });
       db.exec("COMMIT");
     } catch (e) {
       try {
@@ -282,6 +411,8 @@ export function migrateDown(db: SqliteDb, dir: string, opts: { to?: string; forc
       } catch {
         /* 不掩盖原始错误 */
       }
+      // 失败条目也在案（§3.5 同纪律）——回滚后独立落账，不掩盖原始 ATR-333
+      appendJournalFailedQuietly(db, { name: f.name, action: "down", status: "failed", principal, durMs: Math.round(performance.now() - t0), checksum: row.checksum });
       throw fail("ATR-333", `迁移 ${f.name} down 失败，事务已回滚：${errMsg(e)}`, `修复 ${f.name}.down.sql 中的 SQL 后重跑（失败即整条回滚，库未受影响）`, [f.name]);
     }
     steps.push({ name: f.name, checksum: row.checksum, durMs: Math.round(performance.now() - t0) });
