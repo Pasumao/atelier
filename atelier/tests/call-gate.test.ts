@@ -16,9 +16,16 @@
  *   红证 × 契约违规：min:1 违约 → ATR-201 上 stderr + exit 1（agent 看得见的结构化拒因）；
  *   红证 × server 不可达：ATR-403 形态结构化错误 + fix 指路 pnpm dev + exit 1（不静默、不 spawn——
  *     诚实边界：call 是验收环不是托管环，起 server 归 atelier dev / 产物自证归 build）；
- *   红证 × JSON 实参坏 / 非法端点名：usage 级 exit 2（不出网——坏输入在客户端即拦）。
+ *   红证 × JSON 实参坏 / 非法端点名：usage 级 exit 2（不出网——坏输入在客户端即拦）；
+ *   专项 × --timeout（M6-A 诚实边界关闭，2026-09-25 回填）：fixture 造慢端点（墙钟 sleep 超过
+ *     时限）→ call 以极小 --timeout 打它 → ATR-403「无响应」形态 + 报出实际时限 + fix 指路
+ *     --timeout 放宽 + exit 1（AbortSignal.timeout 路径）。红检替代=对照留证（同请求行为分流）：
+ *     ①同端点无 --timeout（默认 10s）→ exit 0 正常返回——排除端点/server 本身坏；
+ *     ②快端点 + 同样极小 --timeout → exit 0——超时是墙钟对响应等待，不是「小时限」本身；
+ *     ③错误文案分流——timeout 路径「无响应」+「--timeout」fix，不含不可达路径的「pnpm dev」
+ *     fix（call.mjs catch 内两个分支的措辞即分流观测点）。
  *
- * 诚实边界：--timeout 的 AbortSignal 路径不在此测（真超时需慢端点拖墙钟，挂账）；--mount 自定义
+ * 诚实边界：--mount 自定义
  * 值走的是 resolveServerConfig 同款归一逻辑，单测不重复钉（dev-server-host.test.ts 已钉）。
  * 纪律（§14.2）：全 127.0.0.1、listen 一律 port 0；afterAll 杀子进程收尸后才删临时目录（Windows
  * 孤儿进程零容忍，openapi-golden 同款）。
@@ -73,6 +80,8 @@ registry.register(defineCommand<{ msg: string }, { echoed: string; upper: string
   contract: { type: "object", reqProps: { msg: { type: "string", min: 1 } } },
   handler: (input) => ({ echoed: input.msg, upper: input.msg.toUpperCase() }),
 }));
+// --timeout 专项（M6-A 回填）：慢端点拖墙钟（2.5s sleep——超过用例的极小时限，短于缺省 10s 对照时限）
+registry.register(defineQuery("gate.slow", { handler: async () => { await new Promise((r) => setTimeout(r, 2500)); return { ok: true, slow: true }; } }));
 await serve(registry.createHandler({ mount: "/api" }), { port: 0 });
 `,
     "utf8",
@@ -178,6 +187,35 @@ d("D-F15 atelier call：端点直调 CLI 通道（Builder.io 四通道对表的 
       // 端点名形态守卫：带路径分隔符的实参是用法错误（端点是注册表名，不是 URL）
       const p = await call(["../escape"]);
       expect(p.status).toBe(2);
+    },
+  );
+
+  it(
+    "专项：--timeout AbortSignal 超时路径（慢端点 + 极小时限 → ATR-403 无响应 + fix 指路放宽）——对照留证分流",
+    { timeout: 60_000, retry: 0 },
+    async () => {
+      // 对照①（红检替代）：同端点无 --timeout（缺省 10s > 2.5s sleep）→ exit 0 正常返回——
+      // 证明下面的失败不是端点坏/server 坏，超时路径确实由时限触发
+      const ctrl = await call(["gate.slow"]);
+      expect(ctrl.status).toBe(0);
+      expect(JSON.parse(ctrl.stdout)).toEqual({ ok: true, slow: true });
+
+      // 专项：极小 --timeout 打慢端点 → fetch 被 AbortSignal.timeout 中止 →
+      // ATR-403「无响应」形态（区别于不可达路径的「不可达」）+ 报出实际时限 + fix 可执行
+      const t = await call(["gate.slow", "--timeout", "300"]);
+      expect(t.status).toBe(1);
+      expect(t.stdout).toBe(""); // 错误只上 stderr（响应 JSON 才上 stdout 的输出面纪律）
+      expect(t.stderr).toContain("ATR-403");
+      expect(t.stderr).toContain("无响应");
+      expect(t.stderr).toContain("300ms"); // 实际时限入错误文案
+      expect(t.stderr).toContain("--timeout"); // fix 指路放宽时限（可执行）
+      // 错误文案分流：timeout 路径不出现不可达路径的「pnpm dev」托管环指路
+      expect(t.stderr).not.toContain("pnpm dev");
+
+      // 对照②：快端点 + 同样极小 --timeout → exit 0——超时是墙钟对响应等待，不是「小时限」本身
+      const fast = await call(["gate.ping", "--timeout", "300"]);
+      expect(fast.status).toBe(0);
+      expect(JSON.parse(fast.stdout)).toEqual({ ok: true, pong: "gate" });
     },
   );
 });
