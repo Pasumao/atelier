@@ -67,6 +67,7 @@ specs/<name>.feedback.md  # 自由格式 markdown，原文返回
 - `endpoint.journal`：command 审计（成功与失败同源呈现）——"代理改了什么、砸了什么"从这里查。
 - `endpoint.call`：POST `<mount|/api>/<name>` JSON 体；响应体/状态/耗时返回，端点级 ATR 错误原样留在 body 作数据（不吞）；confirm=ask 时走多轮审批（见上节——首轮 inputRequired + requestState，二次提交 `_approval`）。
 - live 组在 dev face 不在时返回四段式结构化错误（fix 指路应用目录 `pnpm dev`），绝不静默空结果。
+- 长任务口径（`src/server/jobs/README.md` 同源）：**v1 无内建队列**——command 内联执行，长任务的 command 必须声明 `timeoutMs`（超时 ATR-322；handler 监听 `ctx.signal` 提前退出）；需要异步推进就拆多个 command 分步调用，不在 handler 里挂住等待。
 
 ## Stateless HTTP direct connect + Tasks (FS-M6, MCP 2026-07-28 对齐)
 
