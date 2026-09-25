@@ -10,7 +10,8 @@
     "mcp": "node mcp/server.mjs"
   },
   "devDependencies": {
-    "vitest": "^4.1.11",
-    "typescript": "^5.9.3"
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
   }
 }
