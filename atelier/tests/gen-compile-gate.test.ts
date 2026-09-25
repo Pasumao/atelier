@@ -124,11 +124,22 @@ describe("gen-compile 门禁（§7.3 门禁一：init → 三生成器 → tsc �
         );
       }
 
-      // ③ 三生成器全跑（中间零手改）
+      // ③ 三生成器全跑（中间零手改）。顺序 db → auth → endpoint 是承重序：gen endpoint 的
+      //    扫描面含 src/server/auth/endpoints.ts（FS-M2-d 挂账销账，加法语义）——endpoint
+      //    先于 auth 跑会扫不到 auth 产物，api.ts 缺 auth 客户端（下方断言即机检网）
       writeFixtureFiles(root);
       run(process.execPath, [CLI, "gen", "db", "--root", root]);
       run(process.execPath, [CLI, "gen", "auth", "--root", root]);
       run(process.execPath, [CLI, "gen", "endpoint", "--root", root]);
+
+      // ③' api.ts 含 auth 端点客户端（gen auth 产物三形态投影——authLogin 契约内联字面量
+      //     合成名 + authMe pick 本地表投影；类型渲染与客户端发射的编译性归 ④ tsc 全链零诊断）
+      const apiText = fs.readFileSync(path.join(root, "src", "generated", "api.ts"), "utf8");
+      expect(apiText).toContain(`export const authLogin = Object.freeze({`);
+      expect(apiText).toContain(`name: "auth.login" as const,`);
+      expect(apiText).toContain(`export const authMe = Object.freeze({`);
+      expect(apiText).toContain(`type AuthLoginInput = { email: string; password: string };`);
+      expect(apiText).toContain(`type AuthMeOutput = { email: string; role: string };`);
 
       // ④ tsc 严格诊断 = 0（typescript API 直跑；CompilerHost 的 cwd 必须锚到 fixture——
       //    否则 "types": ["node"] 的默认 typeRoots 解析从 vitest 进程 cwd 走查，永远找不到）
