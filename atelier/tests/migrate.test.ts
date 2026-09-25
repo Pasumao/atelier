@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { openSqlite, type SqliteDb } from "../server/sqlite";
-import { migrateStatus, migrateUp, migrateDown, migrateVerify, MIGRATIONS_TABLE_DDL } from "../server/migrate";
+import { migrateStatus, migrateUp, migrateDown, migrateVerify, MIGRATIONS_TABLE_DDL, MIGRATION_JOURNAL_DDL, readMigrationJournal } from "../server/migrate";
 import { seedAll } from "../server/seed";
 import { AtrEndpointError } from "../server/endpoints";
 
@@ -80,7 +81,7 @@ describeSqlite("migrate 可逆迁移器（FS-DESIGN §5.4，FS-M2(m2b)；node �
     expect(steps.map((s) => s.name)).toEqual(["001_create_chats", "002_add_messages"]);
     expect(steps[0].checksum).toMatch(/^[0-9a-f]{64}$/); // sha256 hex
     expect(steps[0].durMs).toBeTypeOf("number");
-    expect(tableNames(db)).toEqual(["atelier_migrations", "chats", "messages"]);
+    expect(tableNames(db)).toEqual(["atelier_migration_journal", "atelier_migrations", "chats", "messages"]); // journal 随 up 惰性建表
     const status = migrateStatus(db, dir);
     expect(status.applied.map((a) => a.name)).toEqual(["001_create_chats", "002_add_messages"]);
     expect(status.applied.every((a) => a.checksumOk && !a.fileMissing && !a.irreversible)).toBe(true);
@@ -125,7 +126,7 @@ describeSqlite("migrate 可逆迁移器（FS-DESIGN §5.4，FS-M2(m2b)；node �
     migrateUp(db, dir);
     const steps = migrateDown(db, dir, { to: "001" });
     expect(steps.map((s) => s.name)).toEqual(["002_add_messages"]);
-    expect(tableNames(db)).toEqual(["atelier_migrations", "chats"]);
+    expect(tableNames(db)).toEqual(["atelier_migration_journal", "atelier_migrations", "chats"]);
     db.close();
   });
 
@@ -224,7 +225,7 @@ describeSqlite("migrate 可逆迁移器（FS-DESIGN §5.4，FS-M2(m2b)；node �
       expect((e as AtrEndpointError).message).toContain("002_broken");
       expect((e as AtrEndpointError).message).toContain("回滚");
     }
-    expect(tableNames(db)).toEqual(["atelier_migrations", "chats"]); // 002 无残留
+    expect(tableNames(db)).toEqual(["atelier_migration_journal", "atelier_migrations", "chats"]); // 002 无残留（failed 行也在 journal 落案）
     expect(db.prepare("SELECT COUNT(*) AS n FROM atelier_migrations WHERE name = '002_broken'").get()!.n).toBe(0);
     db.close();
   });
@@ -275,6 +276,118 @@ describeSqlite("migrate 可逆迁移器（FS-DESIGN §5.4，FS-M2(m2b)；node �
     const result = await migrateVerify(dir);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("ATR-331");
+  });
+});
+
+describeSqlite("迁移持久 journal（决策 21 台账预留位关闭：追加式 atelier_migration_journal，M6 挂账候选池第二枚）", () => {
+  function rawJournalRows(db: SqliteDb): Record<string, unknown>[] {
+    return db
+      .prepare("SELECT id, ts, name, action, status, principal, dur_ms, checksum FROM atelier_migration_journal ORDER BY id")
+      .all() as Record<string, unknown>[];
+  }
+
+  it("up→down 后 journal 含 down 历史：状态行已删而 journal 仍在（down 不再丢史）；head 语义零变化", async () => {
+    const { db, dir } = await setup((d) => {
+      writeMig(d, 1, "create_chats", CHATS_UP, CHATS_DOWN);
+      writeMig(d, 2, "add_messages", MSG_UP, MSG_DOWN);
+    });
+    migrateUp(db, dir);
+    migrateDown(db, dir); // 无 to = 回滚 head（002）
+    const rows = rawJournalRows(db);
+    expect(rows.map((r) => [r.action, r.name, r.status])).toEqual([
+      ["up", "001_create_chats", "ok"],
+      ["up", "002_add_messages", "ok"],
+      ["down", "002_add_messages", "ok"], // 状态表里该行已删——journal 是唯一持久历史
+    ]);
+    expect(rows.every((r) => typeof r.ts === "number" && (r.ts as number) > 0)).toBe(true);
+    expect(rows.every((r) => r.principal === "cli")).toBe(true); // CLI 场景缺省主体
+    expect(rows.every((r) => typeof r.dur_ms === "number")).toBe(true);
+    expect(rows[2].checksum).toMatch(/^[0-9a-f]{64}$/); // down 行记的是迁移身份 checksum（up.sql 的 sha256）
+    // head 真相语义完全不变：状态表只剩 001
+    expect(migrateStatus(db, dir).applied.map((a) => a.name)).toEqual(["001_create_chats"]);
+    db.close();
+  });
+
+  it("失败迁移写 failed 行（§3.5 审计失败条目同纪律）：ATR-334 照抛且 journal 落案", async () => {
+    const { db, dir } = await setup((d) => {
+      writeMig(d, 1, "create_chats", CHATS_UP, CHATS_DOWN);
+      writeMig(d, 2, "broken", "CREATE TABEL oops (id INTEGER);", "DROP TABLE oops;");
+    });
+    migrateUp(db, dir, { to: "001" });
+    expect(() => migrateUp(db, dir)).toThrow(/ATR-334/);
+    const rows = rawJournalRows(db);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ action: "up", name: "002_broken", status: "failed", principal: "cli" });
+    expect(typeof rows[1].dur_ms).toBe("number"); // 失败也有实测时长
+    expect(rows[1].checksum).toMatch(/^[0-9a-f]{64}$/);
+    db.close();
+    // down 域执行位失败同口径：down SQL 本身炸 → ATR-333 照抛 + journal 落 action=down failed 行
+    const db2 = await openSqlite(":memory:");
+    const dir2 = makeMigDir();
+    writeMig(dir2, 1, "chats_bad_down", CHATS_UP, "DROP TABE chats;"); // down SQL 语法错
+    migrateUp(db2, dir2);
+    expect(() => migrateDown(db2, dir2)).toThrow(/ATR-333/);
+    const r2 = readMigrationJournal(db2);
+    expect(r2.ok).toBe(true);
+    expect(r2.rows.map((j) => [j.action, j.name, j.status])).toEqual([
+      ["up", "001_chats_bad_down", "ok"],
+      ["down", "001_chats_bad_down", "failed"],
+    ]);
+    db2.close();
+  });
+
+  it("旧库升级路径：只有状态表行（无 journal 表）→ up 惰性建表不炸；既有行不追溯补记", async () => {
+    const db = await openSqlite(":memory:");
+    const dir = makeMigDir();
+    writeMig(dir, 1, "create_chats", CHATS_UP, CHATS_DOWN);
+    writeMig(dir, 2, "add_messages", MSG_UP, MSG_DOWN);
+    // 模拟 journal 时代之前的旧库：状态表 + 已应用 001，journal 表不存在
+    db.exec(MIGRATIONS_TABLE_DDL);
+    db.prepare("INSERT INTO atelier_migrations (name, checksum, applied_at, down_verified) VALUES (?, ?, ?, 0)").run(
+      "001_create_chats",
+      createHash("sha256").update(CHATS_UP, "utf8").digest("hex"),
+      1727000000000
+    );
+    const steps = migrateUp(db, dir); // 002 应用 + journal 惰性建表
+    expect(steps.map((s) => s.name)).toEqual(["002_add_messages"]);
+    const r = readMigrationJournal(db);
+    expect(r.ok).toBe(true);
+    expect(r.rows.map((j) => [j.action, j.name])).toEqual([["up", "002_add_messages"]]); // 001 不追溯
+    db.close();
+  });
+
+  it("down 后再 up 往返：journal 序列 up→down→up（同名迁移多轮历史全保留）；verify 干跑不写宿主 journal", async () => {
+    const { db, dir } = await setup((d) => {
+      writeMig(d, 1, "create_chats", CHATS_UP, CHATS_DOWN);
+    });
+    migrateUp(db, dir);
+    migrateDown(db, dir);
+    migrateUp(db, dir);
+    const r = readMigrationJournal(db);
+    expect(r.ok).toBe(true);
+    expect(r.rows.map((j) => j.action)).toEqual(["up", "down", "up"]);
+    expect(new Set(r.rows.map((j) => j.name))).toEqual(new Set(["001_create_chats"]));
+    const before = r.rows.length;
+    const v = await migrateVerify(dir); // 影子库 :memory: 干跑——宿主 journal 不得增长
+    expect(v.ok).toBe(true);
+    expect(readMigrationJournal(db).rows).toHaveLength(before);
+    db.close();
+  });
+
+  it("journal 形状冻结 + 纯读面零写：status/journal 读都不建表；无 journal 表读取 → ok:false 诚实降级", async () => {
+    const { db, dir } = await setup(() => {});
+    expect(migrateStatus(db, dir)).toEqual({ applied: [], pending: [] });
+    expect(tableNames(db)).toEqual([]); // 纯读不落任何表（journal 表也不建）
+    expect(MIGRATION_JOURNAL_DDL).toContain("atelier_migration_journal");
+    expect(MIGRATION_JOURNAL_DDL).toContain("action TEXT NOT NULL CHECK(action IN ('up','down'))");
+    expect(MIGRATION_JOURNAL_DDL).toContain("status TEXT NOT NULL CHECK(status IN ('ok','failed'))");
+    expect(MIGRATION_JOURNAL_DDL).toContain("principal TEXT");
+    expect(MIGRATION_JOURNAL_DDL).toContain("dur_ms INTEGER");
+    const r = readMigrationJournal(db);
+    expect(r.ok).toBe(false);
+    expect(r.rows).toEqual([]);
+    expect(String(r.note)).toContain("journal");
+    db.close();
   });
 });
 

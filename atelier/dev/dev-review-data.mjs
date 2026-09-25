@@ -10,11 +10,13 @@
  *                           （内存环形、重启清零的诚实边界见 server/introspect.ts）；
  *   2. MCP/dev 操作审计  —— 既有 .atelier/audit.jsonl（/__atelier/audit 同一文件，只复用不重建）；
  *   3. 迁移审计          —— server-status.db.migrations.rows（atelier_migrations 状态表 = 决策 19
- *                           "迁移即 checkpoint 审计对象"的现成数据源）；server 面不在时兜底：
+ *                           "迁移即 checkpoint 审计对象"的现成数据源）+ 迁移 journal 尾部
+ *                           （atelier_migration_journal，决策 21 台账预留位关闭：追加式审计史
+ *                           up/down × ok/failed，down 历史自此持久）；server 面不在时兜底：
  *                           node:sqlite 只读直开 dev 库（Node ≥22.5 内建，实验性标注——
  *                           checkpoint.mjs readMigrationHead 同先例；只跑 SELECT，不写不锁）。
- *                           诚实挂账：状态表只记 applied 时刻，down 成功即删行 → down 历史无处
- *                           可记（决策 21 台账形状预留位）；principal/duration 无持久化，归一置 null。
+ *                           旧库无 journal 表 = journal 段诚实降级（ok:false + note），绝不假数据；
+ *                           journal 时代之前的 up 历史仍由状态表呈现（状态表面不退化）。
  *
  * 归一形状（§11.3 字段对齐 ts/name/principal/duration）：
  *   { ts, source: "command"|"audit"|"migration", name, status, principal, durMs, detail }
@@ -97,16 +99,23 @@ export function readAuditTail(root, lines = 200) {
 
 /* ---------------- §11.3 源 3：迁移审计（server-status 优先，node:sqlite 只读兜底） ---------------- */
 
+/** journal 段缺省形状（旧 server 面/旧库——诚实降级，绝不假数据） */
+function journalUnavailable(note) {
+  return { ok: false, rows: [], note };
+}
+
 /**
- * 从 server-status 快照取迁移行（首选路径——server 子进程持句柄，dev 父进程不重复开库）。
- * serverStatus 为空/无 db 段 → { ok:false, note }（由调用方决定是否走兜底）。
+ * 从 server-status 快照取迁移行 + journal 尾（首选路径——server 子进程持句柄，dev 父进程
+ * 不重复开库）。serverStatus 为空/无 db 段 → { ok:false, note }（由调用方决定是否走兜底）；
+ * 快照缺 journal 字段（旧 server 面，sync 前的瞬时错配）→ journal 段 ok:false + note。
  */
 export function migrationsFromServerStatus(serverStatus) {
   const mig = serverStatus?.db?.migrations;
   if (!mig || !Array.isArray(mig.rows)) {
-    return { ok: false, rows: [], head: null, source: "server-status", note: "server-status 未携带迁移行（server 面未就绪或未装配 db）" };
+    return { ok: false, rows: [], head: null, journal: journalUnavailable("server-status 未携带迁移行（server 面未就绪或未装配 db）"), source: "server-status", note: "server-status 未携带迁移行（server 面未就绪或未装配 db）" };
   }
-  return { ok: true, rows: mig.rows, head: mig.head ?? null, source: "server-status", note: null };
+  const journal = mig.journal && Array.isArray(mig.journal.rows) ? mig.journal : journalUnavailable("server-status 未携带迁移 journal（旧 server 面——node atelier/cli.mjs sync 后恢复）");
+  return { ok: true, rows: mig.rows, head: mig.head ?? null, journal, source: "server-status", note: null };
 }
 
 /**
@@ -118,7 +127,7 @@ export function migrationsFromServerStatus(serverStatus) {
 export async function readMigrationsSqlite(root, dbRel = DEFAULT_DB_FILE) {
   const dbFile = path.isAbsolute(dbRel) ? dbRel : path.join(root, dbRel);
   if (!fs.existsSync(dbFile)) {
-    return { ok: false, rows: [], head: null, source: "sqlite-readonly", note: `库不存在（${path.relative(root, dbFile) || dbFile}）——迁移审计缺省` };
+    return { ok: false, rows: [], head: null, journal: journalUnavailable(`库不存在（${path.relative(root, dbFile) || dbFile}）——迁移审计缺省`), source: "sqlite-readonly", note: `库不存在（${path.relative(root, dbFile) || dbFile}）——迁移审计缺省` };
   }
   let db;
   try {
@@ -130,21 +139,43 @@ export async function readMigrationsSqlite(root, dbRel = DEFAULT_DB_FILE) {
       db = new DatabaseSync(dbFile);
     }
   } catch (e) {
-    return { ok: false, rows: [], head: null, source: "sqlite-readonly", note: `node:sqlite 打不开库（${e?.message ?? e}）——迁移审计缺省` };
+    return { ok: false, rows: [], head: null, journal: journalUnavailable(`node:sqlite 打不开库（${e?.message ?? e}）——迁移审计缺省`), source: "sqlite-readonly", note: `node:sqlite 打不开库（${e?.message ?? e}）——迁移审计缺省` };
   }
   try {
     const has = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get("atelier_migrations");
     if (!has) {
-      return { ok: false, rows: [], head: null, source: "sqlite-readonly", note: "库内无 atelier_migrations 表（migrate up first）" };
+      return { ok: false, rows: [], head: null, journal: journalUnavailable("库内无 atelier_migrations 表（migrate up first）"), source: "sqlite-readonly", note: "库内无 atelier_migrations 表（migrate up first）" };
     }
+    // 迁移 journal（决策 21 台账预留位关闭）：同一次只读连接顺携——表不存在（旧库）= ok:false
+    // 诚实降级，状态表面不因此退化；行形状与 server/introspect.ts introspectJournalTail 同源。
+    const hasJournal = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get("atelier_migration_journal");
+    const journal = hasJournal
+      ? {
+          ok: true,
+          rows: db
+            .prepare("SELECT id, ts, name, action, status, principal, dur_ms, checksum FROM atelier_migration_journal ORDER BY id")
+            .all()
+            .map((r) => ({
+              id: Number(r.id),
+              ts: Number(r.ts),
+              name: String(r.name),
+              action: r.action === "down" ? "down" : "up",
+              status: r.status === "failed" ? "failed" : "ok",
+              principal: r.principal == null ? null : String(r.principal),
+              durMs: r.dur_ms == null ? null : Number(r.dur_ms),
+              checksum: r.checksum == null ? null : String(r.checksum),
+            })),
+          note: null,
+        }
+      : journalUnavailable("库内无 atelier_migration_journal 表（journal 时代之前的旧库——下次 migrate up/down 惰性建表，此前的 down 历史无处可考）");
     const rows = db
       .prepare("SELECT id, name, checksum, applied_at, down_verified FROM atelier_migrations ORDER BY id")
       .all()
       .map((r) => ({ id: Number(r.id), name: String(r.name), checksum: String(r.checksum), appliedAt: Number(r.applied_at), downVerified: Number(r.down_verified ?? 0) === 1 }));
     const last = rows[rows.length - 1] ?? null;
-    return { ok: true, rows, head: last ? { id: last.id, name: last.name } : null, source: "sqlite-readonly", note: null };
+    return { ok: true, rows, head: last ? { id: last.id, name: last.name } : null, journal, source: "sqlite-readonly", note: null };
   } catch (e) {
-    return { ok: false, rows: [], head: null, source: "sqlite-readonly", note: `迁移表不可读（${e?.message ?? e}）` };
+    return { ok: false, rows: [], head: null, journal: journalUnavailable(`迁移表不可读（${e?.message ?? e}）`), source: "sqlite-readonly", note: `迁移表不可读（${e?.message ?? e}）` };
   } finally {
     try { db.close(); } catch { /* 已关闭 */ }
   }
@@ -186,17 +217,41 @@ export function normalizeAudit(rows) {
   }).filter((r) => r.ts);
 }
 
-/** 迁移审计 → 归一行（source=migration；applied_at(ms) → ISO；principal/durMs 无持久化诚实置 null） */
+/** 迁移审计 → 归一行（source=migration；applied_at(ms) → ISO；action=up——状态表行是"已应用"
+ * 即 up 事实的呈现，down/failed 历史由 normalizeMigrationJournal 补入时间轴） */
 export function normalizeMigrations(rows) {
   return (rows ?? []).map((r) => ({
     ts: msToIso(r?.appliedAt ?? r?.applied_at) ?? "",
     source: "migration",
+    action: "up",
     name: String(r?.name ?? "?"),
     status: "applied",
     principal: null,
     durMs: null,
-    detail: `#${r?.id ?? "?"} ${r?.name ?? ""}（down_verified=${r?.downVerified ? 1 : 0}）——迁移审计挂账：down 即删行无历史，principal/durMs 不落库（决策 21 台账形状预留）`,
+    detail: `#${r?.id ?? "?"} ${r?.name ?? ""}（down_verified=${r?.downVerified ? 1 : 0}）——状态表当前态（applied）；down 历史/principal/durMs 持久于迁移 journal`,
   })).filter((r) => r.ts);
+}
+
+/**
+ * 迁移 journal → 归一行（source=migration 沿用既有标签；action 显式标注 up/down）：
+ * up ok → applied（与状态表同语义），down ok → rolled-back，failed → failed。
+ * principal/durMs 是 journal 持久化的真实值（CLI 场景 principal 恒 'cli'——诚实缺省非假数据）。
+ */
+export function normalizeMigrationJournal(rows) {
+  return (rows ?? []).map((r) => {
+    const action = r?.action === "down" ? "down" : "up";
+    const failed = r?.status === "failed";
+    return {
+      ts: msToIso(r?.ts) ?? "",
+      source: "migration",
+      action,
+      name: String(r?.name ?? "?"),
+      status: failed ? "failed" : action === "down" ? "rolled-back" : "applied",
+      principal: r?.principal ?? null,
+      durMs: Number.isFinite(r?.durMs) ? Number(r.durMs) : null,
+      detail: clip(`#${r?.id ?? "?"} ${action} ${failed ? "失败（事务已回滚）" : action === "down" ? "已回滚" : "已应用"}${r?.checksum ? ` · checksum ${String(r.checksum).slice(0, 12)}…` : ""}${r?.principal ? ` · ${r.principal}` : ""}`),
+    };
+  }).filter((r) => r.ts);
 }
 
 /**
@@ -270,8 +325,11 @@ export function buildReviewData({ root, serverStatus = null, anchorId = null, mi
   const checkpoints = readCheckpointLedger(root);
 
   // 迁移审计：优先 server-status（子进程持句柄，父进程不重复开库）；async 入口已试过
-  // node:sqlite 只读兜底时直接用其结果（migrationsOverride）。
+  // node:sqlite 只读兜底时直接用其结果（migrationsOverride）。journal 段随两条路径顺携
+  // （旧库无表/旧 server 面缺字段 = ok:false + note 诚实降级）。
   const migrations = migrationsOverride ?? migrationsFromServerStatus(serverStatus);
+  const migJournalRaw = migrations.journal ?? journalUnavailable("迁移 journal 不可用（旧库或旧 server 面）");
+  const migJournalRows = normalizeMigrationJournal(migJournalRaw.rows);
 
   const journalEntries = Array.isArray(serverStatus?.journal) ? serverStatus.journal : [];
   const journal = Array.isArray(serverStatus?.journal)
@@ -283,7 +341,12 @@ export function buildReviewData({ root, serverStatus = null, anchorId = null, mi
   const journalRows = normalizeJournal(journal.entries);
   const auditRows = normalizeAudit(audit.rows);
   const migrationRows = normalizeMigrations(migrations.rows);
-  const timeline = mergeTimeline([journalRows, auditRows, migrationRows]);
+  // 时间轴补行（决策 21 台账预留位关闭）：journal 的 down 行与 failed 行补入归一时间轴；
+  // up ok 行**不**重复进时间轴——同一事件已由状态表行呈现（applied），补入即双计。
+  // journal 时代之前的旧库 up 历史仍由状态表呈现（状态表面不退化）；被 down 掉的迁移
+  // 状态行已删、只剩 journal down 行，历史由此接住。
+  const journalTimelineRows = migJournalRows.filter((r) => r.action === "down" || r.status === "failed");
+  const timeline = mergeTimeline([journalRows, auditRows, migrationRows, journalTimelineRows]);
 
   const saves = checkpoints.rows.filter((r) => r.type === "save");
   const head = migrations.head ?? null;
@@ -305,7 +368,9 @@ export function buildReviewData({ root, serverStatus = null, anchorId = null, mi
     ok: true,
     at: new Date().toISOString(),
     checkpoints,
-    migrations,
+    // journal 段挂迁移段之下（与顶层 journal = command journal 区分）：rows 为归一行
+    // （全量在案可查——含 up ok；时间轴只补 down/failed，见上）
+    migrations: { ...migrations, journal: { ok: migJournalRaw.ok === true, rows: migJournalRows, note: migJournalRaw.note ?? null } },
     journal,
     audit,
     aligned,

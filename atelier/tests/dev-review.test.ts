@@ -130,6 +130,32 @@ describe("server/introspect · serverStatusSnapshot（§10.3 数据源）", () =
     db.close();
   });
 
+  it("db.migrations.journal：server-status 携迁移 journal 尾（决策 21 台账预留位关闭——down 历史出口）", async () => {
+    const { EndpointRegistry } = await import("../server/endpoints.ts");
+    const { serverStatusSnapshot } = await import("../server/introspect.ts");
+    const { openSqlite } = await import("../server/sqlite.ts");
+    const { MIGRATIONS_TABLE_DDL, MIGRATION_JOURNAL_DDL } = await import("../server/migrate.ts");
+
+    const db = await openSqlite(":memory:");
+    db.exec(MIGRATIONS_TABLE_DDL);
+    db.exec(MIGRATION_JOURNAL_DDL);
+    db.prepare("INSERT INTO atelier_migration_journal (ts, name, action, status, principal, dur_ms, checksum) VALUES (?, ?, ?, ?, ?, ?, ?)").run(1727000000000, "001_init", "up", "ok", "cli", 3, "c1");
+    db.prepare("INSERT INTO atelier_migration_journal (ts, name, action, status, principal, dur_ms, checksum) VALUES (?, ?, ?, ?, ?, ?, ?)").run(1727000050000, "001_init", "down", "ok", "cli", 2, "c1");
+
+    const registry = new EndpointRegistry();
+    const mig: any = serverStatusSnapshot(registry, { db, migrationsDir: MIG_DIR }).db.migrations;
+    expect(mig.journal.ok).toBe(true);
+    expect(mig.journal.rows).toHaveLength(2);
+    expect(mig.journal.rows[1]).toMatchObject({ id: 2, ts: 1727000050000, name: "001_init", action: "down", status: "ok", principal: "cli", durMs: 2, checksum: "c1" });
+    // 旧库（journal 表不存在）→ ok:false 诚实降级，不假数据
+    db.exec("DROP TABLE atelier_migration_journal");
+    const mig2: any = serverStatusSnapshot(registry, { db, migrationsDir: MIG_DIR }).db.migrations;
+    expect(mig2.journal.ok).toBe(false);
+    expect(mig2.journal.rows).toEqual([]);
+    expect(String(mig2.journal.note)).toContain("journal");
+    db.close();
+  });
+
   it("无 db：db=null + 诚实 note（不假数据）", async () => {
     const { EndpointRegistry } = await import("../server/endpoints.ts");
     const { serverStatusSnapshot } = await import("../server/introspect.ts");
@@ -323,6 +349,97 @@ describe("dev-review-data · 三源归一（§11.3 ts/name/principal/duration �
     const bare = buildReviewData({ root: path.join(TMP, "no-ledger-root"), serverStatus: null, anchorId: null });
     expect(bare.checkpoints.ok).toBe(false);
     expect(bare.timeline).toEqual([]);
+  });
+});
+
+describe("dev-review-data · 迁移 journal（down 历史）消费与降级（决策 21 台账预留位关闭）", () => {
+  it("readMigrationsSqlite 顺携 journal：有表 → 行读出；旧库无表 → journal 段 ok:false + note 不假数据", async () => {
+    const { openSqlite } = await import("../server/sqlite.ts");
+    const { MIGRATIONS_TABLE_DDL, MIGRATION_JOURNAL_DDL } = await import("../server/migrate.ts");
+    const { readMigrationsSqlite } = await import("../dev/dev-review-data.mjs");
+    const root = path.join(TMP, "journal-root");
+    fs.mkdirSync(path.join(root, ".atelier"), { recursive: true });
+    const db = await openSqlite(path.join(root, ".atelier", "dev.db"));
+    db.exec(MIGRATIONS_TABLE_DDL);
+    db.exec(MIGRATION_JOURNAL_DDL);
+    db.prepare("INSERT INTO atelier_migrations (name, checksum, applied_at, down_verified) VALUES (?, ?, ?, 0)").run("001_init", "c1", 1727000000000);
+    db.prepare("INSERT INTO atelier_migration_journal (ts, name, action, status, principal, dur_ms, checksum) VALUES (?, ?, ?, ?, ?, ?, ?)").run(1727000000000, "001_init", "up", "ok", "cli", 3, "c1");
+    db.prepare("INSERT INTO atelier_migration_journal (ts, name, action, status, principal, dur_ms, checksum) VALUES (?, ?, ?, ?, ?, ?, ?)").run(1727000050000, "001_init", "down", "ok", "cli", 2, "c1");
+    db.close();
+    const r: any = await readMigrationsSqlite(root, path.join(".atelier", "dev.db"));
+    expect(r.ok).toBe(true);
+    expect(r.rows).toHaveLength(1);
+    expect(r.journal.ok).toBe(true);
+    expect(r.journal.rows.map((x: any) => [x.action, x.status])).toEqual([["up", "ok"], ["down", "ok"]]);
+    expect(r.journal.rows[1]).toMatchObject({ name: "001_init", action: "down", principal: "cli", durMs: 2 });
+
+    // 旧库：只有状态表（journal 时代之前）→ 迁移段 ok:true 照旧，journal 段诚实降级
+    const oldRoot = path.join(TMP, "old-journal-root");
+    fs.mkdirSync(path.join(oldRoot, ".atelier"), { recursive: true });
+    const odb = await openSqlite(path.join(oldRoot, ".atelier", "dev.db"));
+    odb.exec(MIGRATIONS_TABLE_DDL);
+    odb.prepare("INSERT INTO atelier_migrations (name, checksum, applied_at, down_verified) VALUES (?, ?, ?, 0)").run("001_init", "c1", 1727000000000);
+    odb.close();
+    const r2: any = await readMigrationsSqlite(oldRoot, path.join(".atelier", "dev.db"));
+    expect(r2.ok).toBe(true); // 状态表面不因 journal 缺席退化
+    expect(r2.journal.ok).toBe(false);
+    expect(r2.journal.rows).toEqual([]);
+    expect(String(r2.journal.note)).toContain("journal");
+  });
+
+  it("normalizeMigrationJournal：source=migration + action 标注；down ok → rolled-back；failed 原样", async () => {
+    const { normalizeMigrationJournal } = await import("../dev/dev-review-data.mjs");
+    const rows = normalizeMigrationJournal([
+      { id: 1, ts: 1727000000000, name: "001_init", action: "up", status: "ok", principal: "cli", durMs: 3, checksum: "c1" },
+      { id: 2, ts: 1727000050000, name: "001_init", action: "down", status: "ok", principal: "cli", durMs: 2, checksum: "c1" },
+      { id: 3, ts: 1727000100000, name: "002_broken", action: "up", status: "failed", principal: "cli", durMs: 1, checksum: "c2" },
+    ]);
+    expect(rows[0]).toMatchObject({ ts: "2024-09-22T10:13:20.000Z", source: "migration", action: "up", name: "001_init", status: "applied", principal: "cli", durMs: 3 });
+    expect(rows[1]).toMatchObject({ source: "migration", action: "down", name: "001_init", status: "rolled-back" });
+    expect(rows[2]).toMatchObject({ source: "migration", action: "up", name: "002_broken", status: "failed" });
+  });
+
+  it("buildReviewData：时间轴补 down/failed 行（up ok 不与状态表重复）；journal 段全量随载荷", async () => {
+    const { buildReviewData } = await import("../dev/dev-review-data.mjs");
+    const root = path.join(TMP, "ledger-root");
+    const serverStatus = {
+      ok: true,
+      journal: [],
+      db: {
+        migrations: {
+          head: { id: 1, name: "001_init" },
+          rows: [{ id: 1, name: "001_init", appliedAt: 1727000000000, downVerified: false }],
+          journal: {
+            ok: true,
+            rows: [
+              { id: 1, ts: 1726999999000, name: "001_init", action: "up", status: "ok", principal: "cli", durMs: 3, checksum: "c1" },
+              { id: 2, ts: 1727000050000, name: "001_init", action: "down", status: "ok", principal: "cli", durMs: 2, checksum: "c1" },
+              { id: 3, ts: 1727000100000, name: "002_broken", action: "up", status: "failed", principal: "cli", durMs: 1, checksum: "c2" },
+            ],
+            note: null,
+          },
+        },
+      },
+    };
+    const full: any = buildReviewData({ root, serverStatus, anchorId: null });
+    expect(full.migrations.journal.ok).toBe(true);
+    expect(full.migrations.journal.rows).toHaveLength(3); // journal 段全量在案（up ok 也可查）
+    const migTimeline = full.timeline.filter((r: any) => r.source === "migration");
+    expect(migTimeline.filter((r: any) => r.action === "down" && r.status === "rolled-back")).toHaveLength(1); // down 行补入
+    expect(migTimeline.filter((r: any) => r.action === "up" && r.status === "failed")).toHaveLength(1); // 失败行补入（§3.5 同纪律）
+    expect(migTimeline.filter((r: any) => r.action === "up" && r.status === "applied")).toHaveLength(1); // up ok 只来自状态表，不重复计一条事件
+    for (let i = 1; i < full.timeline.length; i++) expect(full.timeline[i - 1].ts >= full.timeline[i].ts).toBe(true); // 仍整体降序
+  });
+
+  it("降级：server-status 未携带 journal（旧 server 面）→ journal 段 ok:false + note，时间轴零假数据", async () => {
+    const { buildReviewData } = await import("../dev/dev-review-data.mjs");
+    const root = path.join(TMP, "no-ledger-root");
+    const serverStatus = { ok: true, journal: [], db: { migrations: { head: null, rows: [], pending: [] } } };
+    const d: any = buildReviewData({ root, serverStatus, anchorId: null });
+    expect(d.migrations.journal.ok).toBe(false);
+    expect(d.migrations.journal.rows).toEqual([]);
+    expect(String(d.migrations.journal.note)).toContain("journal");
+    expect(d.timeline.filter((r: any) => r.source === "migration")).toEqual([]);
   });
 });
 
