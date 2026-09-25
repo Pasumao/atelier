@@ -8,6 +8,12 @@
  *   2. runtime/*.ts    → target/src/runtime/ vendored 零依赖内核（应用不依赖框架目录即可跑）
  *   2b. runtime+server → target/src/vendor/atelier/  FS 线规范布局（生成器产物 import 面，§4.4/§7.2）
  *   3. dev/*.mjs       → target/scripts/     dev 面六件：插件 + 无头截图 + tailwind 主题生成 + server 监督器 + review 扩展两件（FS-M6）
+ *   3b. mcp 族十件     → target/{mcp,scripts,gen,compiler}/  MCP HTTP 直连的 import 闭包（FS-M7：
+ *                        mcp/{server,http,tasks,confirm,endpoint-tools}.mjs + mcp-definitions.json +
+ *                        scripts/struct.mjs + gen/{impact,gen-endpoint}.mjs + compiler/project-json.mjs；
+ *                        目标布局与框架仓相对布局同构——server.mjs 经 HERE 解析 mcp-definitions.json、
+ *                        经 ../scripts/struct.mjs 等相对 import 在 vendored 拷贝上原样成立。名单与
+ *                        sync-project.mjs / tests/mcp-vendor.test.ts 三处同源）
  *   4. init-ai（除非 --no-ai）：skills 双落点 + AGENTS.md/llms.txt + specs/ + MCP 客户端配置
  */
 import fs from "node:fs";
@@ -91,6 +97,30 @@ for (const f of ["atelier-dev-plugin.mjs", "dev-server-host.mjs", "dev-screensho
   fs.copyFileSync(path.join(DEV, f), path.join(targetScripts, f));
 }
 
+/* 4b) vendored MCP 族十件（FS-M7，M6 尾件批候选池挂账销账）：应用 dev 面 /__atelier/mcp 直连的
+ *     import 闭包——mcp/http.mjs → server/tasks/confirm/endpoint-tools → ../scripts/struct.mjs +
+ *     ../gen/impact.mjs（→ ./gen-endpoint.mjs 传递）+ ../compiler/project-json.mjs，传递 import
+ *     全为零依赖或 node 内建。目标布局与框架仓相对布局同构（dev/ 与 mcp/ 同级 → scripts/ 与
+ *     mcp/ 同级），vendored 拷贝按同样的相对路径自成一体。运行时 spawn 的 scripts/checkpoint.mjs
+ *     （checkpoint.* 与 diff.report）与 compiler/codegen.mjs（graph.static）不在 import 闭包，
+ *     vendored 应用缺失时走工具级 ATR 结构化报错（诚实降级），不入名单。
+ *     名单与 sync-project.mjs / tests/mcp-vendor.test.ts 三处同源，改动必须同步。 */
+const MCP_VENDOR_DIRS = [
+  ["mcp", ["server.mjs", "http.mjs", "tasks.mjs", "confirm.mjs", "endpoint-tools.mjs", "mcp-definitions.json"]],
+  ["scripts", ["struct.mjs"]],
+  ["gen", ["impact.mjs", "gen-endpoint.mjs"]],
+  ["compiler", ["project-json.mjs"]],
+];
+let mcpFiles = 0;
+for (const [dir, files] of MCP_VENDOR_DIRS) {
+  const dst = path.join(target, dir);
+  fs.mkdirSync(dst, { recursive: true });
+  for (const f of files) {
+    fs.copyFileSync(path.join(PKG, dir, f), path.join(dst, f));
+    mcpFiles++;
+  }
+}
+
 /* personalize: package.json name → kebab slug of the chosen name */
 const pkgPath = path.join(target, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
@@ -115,7 +145,7 @@ const writtenCount = (function count(dir) {
   return n;
 })(target);
 
-console.log(`scaffolded ${writtenCount} files → ${target}  (app: ${pkg.name}, vendored runtime: ${runtimeFiles} modules, vendor/atelier: ${vendorFiles} modules)`);
+console.log(`scaffolded ${writtenCount} files → ${target}  (app: ${pkg.name}, vendored runtime: ${runtimeFiles} modules, vendor/atelier: ${vendorFiles} modules, mcp family: ${mcpFiles} files)`);
 console.log("next:");
 console.log(`  cd ${path.relative(process.cwd(), target) || path.basename(target)} && pnpm install && pnpm dev   # http://127.0.0.1:5173`);
 

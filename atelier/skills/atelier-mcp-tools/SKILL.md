@@ -71,6 +71,7 @@ specs/<name>.feedback.md  # 自由格式 markdown，原文返回
 ## Stateless HTTP direct connect + Tasks (FS-M6, MCP 2026-07-28 对齐)
 
 - dev 面 `POST /__atelier/mcp`：无状态 HTTP 直连——`Mcp-Method`/`Mcp-Name` 头路由，无握手无会话（版本走 `_meta`，应答 `2026-07-28`）；与 stdio 同一工具核心同果。方法：`tools/list · tools/call · tasks/get|update|cancel · ping · server/discover`（initialize/notifications/tasks/list 已随 2026-07-28 移除，诚实 4xx）。
+- Vendored apps（FS-M7）：`atelier init`/`atelier sync` 已 vendor 整棵 import 闭包（`mcp/` 五件 + `mcp-definitions.json` + `scripts/struct.mjs` + `gen/impact.mjs` + `gen/gen-endpoint.mjs` + `compiler/project-json.mjs`）——init/sync 后应用内直连可用；未 sync 的旧应用 503 诚实指路 stdio（fix 文案给可执行的 sync 命令）。
 - Tasks 扩展（服务端主导创建）：HTTP 通道调长操作（`structure.check`/`test.run`）→ 返回 `task.taskId` 句柄而非内联结果；`tasks/get` 轮询至 completed/failed/cancelled，`tasks.update` 收紧保留窗（ttlMs），`tasks.cancel` 取消。句柄只在创建实例可解析（dev 面单实例）；过期 ATR-401 = 重跑该工具。
 
 ## Common failures

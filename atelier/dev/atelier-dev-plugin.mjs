@@ -206,8 +206,10 @@ export function atelierDevPlugin() {
 
         /* ---------- FS-M6（§10.2）：/__atelier/mcp —— MCP 2026-07-28 无状态 HTTP 直连端点 ----------
          * 逻辑单源 = atelier/mcp/http.mjs（handleMcpHttp，与 stdio server.mjs 同一 callTool 核心）；
-         * 这里只接线：token 门之后桥接。桥模块按框架仓布局解析（dev/ 与 mcp/ 同级）；应用 vendor
-         * 未含 mcp/ 族时诚实降级指路 stdio 通道，绝不静默。 */
+         * 这里只接线：token 门之后桥接。桥模块按框架仓布局解析（dev/ 与 mcp/ 同级；应用侧由
+         * init/sync vendor 同构布局——scripts/ 与 mcp/ 同级，FS-M7 起名单含 MCP 族十件），vendored
+         * 拷贝按同样的相对路径直连可用；旧应用未 sync（缺 mcp/ 族）时诚实降级指路补齐 vendor /
+         * stdio 通道，绝不静默。 */
         if (url === "/__atelier/mcp") {
           const body = await readBody(req);
           let out;
@@ -236,7 +238,7 @@ export function atelierDevPlugin() {
                 error: {
                   code: "ATR-4xx-dev",
                   message: `MCP HTTP bridge not available in this install (${e?.message ?? e})`,
-                  fix: "走 stdio 通道（node <repo>/atelier/mcp/server.mjs，env ATELIER_PROJECT_ROOT=<appDir>），或在框架仓内跑 dev 面；应用内补齐 vendor 待集成拍板",
+                  fix: "旧应用未含 MCP vendor：重跑 node <repo>/atelier/cli.mjs sync --target <appDir> 补齐 mcp/ 族 vendor 后直连即用（新 init 应用自带）；或走 stdio 通道（node <repo>/atelier/mcp/server.mjs，env ATELIER_PROJECT_ROOT=<appDir>）",
                 },
               }),
             };

@@ -674,7 +674,11 @@ CLI `struct check` / MCP `structure.check` / 技能包文本——单份引擎 `
 > ③ Tasks：`mcp/tasks.mjs` 进程内任务存储（生命周期 + ttl 保留窗 + 容量上限），`tasks/get|
 > update|cancel` 协议方法 + 同名点工具双形态（33→36），服务端主导创建 = HTTP 通道 × 长操作清单
 > （structure.check/test.run）。诚实边界：任务态进程内 + 显式句柄仅创建实例可解析（dev 面单实例
-> 成立）；vendored 应用未 vendor mcp 族 → 桥 503 诚实指路 stdio（vendor 依赖树挂候选池）；零新增
+> 成立）；vendored 应用经 init/sync vendor MCP 族十件后桥直连可用（FS-M7 vendor 批 2026-09-25：
+> mcp 五件 + mcp-definitions.json + scripts/struct.mjs + gen/{impact,gen-endpoint}.mjs +
+> compiler/project-json.mjs，布局与框架仓相对布局同构，闭包机械核对防漂移；候选池挂账销账），
+> 未 sync 旧应用 → 桥 503 诚实指路补齐 vendor / stdio；运行时 spawn 的 checkpoint.mjs/codegen.mjs
+> 不在 import 闭包（缺失时工具级 ATR 报错）；零新增
 > 错误码（复用 ATR-401/402/4xx-dev 段）。
 
 ### 10.3 dev 面 HTTP 端点补齐（/`__atelier/*` 服务端面）
