@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-22T07:53:30.935Z",
+  "generatedAt": "2026-09-25T12:09:19.314Z",
   "root": "Agentic",
   "layout": "framework",
   "surfaces": {
@@ -70,6 +70,10 @@
         "kind": "type"
       },
       {
+        "id": "RevertErrorEntry",
+        "kind": "type"
+      },
+      {
         "id": "STANDARD_VENDOR",
         "kind": "value"
       },
@@ -91,6 +95,10 @@
       },
       {
         "id": "StandardValidateResult",
+        "kind": "type"
+      },
+      {
+        "id": "StreamError",
         "kind": "type"
       },
       {

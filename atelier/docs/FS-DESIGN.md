@@ -480,6 +480,12 @@ await ctx.db.tx(async (tx) => {
   command 内联执行长任务请声明 timeoutMs"）；② `emits`/审计元数据为将来 job 化预留兼容
   （command 契约不因同步/异步执行改变——执行位置是部署细节不是契约细节）。
 
+> **落地注记（2026-09-25，M8 挂账收尾批）**：① 兑现——模板 `src/server/jobs/README.md`
+> 目录文档位（v1 无内建队列诚实声明 + 长任务 = command 内联执行 + `timeoutMs` 声明 +
+> job 化接口位预留说明），init 为整目录拷贝机制、零机制改动自动落产物（存量应用属 init 时点
+> vendor 语义不自动获得，sync 不碰应用 src）；技能包 `atelier-mcp-tools` Server-face 段同口径
+> 一句。② 既有落地（M2-b `emits` 已入端点契约）。
+
 ### 5.7 种子与备份〔议：D-F17 / 观察位〕
 
 - `atelier migrate seed`：幂等种子命令——dev 体验件，S 级〔议〕。**已落地（M2-d，2026-09-19）**，
@@ -588,6 +594,16 @@ export const chatAsk = defineCommand("chat.ask", { /* §2.2 形态 */ });
 §4.4 样例已示。要点：每端点一个冻结命名空间对象（`name` 字面量 + `call` + live 端点的
 `live()`）；类型全部 import 自契约单源（双源 = ERROR 机检：生成物内不得出现内联重复类型）。
 
+> **落地注记（2026-09-25，M8 挂账收尾批）**：api.ts 客户端覆盖 auth 端点（M2-d 诚实边界
+> 「api.ts 客户端不覆盖 auth 端点」销账）——gen-endpoint 扫描面纳入 `src/server/auth/endpoints.ts`
+> （存在才扫，加法语义，无 auth 产物时产物字节不变有负例钉住）；gen auth 产物三形态专项解析
+> 与 §13 export-openapi 同款（端点级内联契约字面量仅 auth 面放行〔合成名 `<name>.input/.output`
+> 先例〕/ `pick(<tbl>.rowSchema,…)` 本地契约投影〔实测 FlatOf 透传退化为宽联合，故由生成器
+> 渲染内联别名〕/ `auth:{type:"none"}` 容忍）。auth 投影类型 = 生成器对 gen auth 产物单一真相的
+> 渲染投影（合成别名 + 生成物头注记来源），非第二契约源——双源禁令针对手写重复类型，实质不破；
+> 两份 scanner 各持解析实现是既有格局（gen-endpoint 因 mcp-vendor 闭包机检自包含，不 import
+> export-openapi）。regen 幂等 + gen-compile-gate 断言 api.ts 含 auth 端点 tsc 零诊断。
+
 ### 8.2 分层红线（runtime 不增负）
 
 `streamValue/optimisticList`（runtime/primitives.ts）**零改动**；端点绑定（fetch/EventSource/
@@ -600,6 +616,15 @@ export const chatAsk = defineCommand("chat.ask", { /* §2.2 形态 */ });
 三态原语补 `error` 语义位〔议，小改〕：`streamValue` 增加 `error: AtrError | null` 状态
 （失败不断流；fix 字段可直接渲染为可操作提示——"错误即导航"贯通到 UI 最后一厘米）。
 `optimisticList` 的 revert 携带触发它的 AtrError（供 toast 展示 fix）。
+
+> **落地（2026-09-25，M8 挂账收尾批）**：〔议〕翻落地——`StreamValue.error` 状态位（结构最小
+> 形态 `StreamError {code?, message, context?, fix?}`：严格 AtrError 结构上可赋，catch/live 帧
+> 的残缺错误不被类型挡在导航外；失败不断流，push/finish/values/value/done 零变化，可赋 null
+> 复位）；`optimisticList.revert(id, err?)` 可选参向后兼容 + 新增 `revertErrors` 条目数组
+> （追加序与 rollbacked 同构，既有 `rollbacked: string[]` 逐字节不破）。生成物 live() error 帧
+> → `sv.error` 赋值（console 呈现退役，非 JSON 连接级帧仍忽略由 EventSource 自动重连）；模板
+> LiveNotes 错误卡消费 fix 提示（§4.5-3b revert 台账化）；api-diff 纯加法（+StreamError/
+> +RevertErrorEntry，runtime-exports churn 1.43% PASS）。
 
 ### 8.4 异步表达式守卫（FS-11，方向=显式拒绝〔已定稿：决策 24，2026-09-19〕）
 
@@ -816,6 +841,16 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 > login/Set-Cookie→me→logout→401 九步对拍，顺手修出 securitySchemes cookie 名硬编码
 > `"session"` vs gen-auth 产物 `SESSION_COOKIE "atelier_session"` 的真漂移。journal 子进程内省
 > 与 bun 宿主桥维持挂账。
+>
+> **落地注记（2026-09-25，M8 挂账收尾批）**：journal 子进程内省关闭——`tests/journal-subprocess.test.ts`
+> 真实 spawn server 子进程（D-F14 启动壳 `serve()` + `ATELIER_SERVER_READY` 握手，port 0，
+> fixture 走 init→gen db→宿主 CLI migrate up→spawn），端到端验证 command journal（成功条目
+> ts/name/kind/input/status/principal/durMs/notes + 失败条目 ATR-320 error 随行）与迁移 journal
+> （up ok 行 + principal 缺省 `cli`）经 GET `<mount>/__atelier/server-status` 可查。失败入账语义
+> 实读钉死：handler 抛错 ATR-320 入账 / 契约违规 ATR-201 不入账（校验失败在 journalPush 前返回，
+> 分发未穿 handler）/ query 永不入账。prod 旗标隐身负例实证：introspect 返 null 后分发器穿到
+> 非 POST 守卫 = **405 ATR-311**（非挂账原文猜测的 404，以代码为准断言）。bun 宿主桥维持挂账
+> （本机无 bun）。
 
 ---
 
@@ -886,6 +921,14 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 > HTTP 直连双通道，§10.2）；验证环 = `atelier call`（D-F15，agent 位）× try-it（D-F16，人位）；
 > 锚定环 = checkpoint（save 门禁自带测试/快照/API 面三闸 + migrationHead 进台账）。错误导航表
 > = §15 全表 + `skills/atelier-error-codes`（ERR_CATALOG 机检既有纪律）。
+>
+> **落地注记（2026-09-25，M8 挂账收尾批）**：底稿兑现——`docs/SPEC-Agentic-DX-v0.2.md` 升版
+> （v0.1 留档 superseded）：决策 17-23 全站化段并入（硬约定 H7-H12 / 全站化行为契约七节 =
+> 契约三域·端点面·数据面·边界守卫与 struct 八层·MCP 与 dev 面·dev 托管与 build·生成器纪律 /
+> 错误导航表全码段以 ERR_CATALOG 实文对表 / §6.2 端点开发工作循环 = 本节原纲）+ 决策 24
+> ATR-323 收录（17-23 之外，属错误导航表与硬约定不可缺项，版本头注明）；数字一律不写死
+> （以 mcp-definitions.json / docs-numbers 标记位单源为准）；§2 如实标注 @atelier/eslint
+> 规则集未立包（规则清单 = 规范位而非已落地机检）。
 
 ---
 
