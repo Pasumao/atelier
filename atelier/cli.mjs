@@ -31,8 +31,8 @@ PROJECT
                                                                          edge = 不做清单显式拒绝
   atelier package | e2e                                            STUB  spec'd, lands with compiler /
                                                                          @atelier/review packages (v0.2+)
-  atelier sync [--target <dir>]                                    FULL  re-vendor runtime + dev face into
-                                                                         an existing app (拉齐到框架当前时点)
+  atelier sync [--target <dir>]                                    FULL  re-vendor runtime + dev face + mcp
+                                                                         family into an existing app (拉齐到框架当前时点)
   atelier tokens export|import --in <f> --out <f>                  FULL  W3C DTCG 设计令牌互导
                                                                          (atelier.config.json ↔ .tokens.json)
 

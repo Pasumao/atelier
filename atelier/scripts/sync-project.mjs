@@ -10,6 +10,13 @@
  *                                               dev-screenshot / gen-tailwind-theme /
  *                                               dev-review-data / dev-review-pages；vite.config 从
  *                                               ./scripts/ 引入）
+ *   2c. MCP 族十件   → <target>/{mcp,scripts,gen,compiler}/ 全量覆盖（FS-M7，M6 尾件批候选池挂账
+ *                                               销账：/__atelier/mcp HTTP 直连的 import 闭包——
+ *                                               mcp 五件 + mcp-definitions.json、scripts/struct.mjs、
+ *                                               gen/{impact,gen-endpoint}.mjs、compiler/project-json.mjs；
+ *                                               目标布局与框架仓相对布局同构，相对 import 原样解析。
+ *                                               旧应用 sync 一次即从 503 指路 stdio 转直连可用。名单与
+ *                                               init-project.mjs / tests/mcp-vendor.test.ts 三处同源）
  *   3. specs/ 模板补种（_spec-template.md / guardrails.md，skip-if-exists——不碰用户文件）
  *
  * 不触碰：应用 src 组件 / tests / atelier.config.json / index.html / package.json——
@@ -68,6 +75,30 @@ for (const [srcDir, dstName] of [[RUNTIME, "runtime"], [path.join(PKG, "server")
 const DEV_FILES = ["atelier-dev-plugin.mjs", "dev-server-host.mjs", "dev-screenshot.mjs", "gen-tailwind-theme.mjs", "dev-review-data.mjs", "dev-review-pages.mjs"];
 for (const f of DEV_FILES) fs.copyFileSync(path.join(DEV, f), path.join(target, "scripts", f));
 
+/* 2c) MCP 族十件全量覆盖（FS-M7，M6 尾件批候选池挂账销账）：/__atelier/mcp HTTP 直连的 import
+ *     闭包——mcp/http.mjs → server/tasks/confirm/endpoint-tools → ../scripts/struct.mjs +
+ *     ../gen/impact.mjs（→ ./gen-endpoint.mjs 传递）+ ../compiler/project-json.mjs，传递 import
+ *     全为零依赖或 node 内建。目标布局与框架仓相对布局同构（dev/ 与 mcp/ 同级 → scripts/ 与
+ *     mcp/ 同级），vendored 拷贝按同样的相对路径自成一体。运行时 spawn 的 scripts/checkpoint.mjs
+ *     （checkpoint.* 与 diff.report）与 compiler/codegen.mjs（graph.static）不在 import 闭包，
+ *     vendored 应用缺失时走工具级 ATR 结构化报错（诚实降级），不入名单。
+ *     名单与 init-project.mjs / tests/mcp-vendor.test.ts 三处同源，改动必须同步。 */
+const MCP_VENDOR_DIRS = [
+  ["mcp", ["server.mjs", "http.mjs", "tasks.mjs", "confirm.mjs", "endpoint-tools.mjs", "mcp-definitions.json"]],
+  ["scripts", ["struct.mjs"]],
+  ["gen", ["impact.mjs", "gen-endpoint.mjs"]],
+  ["compiler", ["project-json.mjs"]],
+];
+let mcpFiles = 0;
+for (const [dir, files] of MCP_VENDOR_DIRS) {
+  const dst = path.join(target, dir);
+  fs.mkdirSync(dst, { recursive: true });
+  for (const f of files) {
+    fs.copyFileSync(path.join(PKG, dir, f), path.join(dst, f));
+    mcpFiles++;
+  }
+}
+
 /* 3) specs 模板补种（skip-if-exists） */
 let planted = [];
 for (const f of ["_spec-template.md", "guardrails.md"]) {
@@ -93,7 +124,7 @@ try {
   }
 } catch { /* package.json 读取失败不算同步失败 */ }
 
-console.log(`[atelier sync] ${path.basename(target)}: runtime ${runtimeFiles} modules + vendor/atelier ${vendorFiles} modules + dev face ${DEV_FILES.length} scripts → 当前时点`);
+console.log(`[atelier sync] ${path.basename(target)}: runtime ${runtimeFiles} modules + vendor/atelier ${vendorFiles} modules + dev face ${DEV_FILES.length} scripts + mcp family ${mcpFiles} files → 当前时点`);
 for (const p of planted) console.log(`  planted ${p} (skip-if-exists)`);
 if (hints.length) {
   console.log("dependency drift (hint only — review then `pnpm install`):");
