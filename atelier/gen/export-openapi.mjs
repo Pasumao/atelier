@@ -8,16 +8,23 @@
  *
  * 端点枚举：复用 gen-endpoint.mjs 的文本扫描原语（parseProps/stripComments/identOf/
  * stringArrayOf/matchDelim/walkTsFiles 加法导出，gen-endpoint 行为零改动、生成产物字节不变）。
- * 本文件自己的 define* walk 提取 OpenAPI 需要的超集元数据（auth/restful/timeoutMs 值），
- * live/invalidate/emits/idempotent 语义与 scanEndpointSource 同构（同一原语、同一测试钉住）。
- * 泛型标注形态 defineCommand<Input, Output>(…)（模板 example.ts / gen-compile-gate 的应用
- * 规范形态）与裸调用形态 defineCommand(…) 都认——golden 机检（tests/openapi-golden.test.ts）
- * 先红后绿钉住：泛型形态曾整端点漏导出（文档漏端点 = naive 文档驱动的机检盲区）。
+ * 扫描面：src/server/endpoints/ 递归 + src/server/auth/endpoints.ts（gen auth 产物三件套，
+ * 加法语义；openapi-golden auth 联测段先红后绿钉住）。本文件自己的 define* walk 提取 OpenAPI
+ * 需要的超集元数据（auth/restful/timeoutMs 值），live/invalidate/emits/idempotent 语义与
+ * scanEndpointSource 同构（同一原语、同一测试钉住）。泛型标注形态 defineCommand<Input, Output>(…)
+ * （模板 example.ts / gen-compile-gate 的应用规范形态）与裸调用形态 defineCommand(…) 都认——
+ * golden 机检（tests/openapi-golden.test.ts）先红后绿钉住：泛型形态曾整端点漏导出（文档漏端点 =
+ * naive 文档驱动的机检盲区）。gen auth 产物三形态专项解析（同批红绿）：①端点级内联契约字面量
+ * （仅 auth 扫描面放行，合成名 <name>.input/.output；用户端点面禁令不变）②auth.me 的
+ * pick(users.rowSchema, […]) 本地投影（resolveLocalPickSchemas 经框架 server/db.ts 的 table()/pick()
+ * 运行时同一实现重构）③auth: { type: "none" } 显式免鉴权 → 无 security 引用不进 securitySchemes；
+ * securitySchemes.session 的 cookie 名实读 gen auth 产物 cookie.ts 的 SESSION_COOKIE。
  *
  * 契约取值：src/contract.ts 契约单源（`export const X = {…}` 形态，兼容 `: FlatSchema =` 注解
  * 与 `satisfies FlatSchema` 后缀）——纯文本扫描 + parseLiteral 字面量解析（gen-db.mjs 同款纪律：
  * 对象字面量 → JS 值，无 eval、无 TS 解析器、扫描器不执行被扫代码）。端点内联契约字面量
- * 不支持（gen endpoint 扫描器同边界）→ 显式报错指路契约单源，绝不静默。
+ * 在 src/server/endpoints/ 用户端点面不支持（gen endpoint 扫描器同边界）→ 显式报错指路契约单源；
+ * 仅 gen auth 产物扫描面按上段放行。
  *
  * 文档形态：
  *   paths        默认 POST（请求体 = 输入契约投影；响应 200 = 输出契约投影；无 output 契约
@@ -38,6 +45,9 @@ import path from "node:path";
 import url from "node:url";
 import { matchDelim, parseProps, stripComments, identOf, stringArrayOf, walkTsFiles } from "./gen-endpoint.mjs";
 import { projectJsonSchema, projectFlatField } from "../compiler/project-json.mjs";
+// gen auth 产物形态的本地契约解析用（运行时同一实现——绝不复刻列→FlatSchema 映射，gen-auth.mjs
+// 直 import server/db.ts 渲染 DDL 同一先例）：table() 重构表定义 → pick() 投影 rowSchema 子集。
+import { table as defineTable, pick as pickRowSchema } from "../server/db.ts";
 
 const INVOKED_DIRECTLY = process.argv[1] && url.pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
@@ -251,8 +261,17 @@ function parseAuthMeta(valueText, endpointName) {
  * 扫一个端点源文件的 defineQuery/defineCommand → OpenAPI 超集端点清单。
  * 与 gen-endpoint scanEndpointSource 同构（同一原语；live/invalidate/emits/idempotent 语义一致），
  * 另提取 auth/restful/timeoutMs 值。行内契约对象字面量不支持 → 显式报错（绝不静默猜）。
+ *
+ * opts（默认缺省 = 原行为零变化）：
+ *   allowInlineLiterals — 端点级内联契约字面量放行解析（gen auth 产物形态：自包含生成码，
+ *                         contract/output 就地扁平字面量；src/server/endpoints/ 用户端点维持
+ *                         原禁令——契约提升单源纪律不变）。合成 schema 名 `<name>.input/.output`。
+ *   localSchemas        — 本地标识符 → FlatSchema（gen auth 产物 `const meOutput = pick(…)` 的
+ *                         resolveLocalPickSchemas 解析产物）；命中时合成名进文档、flat 随端点带出
+ *                         （entry.contractFlat/outputFlat——buildOpenApi 经同一 §2.4 投影管线）。
  */
-export function scanOpenApiEndpoints(src) {
+export function scanOpenApiEndpoints(src, opts = {}) {
+  const { allowInlineLiterals = false, localSchemas = null } = opts;
   const out = [];
   DEFINE_RE.lastIndex = 0;
   for (let m; (m = DEFINE_RE.exec(src));) {
@@ -286,13 +305,29 @@ export function scanOpenApiEndpoints(src) {
     if (close < 0) continue;
     const props = parseProps(src.slice(i + 1, close));
 
+    // 内联契约字面量 / 本地解析 schema（仅 opts 放行的扫描面——默认面维持显式报错）
+    const local = {};
     for (const role of ["contract", "output"]) {
       const raw = props[role];
-      if (raw != null && stripComments(raw).trim().startsWith("{")) {
-        throw exportError(
-          `端点 ${name} 的 ${role} 是行内契约对象字面量——OpenAPI 导出不支持（gen endpoint 扫描器同边界）`,
-          `把契约提升为 src/contract.ts 契约单源常量（export const … = { type: "object", … }），端点改引用常量名`
-        );
+      const stripped = raw != null ? stripComments(raw).trim() : null;
+      if (stripped != null && stripped.startsWith("{")) {
+        if (!allowInlineLiterals) {
+          throw exportError(
+            `端点 ${name} 的 ${role} 是行内契约对象字面量——OpenAPI 导出不支持（gen endpoint 扫描器同边界）`,
+            `把契约提升为 src/contract.ts 契约单源常量（export const … = { type: "object", … }），端点改引用常量名`
+          );
+        }
+        const litClose = matchDelim(stripped, 0);
+        if (litClose < 0) continue; // 不闭合——诚实跳过（TS 本身编译不过）
+        local[role] = {
+          ident: `${name}.${role === "contract" ? "input" : "output"}`,
+          flat: parseFlatSchemaLiteral(stripped.slice(0, litClose + 1), `端点 ${name} 的 ${role}`),
+        };
+      } else if (role === "output" && localSchemas != null) {
+        const ref = identOf(raw);
+        if (ref != null && localSchemas[ref] != null) {
+          local[role] = { ident: `${name}.output`, flat: localSchemas[ref] };
+        }
       }
     }
 
@@ -323,8 +358,10 @@ export function scanOpenApiEndpoints(src) {
     out.push({
       name,
       kind,
-      contract: identOf(props.contract),
-      output: identOf(props.output),
+      contract: local.contract?.ident ?? identOf(props.contract),
+      output: local.output?.ident ?? identOf(props.output),
+      contractFlat: local.contract?.flat ?? null,
+      outputFlat: local.output?.flat ?? null,
       live,
       invalidate,
       emits: stringArrayOf(props.emits),
@@ -339,14 +376,79 @@ export function scanOpenApiEndpoints(src) {
   return out;
 }
 
-/** 扫 <root>/src/server/endpoints/ 递归 .ts → 端点清单（按 name 排序，file 为相对路径） */
+/**
+ * gen auth 产物形态窄解析：端点源内 `const <id> = pick(<tbl>.rowSchema, […])` 的本地契约投影。
+ * `<tbl>` 经同文件 import 映射到同级 .ts 产物（sessions.table.ts），表定义以扁平字面量解析后经
+ * 框架 server/db.ts 的 table()/pick() 重构（运行时同一实现——列→FlatSchema 映射零复刻）。
+ * 窄边界（诚实）：只认这一种生成形态（扁平字面量表 + 同级 .ts import）；其余形态不进本解析，
+ * 标识符照旧走契约单源解析（未声明 → 聚合报错）。解析失败惰性跳过（buildOpenApi 侧引用报错兜底）。
+ */
+function resolveLocalPickSchemas(file, src) {
+  const flats = {};
+  const importMap = {};
+  for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*"([^"]+\.ts)"/g)) {
+    for (const piece of m[1].split(",")) {
+      const ident = piece.trim().split(/\s+as\s+/).pop()?.trim();
+      if (ident) importMap[ident] = m[2];
+    }
+  }
+  for (const m of src.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*pick\(\s*([A-Za-z_$][\w$]*)\s*\.\s*rowSchema\s*,\s*(\[[^[\]]*\])\s*\)/g)) {
+    const constIdent = m[1];
+    const rel = importMap[m[2]];
+    if (!rel) continue;
+    const tableFile = path.resolve(path.dirname(file), rel);
+    if (!fs.existsSync(tableFile)) continue;
+    try {
+      const tsrc = fs.readFileSync(tableFile, "utf8");
+      const tm = /\btable\s*\(\s*(["'`])((?:\\.|(?!\1).)*)\1\s*,\s*\{/.exec(tsrc);
+      if (!tm) continue;
+      const colsOpen = tm.index + tm[0].length - 1;
+      const colsClose = matchDelim(tsrc, colsOpen);
+      if (colsClose < 0) continue;
+      const optsM = /^\s*,\s*\{/.exec(tsrc.slice(colsClose + 1));
+      let optsClose = -1;
+      let optsText = "{}";
+      let tailFrom = colsClose + 1;
+      if (optsM) {
+        const optsOpen = colsClose + 1 + optsM[0].length - 1;
+        optsClose = matchDelim(tsrc, optsOpen);
+        if (optsClose < 0) continue;
+        optsText = tsrc.slice(optsOpen, optsClose + 1);
+        tailFrom = optsClose + 1;
+      }
+      if (!/^\s*\)/.test(tsrc.slice(tailFrom))) continue; // table( 参数段未按预期闭合——窄边界外
+      const name = (tm[2] ?? "").replace(/\\(.)/g, "$1"); // 引号内表名（DDL 标识符白名单由 defineTable 校验）
+      const cols = parseFlatSchemaLiteral(tsrc.slice(colsOpen, colsClose + 1), `表定义 ${name}`);
+      const tableOpts = parseFlatSchemaLiteral(optsText, `表定义 ${name} opts`);
+      const def = defineTable(name, cols, tableOpts);
+      flats[constIdent] = pickRowSchema(def.rowSchema, parseFlatSchemaLiteral(m[3], `pick 键集（${constIdent}）`));
+    } catch {
+      /* 惰性：形态漂移/解析失败不在此报——标识符走契约单源解析路径，未声明即聚合报错 */
+    }
+  }
+  return flats;
+}
+
+/**
+ * 扫端点文件面：src/server/endpoints/ 递归 + src/server/auth/endpoints.ts（gen auth 产物，加法
+ * 语义——存在才扫）。auth 面放行内联契约字面量与 pick 本地投影解析（产物三件套形态，见上）；
+ * 返回按 name 排序（file 为相对路径）。
+ */
 export function scanOpenApiEndpointFiles(root) {
   const dir = path.join(root, "src", "server", "endpoints");
+  const authFile = path.join(root, "src", "server", "auth", "endpoints.ts");
   const all = [];
   for (const file of walkTsFiles(dir)) {
     const src = fs.readFileSync(file, "utf8");
     for (const ep of scanOpenApiEndpoints(src)) {
       all.push({ ...ep, file: path.relative(root, file).split(path.sep).join("/") });
+    }
+  }
+  if (fs.existsSync(authFile)) {
+    const src = fs.readFileSync(authFile, "utf8");
+    const localSchemas = resolveLocalPickSchemas(authFile, src);
+    for (const ep of scanOpenApiEndpoints(src, { allowInlineLiterals: true, localSchemas })) {
+      all.push({ ...ep, file: path.relative(root, authFile).split(path.sep).join("/") });
     }
   }
   return all.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -358,13 +460,17 @@ function normalizeMount(mount) {
   return String(mount ?? "/api").replace(/^\/+|\/+$/g, "");
 }
 
-/** securitySchemes：session → cookie apiKey 位；oauth → 预留占位声明（§6.4，不实现） */
-function securitySchemeFor(type) {
+/**
+ * securitySchemes：session → cookie apiKey 位（cookie 名实读 gen auth 产物 cookie.ts 的
+ * SESSION_COOKIE——曾硬编码 "session" 与实际 "atelier_session" 漂移，openapi-golden auth 联测段
+ * 对拍抓出后修复；无 gen auth 产物时回退旧通用名）；oauth → 预留占位声明（§6.4，不实现）
+ */
+function securitySchemeFor(type, cookieName) {
   if (type === "session") {
     return {
       type: "apiKey",
       in: "cookie",
-      name: "session",
+      name: cookieName ?? "session",
       description: "Atelier session 会话 cookie（gen auth 产物定义 Cookie 名——FS-DESIGN §6.2；本位为互操作投影）",
     };
   }
@@ -383,6 +489,22 @@ function securitySchemeFor(type) {
   );
 }
 
+/** gen auth 产物 cookie.ts 的 SESSION_COOKIE 实读（缺产物/解析失败 → null，由调用方回退通用名） */
+function sessionCookieName(root) {
+  const f = path.join(root, "src", "server", "auth", "cookie.ts");
+  if (!fs.existsSync(f)) return null;
+  const stripped = stripComments(fs.readFileSync(f, "utf8"));
+  const m = /export\s+const\s+SESSION_COOKIE\s*=\s*/.exec(stripped);
+  if (!m) return null;
+  const tail = stripped.slice(m.index + m[0].length).split(";")[0]?.trim();
+  if (!tail) return null;
+  try {
+    return parseStringLiteral(tail, "SESSION_COOKIE");
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 组装 openapi-3.0.3 文档（纯函数——不落盘，字节确定性由排序与定序输出保证）。
  * opts: { mount?, name?, out? }；契约引用不存在/投影 ATR-107 → 聚合抛错（绝不静默降级）。
@@ -391,6 +513,7 @@ export function buildOpenApi(root, opts = {}) {
   const mount = normalizeMount(opts.mount);
   const endpoints = scanOpenApiEndpointFiles(root);
   const contracts = scanContractSchemas(root);
+  const cookieName = sessionCookieName(root);
   const notes = [];
   if (!contracts.exists) notes.push("未找到 src/contract.ts（契约单源）——端点若声明 contract/output 将无法解析");
   if (endpoints.length === 0) notes.push("未发现端点定义（src/server/endpoints/ 下无 defineQuery/defineCommand）——产出空 paths 文档");
@@ -398,8 +521,21 @@ export function buildOpenApi(root, opts = {}) {
   const errors = [];
   const schemas = {}; // ident → 投影结果（openapi-3.0 target）
   const referencedIdents = new Set();
-  const resolveSchema = (ident, endpointName, role) => {
+  const localSchemas = {}; // 合成名 → 本地解析 FlatSchema（gen auth 产物内联字面量/pick 投影——联测校验复用同一解析）
+  const resolveSchema = (ident, endpointName, role, flat = null) => {
     if (schemas[ident]) return schemas[ident];
+    if (flat != null) {
+      // 本地解析路径（gen auth 产物形态）：同一 §2.4 投影管线，绝不另写投影
+      try {
+        schemas[ident] = projectJsonSchema(flat, "openapi-3.0", { label: ident });
+        referencedIdents.add(ident);
+        localSchemas[ident] = flat;
+        return schemas[ident];
+      } catch (e) {
+        errors.push(exportError(`端点 ${endpointName} 的 ${role}（本地解析 schema ${ident}）：${e.message}`, e.fix ?? "检查生成产物契约形态", e.context));
+        return null;
+      }
+    }
     if (!contracts.exists || !contracts.idents.includes(ident)) {
       errors.push(
         exportError(
@@ -437,8 +573,8 @@ export function buildOpenApi(root, opts = {}) {
   const paths = {};
   const securitySchemes = {};
   for (const ep of endpoints) {
-    const inputSchema = ep.contract ? resolveSchema(ep.contract, ep.name, "contract") : null;
-    const outputSchema = ep.output ? resolveSchema(ep.output, ep.name, "output") : null;
+    const inputSchema = ep.contract ? resolveSchema(ep.contract, ep.name, "contract", ep.contractFlat) : null;
+    const outputSchema = ep.output ? resolveSchema(ep.output, ep.name, "output", ep.outputFlat) : null;
     if (ep.contract && !inputSchema) continue; // 错误已入账——本端点不产出（聚合报错在末尾统一抛）
     if (ep.output && !outputSchema) continue;
 
@@ -451,8 +587,11 @@ export function buildOpenApi(root, opts = {}) {
       : {
           "200": { description: "OK（端点未声明 output 契约——响应 schema 省略）", "x-atelier-output-contract": false },
         };
-    const security = ep.auth ? [{ [ep.auth.type]: [] }] : null;
-    if (ep.auth && !securitySchemes[ep.auth.type]) securitySchemes[ep.auth.type] = securitySchemeFor(ep.auth.type);
+    // auth: { type: "none" } = 显式免鉴权（§6.2 显式消警位）→ 无 security 引用、不进 securitySchemes
+    //（与运行时拦截语义对齐：type "none" 不过分发层鉴权拦截——文档即真相）
+    const secured = ep.auth != null && ep.auth.type !== "none";
+    const security = secured ? [{ [ep.auth.type]: [] }] : null;
+    if (secured && !securitySchemes[ep.auth.type]) securitySchemes[ep.auth.type] = securitySchemeFor(ep.auth.type, cookieName);
 
     const extensions = {
       "x-atelier-kind": ep.kind,
@@ -553,6 +692,8 @@ export function buildOpenApi(root, opts = {}) {
     pathCount: Object.keys(paths).length,
     schemaIdents: [...referencedIdents].sort(),
     securityTypes: Object.keys(securitySchemes).sort(),
+    /** 合成名 → 本地解析 FlatSchema（gen auth 产物内联字面量/pick 投影）——golden 联测校验复用同一解析，无第二真相 */
+    localSchemas,
   };
 }
 
