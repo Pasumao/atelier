@@ -15,13 +15,13 @@ streamValue 三态直通渲染；上行 command POST（`/api/app.addNote`，id �
 
 - 直通形态与 gen-endpoint 生成物同型：URL = `/api/app.notes/live?input=` +
   encodeURIComponent(JSON.stringify(input))；data 事件 push 进 streamValue；error 事件按
-  ATR-321 语义处理（四段式 console 呈现、订阅保持不断流；无 data 的 error = 连接级中断由
-  EventSource 自动重连）。
+  ATR-321 语义处理（四段式解析后赋 sv.error——§8.3 error 语义位，UI 直接渲染 fix 可操作
+  提示；订阅保持不断流；无 data 的 error = 连接级中断由 EventSource 自动重连）。
 - §4.5 五步对账协议为考点：
   1. WHEN send → THE SYSTEM SHALL optimisticAdd(pending) 先行渲染（半透明 + pending 徽标）；
   2. WHEN optimisticAdd 完成 → THE SYSTEM SHALL fetch POST app.addNote（id 客户端生成）；
   3a. WHEN 响应 2xx → THE SYSTEM SHALL commit(id) 并清除上一条 UI 错误；
-  3b. WHEN 响应非 2xx / 网络失败 → THE SYSTEM SHALL revert(id) + rollbacked 计数 + ATR 四段式进 UI 错误卡（fix 可展示，不白屏）；
+  3b. WHEN 响应非 2xx / 网络失败 → THE SYSTEM SHALL revert(id, err)（§8.3：携带触发错误进 revertErrors 台账）+ rollbacked 计数 + ATR 四段式进 UI 错误卡（fix 可展示，不白屏）；
   4. WHEN live data 帧到达 → THE SYSTEM SHALL 以服务端数据对账：同 id 幂等合并、服务端值胜出、optimistic 项不重复渲染。
 - 样式只用 token 工具类 + recipe 层（`.ppanel`/`.btn`）；pending 视觉区分用 opacity（非新增颜色）。
 - 服务端对端见 `../server/endpoints/notes.ts`（内存态 = 热重启即清，诚实边界随文件头）。
@@ -30,7 +30,7 @@ streamValue 三态直通渲染；上行 command POST（`/api/app.addNote`，id �
 
 机检（`LiveNotes.atr.spec.ts`，dom-shim + mock EventSource/fetch 走真实 mountComponent 渲染路径）：
 - [ ] 直通三态更新：EventSource data 帧 → sv.push → 列表与「live 帧」计数渲染（两帧递增）
-- [ ] ATR-321 error 帧：订阅保持（EventSource 未 close）、console.error 呈现四段式、不白屏
+- [ ] ATR-321 error 帧：订阅保持（EventSource 未 close）、四段式进 UI 错误卡（sv.error 语义位，fix 可操作提示）、不白屏
 - [ ] commit 对账：POST 2xx → pending 徽标消失、待确认归零；帧到达同 id 合并行不重复
 - [ ] revert 回滚：POST 4xx ATR-201 → 行移除、已回滚计数、错误卡呈现 code/message/fix
 - [ ] live 推送覆盖 pending：POST 未决时帧先到 → 服务端值胜出（徽标消失、单行、commit 后仍不重复）

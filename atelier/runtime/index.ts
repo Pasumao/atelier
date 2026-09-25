@@ -8,7 +8,7 @@ export type { HtmlTemplate, ComponentDef, ComponentRegistry } from "./template.t
 export { parseTemplate } from "./template.ts"; // compiler face (P0-2②): same parser, same truth
 export type { TemplateNode, TemplateAttr } from "./template.ts";
 export { streamValue, optimisticList } from "./primitives.ts";
-export type { StreamValue, OptimisticItem } from "./primitives.ts";
+export type { StreamValue, OptimisticItem, StreamError, RevertErrorEntry } from "./primitives.ts"; // StreamError/RevertErrorEntry: §8.3 错误面贯通（纯加法）
 export { validateFlat, validateUnknown, collectFlatIssues } from "./contract.ts";
 export type { FlatSchema, AtrError, FlatIssue } from "./contract.ts";
 export { withStandard, isStandardSchema, STANDARD_VENDOR } from "./standard-schema.ts"; // 决策 22（FS-2）：Standard Schema V1 互操作口
