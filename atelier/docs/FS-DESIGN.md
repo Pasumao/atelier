@@ -446,6 +446,18 @@ CREATE TABLE atelier_migrations (
 **边界**：无自动 diff 生成 down（v1 gen db 只为新表生成成对骨架；改列的迁移手写——改表 SQL
 对 agent 是分布内技能且必须过 verify，比代码生成更可靠）；无多环境分支迁移（单库单线）。
 
+> **落地注记（2026-09-25，M7 收尾批）**：迁移持久 journal 落地（决策 21 台账预留位关闭）——
+> 追加式 `atelier_migration_journal(id, ts, name, action up|down, status ok|failed, principal,
+> dur_ms, checksum)`，惰性 `CREATE TABLE IF NOT EXISTS` 对既有库零迁移零风险。**有意偏离预留位
+> 原文「动状态表形状」**：状态表一行=当前态、journal 一行=一次事件（多轮 up→down→up 状态表无法
+> 区分同名迁移的第二轮），且状态表形状被三面消费（struct checksum 体检 / checkpoint migrationHead
+> / sha256 体检）——追加表承载历史，状态表 head 真相语义零变化。up/down 执行位成败都入账（成功
+> 条目与迁移同事务原子一致；失败条目 ROLLBACK 后独立落、不掩盖原始 ATR-33x；前置拒绝不入账=
+> 那是拒绝不是执行）；principal = `ATELIER_PRINCIPAL` env → 缺省 `cli`；`server/introspect.ts`
+> 快照携 journal 尾部，review 统一时间轴只补 down/failed 行（up ok 已由状态表呈现，补入即双计）；
+> seed 不入 journal（`atelier_seeds` 自有记账，混入污染 down 历史时间轴）。诚实边界：库删即史灭、
+> 旧库既有迁移不追溯补记（journal 段 ok:false 降级零假数据）、CLI 场景 principal 恒缺省值。
+
 ### 5.5 事务原语与 command 边界
 
 ```ts
@@ -741,6 +753,11 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 > 迁移状态表=决策 19「迁移即审计对象」现成源，未做埋点）。诚实边界：journal 内存环形重启清零；
 > 状态表只记 applied（down 成功删行，down 历史无处可记——持久 journal 挂账）；principal/durMs
 > 无持久化诚实置 null；台账/库缺失一律 ok:false 降级，零假数据。
+>
+> **落地注记（2026-09-25，M7 收尾批）**：上注「迁移审计」两处挂账关闭——持久 journal 落地
+> （§5.4 注记：`atelier_migration_journal` 追加表成败入账，down/failed 历史与 principal/durMs
+> 持久化；introspect/review-data 顺携 journal 段，旧库/旧 server 面 ok:false 降级不变）。三源中
+> 仅迁移源现持久化；command journal 内存环形清零边界不变（跨重启审计走 audit.jsonl 源）。
 
 ---
 
@@ -790,6 +807,15 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 > 本批顺手红绿修复：扫描器对 `define*<…>(…)` 泛型形态整端点漏导出（export-openapi 与
 > gen-endpoint 同款同修，matchAngle 平衡跳过）。诚实边界：auth 端点联测/journal 子进程
 > 内省/bun 宿主桥不在此测（各自挂账既有）。
+>
+> **落地注记（2026-09-25，M7 收尾批）**：auth 端点联测进 golden 面（第一枚边界关闭）——
+> `scanOpenApiEndpointFiles` 扫描面纳入 `src/server/auth/endpoints.ts`（gen auth 产物三件套），
+> 扫描器三形态专项解析（端点级内联契约字面量仅 auth 面放行〔合成名 `auth.login.input/.output`，
+> 用户端点面行内字面量禁令原样〕/ `pick(users.rowSchema,…)` 经 server/db.ts 运行时同一实现重构
+> / `auth:{type:"none"}` 不进 securitySchemes）；golden fixture 全链 init→gen auth→migrate up→
+> login/Set-Cookie→me→logout→401 九步对拍，顺手修出 securitySchemes cookie 名硬编码
+> `"session"` vs gen-auth 产物 `SESSION_COOKIE "atelier_session"` 的真漂移。journal 子进程内省
+> 与 bun 宿主桥维持挂账。
 
 ---
 
@@ -810,7 +836,8 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 ### 14.2 纪律
 
 红检先红后绿（F-5/P3-6 方法论延续）；不假红（struct 口径）；双宿主测试钉住 bun/node
-（sqlite.ts 诚实边界：bun 路径待 Bun 环境回归——维持挂账）；tsgo/tsc 双跑〔议：D-F18〕。
+（sqlite.ts 诚实边界：bun 路径待 Bun 环境回归——维持挂账）；tsgo/tsc 双跑〔已落地：D-F18，
+2026-09-25 M7 收尾批——tsgo devDep 钉版 + `tests/tsgo-parity.test.ts` golden 钉住行为差〕。
 
 ### 14.3 M3-FS 全栈任务臂（FS-10，后置）
 
@@ -1055,8 +1082,8 @@ FS-6 MCP 工具族（依赖 M2 注册表稳定）+ 2026-07-28 无状态对齐 + 
 | D-F14 | build target | `atelier build --target=node\|bun` 两 target（edge 观察位维持不做） | ✅ 采纳（2026-09-22 M6 尾件批落地，§12 注记） | S |
 | D-F15 | CLI 通道 | `atelier call <endpoint> '<json>'`（Builder.io 四通道对表的 CLI 位；specs 验收命令直接可执行） | ✅ 采纳（2026-09-22 同批落地；v1 全 POST=D-F11 同口径） | S |
 | D-F16 | 端点调试页 | dev 面 `/__atelier/endpoints`（表+try-it+schema） | ✅ 采纳（2026-09-22 同批落地，§10.3 注记） | S |
-| D-F17 | seed 命令 | `atelier migrate seed`（幂等种子明文） | ✅ 建议采纳（随 M2-d） | S |
-| D-F18 | tsgo 双跑 | 类型守卫测试 tsc/tsgo 双跑钉住行为差 | ✅ 建议采纳（CI 条件作业） | S |
+| D-F17 | seed 命令 | `atelier migrate seed`（幂等种子明文） | ✅ 采纳（M2-d 落地：SQL 种子 `seeds/*.seed.sql` + `atelier_seeds` 状态表 + ATR-335/336；漏翻采纳，本行 2026-09-25 补翻） | S |
+| D-F18 | tsgo 双跑 | 类型守卫测试 tsc/tsgo 双跑钉住行为差 | ✅ 采纳（2026-09-25 M7 收尾批落地：`@typescript/native-preview` devDep 精确钉版 + `tests/tsgo-parity.test.ts` 双向 delta golden 钉住行为差〔首跑实测 TS2882×2 仅 tsgo 报，tsc-only 差异空〕；devDep+skipIf 替代「CI 条件作业」——随 matrix frozen install 天然双跑） | S |
 | D-F19 | 表单渐进增强 | no-JS form 原语列 B 队不进 M2/M3（桌面一级分发下低优先） | ✅ 建议维持 B 队 | — |
 | D-F20 | ask 档审批接线 | MCP InputRequiredResult 多轮审批接 confirm=ask（历史诚实边界关闭） | ✅ 采纳（2026-09-22 M6 尾件批落地：requestState HMAC 句柄 stdio/HTTP 双通道，§10.2 注记） | M |
 | D-F21 | M3-FS 对照臂选择 | 建议 Next.js（App Router+Server Actions+Drizzle/SQLite）：live 对账无内建原语 = 检验「给协议 vs 给零件」；语料与官方 agent 工具链最强对照；SvelteKit 留候补 | ✅ 采纳（2026-09-20 执行半批，protocol §1.1；换臂条款留痕） | — |
