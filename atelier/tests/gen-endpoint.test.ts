@@ -151,6 +151,18 @@ export const ping = defineQuery("app.ping", { handler: () => ({ ok: true }) });
     expect(content.indexOf("live(input: ChatListInput)")).toBeGreaterThan(0);
   });
 
+  it("api.ts 产物 error 语义位（§8.3）：live error 事件解析 ATR 四段式帧赋 sv.error、句柄暴露 error getter、console 呈现退役", () => {
+    const root = makeFixture();
+    const { content } = generateApi(root, { mount: "/api" });
+    // error 帧 → sv.error（失败不断流：订阅保持、push/finish 零变化由原语语义保证）
+    expect(content).toContain(`sv.error = JSON.parse(d) as { code?: string; message: string; context?: unknown; fix?: string };`);
+    // 消费句柄暴露 error 读面（错误即导航——UI 直接渲染 fix）
+    expect(content).toContain(`get error() {`);
+    expect(content).toContain(`return sv.error;`);
+    // §8.3 落地后 console 呈现退役（错误进状态位由 UI 呈现，不再双份）
+    expect(content).not.toContain("console.error");
+  });
+
   it("regen 字节幂等（§7.3 门禁 2）：连续两次生成逐字节一致；writeApi 二次落盘 changed=false", () => {
     const root = makeFixture();
     const a = generateApi(root, { mount: "/api" }).content;

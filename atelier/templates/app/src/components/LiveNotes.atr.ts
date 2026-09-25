@@ -6,13 +6,13 @@
  * 同型的 app.notes.live() 客户端（§4.4 代码片段同源）；模板为保 init 即跑零生成步骤，
  * 按同型手写——改线协议时先改 gen-endpoint.mjs 生成片段，再对齐本文件（同型纪律）。
  * 接生成物的替换点：下方「§4.4 直通」段整体换成 `const feed = appNotes.live({})`，
- * sv 三态读面与 data/error 语义不变。
+ * sv 三态读面（含 §8.3 error 位读面）与 data/error 语义不变。
  *
  * §4.5 五步对账协议（本组件的考点，.atr.md 为意图验收单）：
  *   1. optimisticAdd(pending) → 先行渲染（半透明 + pending 徽标）
  *   2. fetch POST app.addNote（id 客户端生成随请求上行——同 id 合并的前提）
  *   3a. 成功 → commit(id)
- *   3b. 失败 → revert(id) + rollbacked 记录 + ATR 错误对象进 UI error 态（fix 可展示）
+ *   3b. 失败 → revert(id, err) 携带触发错误（§8.3 revertErrors 台账）+ rollbacked 记录 + ATR 错误对象进 UI error 态（fix 可展示）
  *   4. live 推送是真相源：帧到达按 id 幂等合并，服务端值胜出（optimistic 状态只是先行渲染）
  *
  * 三元共置：实现（本文件）/ 意图验收（LiveNotes.atr.md）/ 机检（LiveNotes.atr.spec.ts）。
@@ -40,14 +40,14 @@ export const LiveNotes = component(function LiveNotes(props: { title: string }) 
     sv.push(JSON.parse((e as MessageEvent).data) as NotesFrame);
   });
   es.addEventListener("error", (e) => {
-    // ATR-321 四段式随 error 事件下行；streamValue v1 无 error 位（§8.3 议），先 console 呈现；
+    // ATR-321 四段式随 error 事件下行；解析后赋 sv.error（§8.3 error 语义位已落地）——
+    // fix 由下方 UI 直接渲染为可操作提示（错误即导航贯通到最后一厘米），console 呈现退役；
     // 订阅保持不断流（ATR-321 语义）——下一轮写后失效重算继续推 data。无 data 的 error =
     // 连接级中断，EventSource 按 retry 自动重连（重连即全量重算，语义自愈）。
     const d = (e as MessageEvent).data;
     if (typeof d === "string" && d.length > 0) {
       try {
-        const atr = JSON.parse(d) as { code?: string; message?: string; fix?: string };
-        console.error("[atelier] " + (atr.code ?? "ATR-321") + ": " + (atr.message ?? "") + "\nfix: " + (atr.fix ?? ""));
+        sv.error = JSON.parse(d) as { code?: string; message: string; fix?: string };
       } catch {
         /* 非 JSON error 帧——忽略（连接级错误的自动重连由 EventSource 承担） */
       }
@@ -97,14 +97,16 @@ export const LiveNotes = component(function LiveNotes(props: { title: string }) 
       list.commit(id); // §4.5-3a 成功 → commit(id)；正式数据随后由 live 推送对账到视图
       lastError.value = null;
     } catch (e) {
-      // §4.5-3b 失败 → revert(id) + rollbacked 记录；ATR 错误对象进 UI error 态（fix 可展示）
-      list.revert(id);
+      // §4.5-3b 失败 → revert(id, err) 携带触发它的 ATR 错误（§8.3：revertErrors 台账，供 toast
+      // 展示 fix）+ rollbacked 记录；同一错误对象进 UI error 态（fix 可展示）
       const atr = e as { code?: string; message?: string; fix?: string };
-      lastError.value = {
+      const uiErr: UiError = {
         code: atr.code ?? "ATR-NET",
         message: atr.message ?? String(e),
         fix: atr.fix ?? "确认 server 面在跑（pnpm dev 已托管 /api）后重试",
       };
+      list.revert(id, uiErr);
+      lastError.value = uiErr;
     }
   };
 
@@ -131,6 +133,13 @@ export const LiveNotes = component(function LiveNotes(props: { title: string }) 
           <span class="text-danger font-semibold">{lastError.value.code}</span>
           <span class="text-danger"> {lastError.value.message}</span>
           <span class="text-muted"> — fix: {lastError.value.fix}</span>
+        </div>
+      {/if}
+      {#if sv.error}
+        <div class="rounded-sm p-sm my-xs border border-warn text-sm">
+          <span class="text-warn font-semibold">{sv.error.code ?? "ATR-321"}</span>
+          <span class="text-warn"> {sv.error.message}</span>
+          <span class="text-muted"> — fix: {sv.error.fix ?? "订阅保持中，下一轮写后重算自动恢复"}</span>
         </div>
       {/if}
       {#if view.value.length === 0 && sv.values.length === 0}

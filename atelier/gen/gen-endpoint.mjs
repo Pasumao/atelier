@@ -775,7 +775,7 @@ export function generateApi(root, opts = {}) {
     L.push(`    return (await res.json()) as ${outType};`);
     L.push(`  },`);
     if (e.live) {
-      L.push(`  /** live 订阅：SSE data → streamValue 三态原语直通；error 事件 = ATR-321（订阅保持，不断流） */`);
+      L.push(`  /** live 订阅：SSE data → streamValue 三态原语直通；error 事件 → ATR 四段式帧赋 sv.error（§8.3 已落地：订阅保持，不断流） */`);
       L.push(`  live(input: ${inType}) {`);
       L.push(`    const sv = streamValue<${outType}>();`);
       L.push(`    const es = new EventSource("${mount}/${e.name}/live?input=" + encodeURIComponent(JSON.stringify(input)));`);
@@ -783,13 +783,14 @@ export function generateApi(root, opts = {}) {
       L.push(`      sv.push(JSON.parse((e as MessageEvent).data) as ${outType});`);
       L.push(`    });`);
       L.push(`    es.addEventListener("error", (e) => {`);
-      L.push(`      // ATR-321 四段式随 error 事件下行；streamValue v1 无 error 位（§8.3 议），先 console 呈现；`);
-      L.push(`      // 订阅保持——下轮写后重算继续推 data。无 data 的 error = 连接级中断，EventSource 自动重连。`);
+      L.push(`      // ATR-321 四段式随 error 事件下行；解析后赋 sv.error（§8.3 error 语义位）——fix 字段由`);
+      L.push(`      // UI 直接渲染为可操作提示（错误即导航贯通到最后一厘米），console 呈现退役；`);
+      L.push(`      // 订阅保持——下轮写后重算继续推 data，失败不断流。无 data 的 error = 连接级中断，`);
+      L.push(`      // EventSource 自动重连。`);
       L.push(`      const d = (e as MessageEvent).data;`);
       L.push(`      if (typeof d === "string" && d.length > 0) {`);
       L.push(`        try {`);
-      L.push(`          const atr = JSON.parse(d) as { code?: string; message?: string; fix?: string };`);
-      L.push(`          console.error("[atelier] " + (atr.code ?? "ATR-321") + ": " + (atr.message ?? "") + "\\nfix: " + (atr.fix ?? ""));`);
+      L.push(`          sv.error = JSON.parse(d) as { code?: string; message: string; context?: unknown; fix?: string };`);
       L.push(`        } catch {`);
       L.push(`          // 非 JSON error 帧——忽略（连接级错误的自动重连由 EventSource 承担）`);
       L.push(`        }`);
@@ -804,6 +805,9 @@ export function generateApi(root, opts = {}) {
       L.push(`      },`);
       L.push(`      get done() {`);
       L.push(`        return sv.done;`);
+      L.push(`      },`);
+      L.push(`      get error() {`);
+      L.push(`        return sv.error;`);
       L.push(`      },`);
       L.push(`      push: (v: ${outType}) => sv.push(v),`);
       L.push(`      finish: () => sv.finish(),`);

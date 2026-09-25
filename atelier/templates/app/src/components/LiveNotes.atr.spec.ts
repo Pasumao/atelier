@@ -6,7 +6,7 @@
  * 在 mountComponent 真实渲染路径上驱动事件（不绕过解释器直测信号）。
  * 三元共置：契约/直通形态改动必须三处同步（.atr.ts / .atr.md / 本文件）。
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 /* ---- dom-shim：必须先于组件模块安装。vitest 的静态 import 会被提升到文件顶部，
  * 因此组件与 runtime 桶出口走顶层 await 动态 import（shim 已就位后再加载）。 ---- */
@@ -212,22 +212,19 @@ describe("LiveNotes — live SSE 直通（§4.4，与 gen endpoint 生成物 liv
     expect(container.textContent).toContain("live 帧: 2");
   });
 
-  it("ATR-321 error 帧：订阅保持不断流、console 呈现四段式、不白屏", async () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const { container, es } = mountLiveNotes();
-      es.emit("error", JSON.stringify({ code: "ATR-321", message: "重算失败", context: {}, fix: "修 handler 后无需重连" }));
-      await flush();
-      expect(es.closed).toBe(false); // 订阅保持（ATR-321 语义：不断流）
-      expect(container.textContent).not.toContain("ATR-321"); // UI 不渲染错误卡（console 面），更不白屏
-      expect(spy.mock.calls.some((c) => String(c[0]).includes("ATR-321"))).toBe(true);
-      // 随后的 data 帧照常直通——订阅确实活着
-      es.emit("data", frame([{ id: "n1", text: "still alive", time: "t" }]));
-      await flush();
-      expect(container.textContent).toContain("still alive");
-    } finally {
-      spy.mockRestore();
-    }
+  it("ATR-321 error 帧：订阅保持不断流、四段式进 UI 错误卡（fix 可操作提示）、不白屏", async () => {
+    const { container, es } = mountLiveNotes();
+    es.emit("error", JSON.stringify({ code: "ATR-321", message: "重算失败", context: {}, fix: "修 handler 后无需重连" }));
+    await flush();
+    expect(es.closed).toBe(false); // 订阅保持（ATR-321 语义：不断流）
+    // §8.3：错误即导航——四段式赋 sv.error 后由 UI 直接渲染 fix（console 呈现退役）
+    expect(container.textContent).toContain("ATR-321");
+    expect(container.textContent).toContain("重算失败");
+    expect(container.textContent).toContain("修 handler 后无需重连");
+    // 随后的 data 帧照常直通——订阅确实活着
+    es.emit("data", frame([{ id: "n1", text: "still alive", time: "t" }]));
+    await flush();
+    expect(container.textContent).toContain("still alive");
   });
 });
 
