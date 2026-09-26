@@ -158,16 +158,31 @@ function emitAttrs(attrs, SV, el, tag, out, uid, st) {
   }
 }
 
-/** 子组件：与解释器同款——validate 失败渲染错误卡；挂载返回 root（wrapper 即弃，append 语义逐字节一致） */
+/** 子组件：与解释器同款——dev 渲染错误卡 / prod 记录后占位放行（决策 27 双旗，prod 批归档行挂账的本批收口）。
+ * 决策 27 集成收口（M9 codegen strip）：解释器两处错误卡分支已旗控（template.ts 组件未注册 fallback 卡 /
+ * validateProps 失败卡），而本发射器此前无旗控——用编译产物的应用在 prod 构建里仍残留 atr-error-card
+ * 代码（动态不可达但条件非常量，DCE 不掉）。两处发射改为解释器同款双路（语义逐点同构）。
+ * 诚实边界：产物发射形态 = `!(rt.BUILD_PROD || rt.dynProd())`（双旗经 __compiledRT 注入，产物零 import），
+ * 与解释器同款双旗短路语义（任一旗真即 prod）；发射源是属性访问 rt.BUILD_PROD，define 折叠 + 分支 DCE
+ * 能否剥离归真实 vite build 构建管线验证（prod 批 build-gate 模式），单测只钉守卫形态与运行时行为
+ * （tests/codegen-prodflags.test.ts）。
+ * F-5 响应式 props：表达式归 mount 桶（父侧 effect 求值回写）；挂载返回 root（wrapper 即弃，append 语义逐字节一致） */
 function emitComponent(n, SV, T, out, uid, st) {
   const def = uid("def");
   out.push(`{`);
   out.push(`  const ${def} = registry.get(${esc(n.tag)});`);
   out.push(`  if (!${def}) {`);
-  out.push(`    const fb = document.createElement("div");`);
-  out.push(`    fb.className = "atr-error-card";`);
-  out.push(`    fb.textContent = "ATR-4xx: 组件未注册：" + ${esc(n.tag)} + "（检查 import 是否只注册于组件文件）";`);
-  out.push(`    ${T}.appendChild(fb);`);
+  // 组件未注册（解释器 template.ts:948-955 同构）：dev = atr-error-card（文案逐字）；
+  // prod = recordRuntimeError（ATR-401，message 形态照解释器 template.ts:949）+ 空 span 占位（不静默）。
+  out.push(`    if (!(rt.BUILD_PROD || rt.dynProd())) {`);
+  out.push(`      const fb = document.createElement("div");`);
+  out.push(`      fb.className = "atr-error-card";`);
+  out.push(`      fb.textContent = "ATR-4xx: 组件未注册：" + ${esc(n.tag)} + "（检查 import 是否只注册于组件文件）";`);
+  out.push(`      ${T}.appendChild(fb);`);
+  out.push(`    } else {`);
+  out.push(`      rt.recordRuntimeError({ code: "ATR-401", message: "组件未注册：" + ${esc(n.tag)} });`);
+  out.push(`      ${T}.appendChild(document.createElement("span"));`);
+  out.push(`    }`);
   out.push(`  } else {`);
   out.push(`    const props = {};`);
   for (const a of n.attrs ?? []) {
@@ -179,7 +194,9 @@ function emitComponent(n, SV, T, out, uid, st) {
     );
   }
   out.push(`    const v = rt.validateProps(${def}.schema, props, validate);`);
-  out.push(`    if (!v.ok) {`);
+  // validateProps 失败卡（解释器 template.ts:967 同构）。语义逐点核验：dev 无旗 = !v.ok 原语义；
+  // prod = validateProps 早退 ok 本就不可达，守卫仅为 define 折叠后 DCE 剔除（动态旗开同早退，else 支挂载语义不变）。
+  out.push(`    if (!(rt.BUILD_PROD || rt.dynProd()) && !v.ok) {`);
   out.push(`      const errBox = document.createElement("div");`);
   out.push(`      errBox.className = "atr-error-card";`);
   out.push("      errBox.textContent = `${v.error?.code} ${v.error?.message} — fix: ${v.error?.fix ?? \"\"}`;");
