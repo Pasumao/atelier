@@ -559,14 +559,13 @@ describe("F-4 解析期显式拒绝（ATR-101）", () => {
 
 
 /* ================= 决策 25 bind: v1 双向绑定（codegen 同构发射分支） =================
- * 已知红状态（跨分支依赖，先红后绿）：rt.bindTwoWay 单点在并行 runtime 分支（决策 25 A 批）
- * ——本分支上涉及编译路径执行的用例红因恰好为 mountComponent 兜底错误卡携带的
- * 「rt.bindTwoWay is not a function」一类（帧 #0 起不一致，diff 卡面即红因原文）；
- * 合并进 main 后由 runtime 侧补齐转为全绿。steps 全部 null 守卫：
- * 编译路径错误卡缺 input 时 step 自身不得抛错掩盖真实红因。 */
+ * 集成收口注记（bind 批合并后）：① bind: 目标 = 单个信号名（决策 25 冻结契约，ATR-324 拦属性链
+ * ——B 分支初稿误写 t.value 形态，合并对拍时修正）；② 错误路径不走严格帧对拍：解释器预检 =
+ * 元素级错误卡替换（兄弟节点照常渲染），编译路径 bindTwoWay 直调抛出经 mountComponent 错误边界 =
+ * 组件级错误卡——两路 code/message/fix 同源同文、DOM 粒度不同（诚实边界），故分别挂载断言卡面。 */
 describe("决策 25 bind: v1 双向绑定 golden DOM parity", () => {
   it("bind:value 文本输入双向：双路径 DOM 对拍 + input 事件回写信号 / 信号回写 el.value", async () => {
-    const raw = `<div><input bind:value={t.value}><p>{t.value}</p><i>{mirror.value}</i></div>`;
+    const raw = `<div><input bind:value={t}><p>{t.value}</p><i>{mirror.value}</i></div>`;
     const r = await parity("BindValueText", raw, (container) => {
       const t = $state("hello");
       const mirror = $state("");
@@ -598,7 +597,7 @@ describe("决策 25 bind: v1 双向绑定 golden DOM parity", () => {
   });
 
   it("bind:checked checkbox 对拍：信号→checked 写回 + change 事件回写信号", async () => {
-    const raw = `<div><input type="checkbox" bind:checked={on.value}><p>{on.value}</p><i>{mirror.value}</i></div>`;
+    const raw = `<div><input type="checkbox" bind:checked={on}><p>{on.value}</p><i>{mirror.value}</i></div>`;
     const r = await parity("BindCheckedBox", raw, (container) => {
       const on = $state(false);
       const mirror = $state("");
@@ -625,30 +624,49 @@ describe("决策 25 bind: v1 双向绑定 golden DOM parity", () => {
     expect(r.frames[3]).toContain('"false"'); // change 事件 → 信号 → 插值
   });
 
-  it("重复 bind:value → ATR-325 错误卡（WeakMap 守卫同键只订阅一次；双路径逐字节一致）", async () => {
-    const raw = `<div><input bind:value={t.value} bind:value={t.value}><p>{t.value}</p></div>`;
-    const r = await parity("BindDuplicate", raw, () => {
+  it("重复 bind:value → ATR-325 错误卡：双路径各自呈现（WeakMap/预检同键只订阅一次）", () => {
+    const raw = `<div><input bind:value={t} bind:value={t}><p>{t.value}</p></div>`;
+    const cardOf = (compiled: boolean): string => {
+      const container = makeContainer();
       const t = $state("dup");
-      return { scope: { t }, steps: [] };
-    });
-    expect(r.frames[0]).toContain("ATR-325");
+      if (compiled) registerCompiled(compileFunction("BindDuplicate", raw));
+      const def: ComponentDef = { name: "BindDuplicate", render: () => ({ raw, scope: { t } }) as never };
+      mountComponent(def, { name: "Atelier" }, container, new Map(), okValidate as never);
+      return serialize(container);
+    };
+    const interp = cardOf(false);
+    const comp = cardOf(true);
+    expect(interp).toContain("ATR-325");
+    expect(comp).toContain("ATR-325");
+    // 编译路径：第二次 bindTwoWay 直调抛出 → 组件级边界整体替换，无部分渲染
+    expect(comp).not.toContain("atr-scope-BindDuplicate");
+    // 解释器路径：预检=元素级替换，兄弟 <p> 照常渲染（粒度差异的正面锚定）
+    expect(interp).toContain('"dup"');
   });
 
-  it("$derived 目标 → ATR-305 错误卡（派生信号只读，渲染期前置拦截；双路径一致）", async () => {
-    const raw = `<div><input bind:value={d.value}><p>{d.value}</p></div>`;
-    const r = await parity("BindDerived", raw, () => {
+  it("$derived 目标 → ATR-305 错误卡：双路径各自呈现（派生信号只读，渲染期前置拦截）", () => {
+    const raw = `<div><input bind:value={d}><p>{d.value}</p></div>`;
+    const cardOf = (compiled: boolean): string => {
+      const container = makeContainer();
       const base = $state("base");
       const d = $derived(() => base.value.toUpperCase());
-      return { scope: { base, d }, steps: [] };
-    });
-    expect(r.frames[0]).toContain("ATR-305");
+      if (compiled) registerCompiled(compileFunction("BindDerived", raw));
+      const def: ComponentDef = { name: "BindDerived", render: () => ({ raw, scope: { base, d } }) as never };
+      mountComponent(def, { name: "Atelier" }, container, new Map(), okValidate as never);
+      return serialize(container);
+    };
+    const interp = cardOf(false);
+    const comp = cardOf(true);
+    expect(interp).toContain("ATR-305");
+    expect(comp).toContain("ATR-305");
+    expect(interp).toContain('"BASE"'); // 兄弟插值照常（元素级粒度）
   });
 
   it("发射形态锚定：bind: 支路发射 rt.bindTwoWay 单点调用（同位同构）+ 目标入 reactive 依赖桶", () => {
-    const raw = `<div><input bind:value={t.value}><input type="checkbox" bind:checked={on.value}></div>`;
+    const raw = `<div><input bind:value={t}><input type="checkbox" bind:checked={on}></div>`;
     const body = programSource(parseTemplate(raw));
-    expect(body).toMatch(/rt\.bindTwoWay\(el\d+, "bind:value", "t\.value", scope, "input"\);/);
-    expect(body).toMatch(/rt\.bindTwoWay\(el\d+, "bind:checked", "on\.value", scope, "input"\);/);
+    expect(body).toMatch(/rt\.bindTwoWay\(el\d+, "bind:value", "t", scope, "input"\);/);
+    expect(body).toMatch(/rt\.bindTwoWay\(el\d+, "bind:checked", "on", scope, "input"\);/);
     expect(body).not.toContain('setAttribute("bind:value"'); // 未误入 dynamic 单向支路
     const c = compileFunction("BindEmitDeps", raw);
     // collect 论证的用例钉：bind 目标运行时必被 bindTwoWay 内部 effect 追踪 ⇒ 静态清单必收

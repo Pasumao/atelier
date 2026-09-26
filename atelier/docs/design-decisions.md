@@ -289,6 +289,14 @@
 - **双路同构**：解释器 `renderNode` element 分支加 `bind:` 支路（先于 dynamic 单向支路）→ 单点 `bindTwoWay(el, name, expr, scope, tag)`；codegen `emitAttrs` 同位支路发射 `rt.bindTwoWay(...)`，`__compiledRT` 增补同名函数（产物零 import 红线不破）；golden DOM parity 对拍钉双路逐字节一致。
 - 时间：2026-09-26（用户从候选池拍板；主/子智能体 worktree 三分支并行实施）。
 
+> **落地注记（2026-09-26 bind 批，三分支并行 `5dac107`/`2cfd466`/`931aef5` 零冲突合并链至 `9093d8b`）**：
+> 全文兑现，实现要点与两枚诚实边界——① type 细化校验仅归解释器预检（`bindTwoWay` 无 attrs 视野，
+> 若直读 `el.getAttribute("type")` 会在 `bind:` attr 源序先于 `type` 时对合法绑定误拒）；② 错误路径
+> 双路 DOM 粒度不同：解释器预检=元素级错误卡替换（兄弟节点照常渲染），编译路径 `bindTwoWay` 直调
+> 抛出经 mountComponent 错误边界=组件级错误卡——code/message/fix 同源同文，parity 用例按此口径分形
+> （成功路径严格帧对拍、错误路径双路各自呈现断言）。select 真语义/监听退订归真 DOM（dom-shim 边界）；
+> 动态 `type={...}` v1 不追。门禁：490 绿+8 skip / check-skills 56-0 / api-diff PASS / scratch 31/31。
+
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
 - ~~异步表达式策略（D-F9）~~ → **已定稿为决策 24**（2026-09-19，原型通过）。
