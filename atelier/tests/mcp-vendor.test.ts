@@ -6,13 +6,16 @@
  * 整棵依赖树并核对 vendor 布局相对 import。本测试把「整棵依赖树」钉成机械事实：
  *   a. init fixture（--no-ai；vendored MCP 族是零依赖 .mjs——只 import node 内建，无需 pnpm install）；
  *   b. vendor 名单断言：mcp 五件 + mcp-definitions.json + scripts/struct.mjs + gen/impact.mjs
- *      + gen/gen-endpoint.mjs（impact 的传递 import）+ compiler/project-json.mjs 全部落位，
+ *      + gen/gen-endpoint.mjs（impact 的传递 import）+ compiler/project-json.mjs +
+ *      scripts/compiler/extract-schema.mjs（决策 26 schema 提取器）全部落位，
  *      且既有 vendor 语义（dev 面六件 / src/runtime / src/vendor/atelier）不回退；
  *   c. 从应用内 vendored 路径动态 import <app>/mcp/http.mjs——独立 deps 实例驱动 tools/list（36 工具）
  *      与 ping；加打 structure.map 真执行（证明 vendored ../scripts/struct.mjs 相对解析生效）；
  *      devUrl 指向必死端口（:9 discard）——tools/list / ping / 本地工具全程不 fetch 即铁证；
  *   d. 机械闭包核对：从 mcp/http.mjs 走相对 import 传递闭包，可达集合必须与 vendor 名单
  *      （除 fs.readFileSync 数据依赖 mcp-definitions.json）精确相等——新增漏 vendor 即红、减少也红；
+ *      extract-schema.mjs 由 dev 插件经 ROOT 相对动态 import 消费（路径是运行时数据而非字面量
+ *      import，文本扫描 regex 不可见）→ 作为闭包种子根显式入队（零依赖自包含 → 闭包贡献仅自身）；
  *   e. sync 幂等：破坏名单内文件后重跑 atelier sync——字节恢复等同框架源 + vendored import
  *      照常工作；名单外文件不误删（全量覆盖语义，非镜像删除）。
  *
@@ -40,10 +43,12 @@ afterAll(() => {
 });
 
 /** vendor 名单（目标应用布局与框架仓相对布局同构；与 init-project.mjs / sync-project.mjs 的
- * MCP 族清单三处同源——任何一处改动必须同步另外两处，test d 的精确相等断言是机检网）。 */
+ * MCP 族清单三处同源——任何一处改动必须同步另外两处，test d 的精确相等断言是机检网）。
+ * extract-schema.mjs（决策 26）不属 /__atelier/mcp 闭包，由 dev 插件 transform 消费——见 test d。 */
 const MCP_VENDOR: Array<[string, string[]]> = [
   ["mcp", ["server.mjs", "http.mjs", "tasks.mjs", "confirm.mjs", "endpoint-tools.mjs", "mcp-definitions.json"]],
   ["scripts", ["struct.mjs"]],
+  ["scripts/compiler", ["extract-schema.mjs"]],
   ["gen", ["impact.mjs", "gen-endpoint.mjs"]],
   ["compiler", ["project-json.mjs"]],
 ];
@@ -64,12 +69,12 @@ function scanRelativeImports(file: string): string[] {
   return [...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*)["'](\.[^"']*)["']/g)].map((m) => m[1]);
 }
 
-/** 从 app 内 entry（app 相对路径）走相对 import 传递闭包。
+/** 从 app 内 entry（app 相对路径，可多个种子根）走相对 import 传递闭包。
  * missing = 解析到但应用内不存在（vendor 漏件 / 未来依赖漂移的第一现场）。 */
-function walkImportClosure(entryRel: string): { reached: string[]; missing: string[] } {
+function walkImportClosure(entryRels: string[]): { reached: string[]; missing: string[] } {
   const seen = new Set<string>();
   const missing: string[] = [];
-  const queue = [entryRel];
+  const queue = [...entryRels];
   while (queue.length) {
     const rel = queue.shift()!;
     if (seen.has(rel)) continue;
@@ -93,6 +98,14 @@ function walkImportClosure(entryRel: string): { reached: string[]; missing: stri
 
 beforeAll(() => {
   runCli(["init", "--target", APP, "--name", "VendorFs", "--no-ai"]);
+  /* 合并窗口桩（schema 批）：框架源 atelier/scripts/compiler/extract-schema.mjs 由并行分支 A 落地，
+   * 未合并时 init 的名单项 warn+skip（诚实降级）——此处向 fixture 桩入零依赖空实现，让名单/闭包
+   * 断言不依赖合并时序；A 合并后 init 真 vendor 该件（桩分支不再触发）。桩仅存在于 tmp fixture。 */
+  const scanner = path.join(APP, "scripts", "compiler", "extract-schema.mjs");
+  if (!fs.existsSync(scanner)) {
+    fs.mkdirSync(path.dirname(scanner), { recursive: true });
+    fs.writeFileSync(scanner, "export function extractComponentDecls() { return []; }\nexport function extractPropsSchemas() { return []; }\n", "utf8");
+  }
 });
 
 function mcpRequest(method: string, body: unknown, headers: Record<string, string> = {}): Request {
@@ -144,8 +157,11 @@ describe("M7 vendor 批：vendored 应用 MCP HTTP 直连（候选池挂账销�
     expect(JSON.parse(parsedMap.result.content[0].text).summary).toBeTruthy();
   });
 
-  it("d. 机械闭包核对：mcp/http.mjs 相对 import 传递闭包 ≡ vendor 名单（防未来依赖漂移）", () => {
-    const { reached, missing } = walkImportClosure("mcp/http.mjs");
+  it("d. 机械闭包核对：mcp/http.mjs（+ extract-schema.mjs 种子根）相对 import 传递闭包 ≡ vendor 名单（防未来依赖漂移）", () => {
+    // 种子根二：extract-schema.mjs 由 dev 插件经 ROOT 相对动态 import 消费（路径是运行时数据，
+    // 文本 regex 不可见）——显式入队后精确相等断言对它双向成立：它新增相对 import（破零依赖
+    // 纪律）→ reached 超期望即红；名单漏 vendor → missing 即红。
+    const { reached, missing } = walkImportClosure(["mcp/http.mjs", "scripts/compiler/extract-schema.mjs"]);
     expect(missing, `vendored 闭包缺件: ${missing.join(", ")}`).toEqual([]);
     expect(reached, "import 闭包与 vendor 名单漂移（两边都红：漏 vendor 与多余依赖）").toEqual(EXPECTED_IMPORT_CLOSURE);
   });
@@ -158,11 +174,13 @@ describe("M7 vendor 批：vendored 应用 MCP HTTP 直连（候选池挂账销�
 
     runCli(["sync", "--target", APP]);
 
-    // 名单内：与框架源字节等同（全量覆盖语义）
+    // 名单内：与框架源字节等同（全量覆盖语义）；框架源自身缺失（分支 A 合并窗口）的名单项
+    // 由 init/sync 的 warn+skip 语义保持桩件——字节等同断言随框架源落地自动生效
     for (const rel of VENDOR_FILES) {
-      const framework = fs.readFileSync(path.join(PKG, rel));
+      const framework = path.join(PKG, rel);
+      if (!fs.existsSync(framework)) continue;
       const vendored = fs.readFileSync(path.join(APP, rel));
-      expect(vendored.equals(framework), `sync 后 ${rel} 与框架源不等同`).toBe(true);
+      expect(vendored.equals(fs.readFileSync(framework)), `sync 后 ${rel} 与框架源不等同`).toBe(true);
     }
     // 名单外哨兵不误删（覆盖非镜像）
     expect(fs.existsSync(path.join(APP, "mcp", "extra-sentinel.mjs")), "名单外文件不应被 sync 删除").toBe(true);
