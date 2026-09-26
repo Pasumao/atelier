@@ -58,6 +58,17 @@ const setProd = (v: boolean): void => {
   (globalThis as unknown as Record<string, unknown>).__ATELIER_PROD__ = v;
 };
 
+/** 捕获抛出物的四段式 code（ATR 错误按 code 断言，不按 message 正则——fs11 同款惯例；
+ * 抛出物是 AtrError 对象，code 不重复嵌进 message 以免错误卡 `${code} ${message}` 双写） */
+const catchCode = (fn: () => unknown): string | undefined => {
+  try {
+    fn();
+  } catch (e) {
+    return (e as { code?: string }).code;
+  }
+  return undefined;
+};
+
 describe("决策 25 bind: 解释器路径（roundtrip）", () => {
   it("文本输入 roundtrip：input 事件回写信号 + 信号外部更新下行 el.value（初始同步即成）", async () => {
     const text = $state("hello");
@@ -188,7 +199,10 @@ describe("决策 25 bind: 解释器路径（校验错误卡，dev）", () => {
     const s1 = serialize(c1);
     expect(s1).toContain("atr-error-card");
     expect(s1).toContain("ATR-324");
-    expect(findByTag(c1, "div").length, "支持面外整元素替换（atr-root 容器除外）").toBeLessThanOrEqual(1);
+    expect(
+      findByTag(c1, "div").filter((d: AnyNode) => d.getAttribute("bind:value") !== null).length,
+      "支持面外整元素替换：无任何元素携带 bind: attr（容器/根/错误卡 div 不计）",
+    ).toBe(0);
 
     const c2 = mountOnce("BindCheckedNoType", `<input bind:checked={on}>`, { on });
     expect(serialize(c2)).toContain("ATR-324");
@@ -230,7 +244,7 @@ describe("决策 25 bind: __compiledRT.bindTwoWay 直调契约（codegen 面）"
     const el = document.createElement("input");
     __compiledRT.bindTwoWay(el, "bind:value", "text", scope, "input");
     expect(el.listeners.get("input")?.length ?? 0).toBe(1);
-    expect(() => __compiledRT.bindTwoWay(el, "bind:value", "text", scope, "input")).toThrowError(/ATR-325/);
+    expect(catchCode(() => __compiledRT.bindTwoWay(el, "bind:value", "text", scope, "input"))).toBe("ATR-325");
     expect(el.listeners.get("input")?.length ?? 0, "不建立第二份订阅").toBe(1);
 
     setLast(undefined);
