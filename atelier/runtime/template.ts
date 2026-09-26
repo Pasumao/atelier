@@ -1296,6 +1296,10 @@ export const __compiledRT = {
   mountComponent,
   bindProp, // F-5：动态属性 = 响应式 prop（编译路径与解释器同源同函数）
   validateProps, // F-5：契约校验免追踪包裹（同上）
+  // 决策 27（M9 codegen strip）：双旗给 codegen emitComponent——两处错误卡分支发射 !(rt.BUILD_PROD ||
+  // rt.dynProd()) 守卫（解释器同款短路语义），产物零 import 拿到构建期常量与运行时动态读两员。
+  BUILD_PROD,
+  dynProd,
   // F-5 teardown 面给 codegen：编译路径的分支/行级析构与解释器共用同一 teardownStack。
   // 修复前 codegen 的 {#if} 换支 / {#each} 行移除只清 DOM 不析构 effect（僵尸 effect 红检见 tests/codegen.test.ts）。
   captureCleanup,
