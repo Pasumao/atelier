@@ -352,7 +352,7 @@ function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unkno
       const err = e as { code?: string; message?: string; fix?: string };
       recordRuntimeError(err);
       // prod 剥离：无错误卡——空文本占位（console 已记，不静默）
-      write(isProd() ? "" : `⚠ ${err.code ?? "ATR"} ${err.message ?? String(e)}${err.fix ? ` — fix: ${err.fix}` : ""}`);
+      write((BUILD_PROD || dynProd()) ? "" : `⚠ ${err.code ?? "ATR"} ${err.message ?? String(e)}${err.fix ? ` — fix: ${err.fix}` : ""}`);
       return;
     }
     write(v);
@@ -438,13 +438,23 @@ function bindProp(expr: string, scope: Record<string, unknown>, target: Record<s
   );
 }
 
-/* ---- F-2 二期 prod 剥离（MINI，决策 6「dev 强制 / prod 剥离」的运行时旗版）----
- * globalThis.__ATELIER_PROD__ === true 时：跳过契约校验（ATR-201）与 token 校验（ATR-204），
- * 渲染期错误不再生成可视化错误卡（改记 console，不静默）。诚实边界：这是运行时旗分支——
- * 校验代码仍在包内，build define/tree-shake 全量剥离归打包面（atelier build，STUB→打包面时落地）。
+/* ---- F-2 二期 prod 剥离（决策 6「dev 强制 / prod 剥离」）× 决策 27 构建期 DCE ----------
+ * 双旗语义（决策 27，任一为真即 prod）：
+ *  · BUILD_PROD = 构建期常量：仅 vite build 经 define 注入 `__ATELIER_BUILD_PROD__`="true"；
+ *    dev serve/vitest/node 直跑不注 → typeof 守卫得 false（零 ReferenceError）。bare 标识符是
+ *    define 可替换的前提——旧读法 globalThis 属性访问 define 匹配不上，勿改回；
+ *    `declare const` 纯类型声明，strip-types/esbuild 产物零残留。
+ *  · dynProd() = 运行时旗动态读，调用点现读（既有语义逐字保留，prod-strip 等置旗测试与
+ *    测试文件 afterAll 复位约定全部兼容）——模块级 init 捕获不得发生，否则测试全数失效。
+ * prod 下（任一旗真）：跳过契约校验（ATR-201）与 token 校验（ATR-204），渲染期错误不再生成
+ * 可视化错误卡（改记 console，不静默）。dev 专属分支的剥离 = vite build define 折叠 + 分支
+ * DCE（决策 27①，浏览器面）；动态旗分支的校验代码仍在包内（服务面语义不变，决策 27②）。
  * 契约语义：prod 放行 = 信任「dev 已强制过」的单源契约（H1），错误卡本就是 dev 专属可视化。
  */
-function isProd(): boolean {
+declare const __ATELIER_BUILD_PROD__: boolean | undefined;
+const BUILD_PROD = typeof __ATELIER_BUILD_PROD__ !== "undefined" && __ATELIER_BUILD_PROD__ === true;
+/** 运行时旗动态读（调用点现读，非 init 捕获）：与旧动态旗语义逐字同源。 */
+function dynProd(): boolean {
   return (globalThis as { __ATELIER_PROD__?: boolean }).__ATELIER_PROD__ === true;
 }
 
@@ -455,7 +465,7 @@ function validateProps(
   props: Record<string, unknown>,
   validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: import("./contract.ts").AtrError },
 ): { ok: boolean; error?: import("./contract.ts").AtrError } {
-  if (isProd()) return { ok: true };
+  if (BUILD_PROD || dynProd()) return { ok: true };
   return __withTracking(() => validate(schema, props)).result;
 }
 
@@ -627,7 +637,7 @@ function bindTwoWay(
 ): () => void {
   const fail = (err: AtrError): (() => void) => {
     recordRuntimeError(err);
-    if (!isProd()) throw err;
+    if (!(BUILD_PROD || dynProd())) throw err;
     return () => {}; // prod：元素照常语义，跳过该 bind: 绑定
   };
   const err = checkBindCore(name, expr, scope, tag.toLowerCase());
@@ -703,7 +713,7 @@ function injectScopedStyle(componentName: string, css: string, file: string): vo
   });
   // F-2 二期 prod 剥离（MINI）：prod 下跳过 ATR-204 校验——未定义 token 交由 var() 回退，
   // 不再抛错误卡（dev 已强制过；校验代码仍在包内，tree-shake 全量剥离归打包面）。
-  if (!isProd()) {
+  if (!(BUILD_PROD || dynProd())) {
     // H3/ATR-204：样式只能引用语义 token
     const re = /var\(\s*(--[\w-]+)\s*\)/g;
     let m: RegExpExecArray | null;
@@ -744,7 +754,7 @@ export function mountComponent(
     const err = e as { code?: string; message?: string; fix?: string };
     recordRuntimeError(e);
     const fallback: HTMLElement = document.createElement("div");
-    if (isProd()) {
+    if (BUILD_PROD || dynProd()) {
       container.appendChild(fallback);
       return fallback;
     }
@@ -935,7 +945,7 @@ function renderNode(
         const def = registry.get(node.tag);
         if (!def) {
           // prod 剥离：无错误卡，空占位 + console（不静默）
-          if (isProd()) {
+          if (BUILD_PROD || dynProd()) {
             recordRuntimeError({ code: "ATR-401", message: `组件未注册：${node.tag}` });
             return document.createElement("span");
           }
@@ -963,7 +973,7 @@ function renderNode(
       // prod 记录后跳过失败项、元素照常渲染（ATR-401 同款分层，不静默）。
       const bindFails = precheckBinds(node, scope);
       if (bindFails.length > 0) {
-        if (isProd()) {
+        if (BUILD_PROD || dynProd()) {
           for (const f of bindFails) recordRuntimeError(f.error);
         } else {
           const e = bindFails[0].error;
