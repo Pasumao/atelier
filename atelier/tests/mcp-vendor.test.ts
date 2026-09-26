@@ -7,7 +7,7 @@
  *   a. init fixture（--no-ai；vendored MCP 族是零依赖 .mjs——只 import node 内建，无需 pnpm install）；
  *   b. vendor 名单断言：mcp 五件 + mcp-definitions.json + scripts/struct.mjs + gen/impact.mjs
  *      + gen/gen-endpoint.mjs（impact 的传递 import）+ compiler/project-json.mjs +
- *      scripts/compiler/extract-schema.mjs（决策 26 schema 提取器）全部落位，
+ *      compiler/extract-schema.mjs（决策 26 schema 提取器）全部落位，
  *      且既有 vendor 语义（dev 面六件 / src/runtime / src/vendor/atelier）不回退；
  *   c. 从应用内 vendored 路径动态 import <app>/mcp/http.mjs——独立 deps 实例驱动 tools/list（36 工具）
  *      与 ping；加打 structure.map 真执行（证明 vendored ../scripts/struct.mjs 相对解析生效）；
@@ -48,9 +48,8 @@ afterAll(() => {
 const MCP_VENDOR: Array<[string, string[]]> = [
   ["mcp", ["server.mjs", "http.mjs", "tasks.mjs", "confirm.mjs", "endpoint-tools.mjs", "mcp-definitions.json"]],
   ["scripts", ["struct.mjs"]],
-  ["scripts/compiler", ["extract-schema.mjs"]],
   ["gen", ["impact.mjs", "gen-endpoint.mjs"]],
-  ["compiler", ["project-json.mjs"]],
+  ["compiler", ["project-json.mjs", "extract-schema.mjs"]],
 ];
 const VENDOR_FILES = MCP_VENDOR.flatMap(([dir, files]) => files.map((f) => `${dir}/${f}`));
 /** import 闭包期望集 = vendor 名单 − mcp-definitions.json（server.mjs 经 HERE + readFileSync 取的数据依赖） */
@@ -98,10 +97,10 @@ function walkImportClosure(entryRels: string[]): { reached: string[]; missing: s
 
 beforeAll(() => {
   runCli(["init", "--target", APP, "--name", "VendorFs", "--no-ai"]);
-  /* 合并窗口桩（schema 批）：框架源 atelier/scripts/compiler/extract-schema.mjs 由并行分支 A 落地，
+  /* 合并窗口桩（schema 批）：框架源 atelier/compiler/extract-schema.mjs 由并行分支 A 落地，
    * 未合并时 init 的名单项 warn+skip（诚实降级）——此处向 fixture 桩入零依赖空实现，让名单/闭包
    * 断言不依赖合并时序；A 合并后 init 真 vendor 该件（桩分支不再触发）。桩仅存在于 tmp fixture。 */
-  const scanner = path.join(APP, "scripts", "compiler", "extract-schema.mjs");
+  const scanner = path.join(APP, "compiler", "extract-schema.mjs");
   if (!fs.existsSync(scanner)) {
     fs.mkdirSync(path.dirname(scanner), { recursive: true });
     fs.writeFileSync(scanner, "export function extractComponentDecls() { return []; }\nexport function extractPropsSchemas() { return []; }\n", "utf8");
@@ -161,7 +160,7 @@ describe("M7 vendor 批：vendored 应用 MCP HTTP 直连（候选池挂账销�
     // 种子根二：extract-schema.mjs 由 dev 插件经 ROOT 相对动态 import 消费（路径是运行时数据，
     // 文本 regex 不可见）——显式入队后精确相等断言对它双向成立：它新增相对 import（破零依赖
     // 纪律）→ reached 超期望即红；名单漏 vendor → missing 即红。
-    const { reached, missing } = walkImportClosure(["mcp/http.mjs", "scripts/compiler/extract-schema.mjs"]);
+    const { reached, missing } = walkImportClosure(["mcp/http.mjs", "compiler/extract-schema.mjs"]);
     expect(missing, `vendored 闭包缺件: ${missing.join(", ")}`).toEqual([]);
     expect(reached, "import 闭包与 vendor 名单漂移（两边都红：漏 vendor 与多余依赖）").toEqual(EXPECTED_IMPORT_CLOSURE);
   });

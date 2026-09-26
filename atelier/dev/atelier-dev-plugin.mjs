@@ -28,7 +28,7 @@
  *                                          Mcp-Method/Mcp-Name 头路由；逻辑单源 mcp/http.mjs，
  *                                          这里只接线）
  * transform：.atr.ts 注入 HMR 边界（P0-5）+ props 注解 schema 提取注册（决策 26，prepend
- *           registerExtractedSchemas——提取器 scripts/compiler/extract-schema.mjs，vendor 名单内）
+ *           registerExtractedSchemas——提取器 compiler/extract-schema.mjs，vendor 名单内）
  * 安全：/__atelier/* 一律校验 token（页面经 transformIndexHtml 注入；工具从 .atelier/dev-token 读取）。
  * 审计：非 GET 的 /__atelier/* 与命令回执均追加 .atelier/audit.jsonl。
  */
@@ -97,8 +97,8 @@ export function atelierDevPlugin() {
   }
 
   /* ---------- 决策 26：schema 编译期提取 v1 —— .atr.ts transform 注入 ----------
-   * 提取器 = <app>/scripts/compiler/extract-schema.mjs（零依赖自包含，init/sync vendor 名单内；
-   * 框架源 atelier/scripts/compiler/extract-schema.mjs ↔ 应用 scripts/ 同构映射）。运行时按
+   * 提取器 = <app>/compiler/extract-schema.mjs（零依赖自包含，init/sync vendor 名单内；
+   * 框架源 atelier/compiler/extract-schema.mjs ↔ 应用 scripts/ 同构映射）。运行时按
    * ROOT（process.cwd() = 应用根，与 dev-token/audit/manifest 同一约定）惰性动态 import：
    *   · 静态顶层 import 不可取——旧应用未 sync（缺提取器件）时整个插件模块加载即炸，dev 面全灭；
    *     惰性 + 诚实降级（通知一次 + 跳过注入）与 /__atelier/mcp 503 指路同一分寸。结果按插件
@@ -116,7 +116,7 @@ export function atelierDevPlugin() {
   let extractorPromise = null;
   function loadSchemaExtractor() {
     extractorPromise ??= (async () => {
-      const file = path.join(ROOT, "scripts", "compiler", "extract-schema.mjs");
+      const file = path.join(ROOT, "compiler", "extract-schema.mjs");
       try {
         return await import(pathToFileURL(file).href);
       } catch (e) {
@@ -157,6 +157,11 @@ export function atelierDevPlugin() {
 
   return {
     name: "atelier-dev-plugin",
+    // enforce pre：transform 必须看到**原始 TS 源**——决策 26 的 schema 注入从 (props: {...})
+    // 注解提取 schema，而 Vite 7 的内部 esbuild 剥类型先于普通用户插件 transform 跑
+    // （真 dev 冒烟实证：普通序拿到的已是 SchemaProbe2(props) 脱注解形态，提取恒空）。
+    // pre 对非 .atr.ts 零影响（早退分支），HMR 尾巴 append 到原始源后经 esbuild 语义不变。
+    enforce: "pre",
     transformIndexHtml(html) {
       // 页面注入一次性 dev token（EventSource 无法带自定义 header，走 query）
       return html.replace(/<head[^>]*>/i, (m) => `${m}\n<script>window.__ATELIER_TOKEN__=${JSON.stringify(TOKEN)};</script>`);

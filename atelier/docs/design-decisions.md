@@ -321,6 +321,21 @@
   漂移风险由文档引导作者删除手写件。④ 嵌套对象/索引签名/`any`/`unknown` 等 v1 全部 ATR-102。
 - 时间：2026-09-26（候选池设计备忘兑现；用户「继续」拍板；主/子智能体 worktree 三分支并行实施）。
 
+> **落地注记（2026-09-26 schema 批，三分支并行 `e6824e9`/`9005ed4`/`c1b1502` 零冲突合并链至 `d1301eb` + 集成收口）**：
+> 全文兑现。集成收口三件（并行汇合的实证）：① **vendor 落点收敛**——C 分支按 `scripts/compiler/`
+> 映射假设接线，A 实落 `atelier/compiler/`（与 project-json 同构、与本决策文本一致），集成统一收敛到
+> `compiler/`（vendor 名单并入既有 `["compiler", …]` 条目 + 插件/测试/spec 四处引用同步）；②
+> **dev 插件 enforce: pre**——真 dev 冒烟实证 Vite 7 内部 esbuild 剥类型先于普通用户插件 transform
+> （普通序拿到的已是脱注解形态，`(props:{` 提取恒空、注入静默为零），插件加 `enforce: "pre"` 后
+> served 模块带 `__atelierRs({…提取 schema…})` prepend，浏览器端到端贯通（SchemaProbe 挂载 +
+> `{#if}` 重复行渲染 + 零错误卡）；③ SchemaProbe spec 内联 dom-shim 补 `style` 面（`{#if}` 分支锚点
+> span 被解释器写 `style.display`，该缺陷在 C 分支被 import 红掩盖、合并后暴露——跨分支已知红
+> 的典型形态）。门禁：533 绿+8 skip（490 基线 +27A +9B +7C）/ check-skills 56-0 / api-diff 纯加法
+> +2（registerExtractedSchemas + test-only `__resetExtractedSchemas`）基线刷新 / docs-numbers
+> tests=533 / scratch init 36/36 全绿 / 真 dev CDP 冒烟全通。诚实边界：codeMask 不解析正则字面量
+> （病理输入可能误命中）；注解内注释照切→必 ATR-102 不静默；类型别名引用不可解（warn 跳过）；
+> 编译产物流（codegen 嵌 schema）v1 留位；api-diff 面含 test-only 重置口（模块级导出即入面）。
+
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
 - ~~异步表达式策略（D-F9）~~ → **已定稿为决策 24**（2026-09-19，原型通过）。

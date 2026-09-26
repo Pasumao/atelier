@@ -7,7 +7,7 @@
  *   非 .atr.ts / node_modules 零影响（既有早退分支）· HMR 尾巴逻辑不动。
  *
  * 桩策略（「用桩目录」）：插件经 ROOT（process.cwd()，与 dev-token/audit/manifest 同一约定）惰性
- * 动态 import <app>/scripts/compiler/extract-schema.mjs——每个用例 mkdtemp 独立 fixture，在其中落
+ * 动态 import <app>/compiler/extract-schema.mjs——每个用例 mkdtemp 独立 fixture，在其中落
  * 一份行为受控的零依赖桩提取器（独立路径 = 独立 ESM 模块实例，互不串台），chdir 建插件实例后调用
  * transform（插件 ROOT 在工厂期捕获，transform 期 cwd 无关）。真实提取器的解析语义归 schema 批 A
  * 的测试田，本文件只钉 C 分支接线本身。
@@ -52,8 +52,8 @@ async function makeFixture(stubSource: string): Promise<{ root: string; plugin: 
   fixtures.push(root);
   fs.mkdirSync(path.join(root, "src", "runtime"), { recursive: true });
   fs.writeFileSync(path.join(root, "src", "runtime", "index.ts"), "export {};\n", "utf8");
-  fs.mkdirSync(path.join(root, "scripts", "compiler"), { recursive: true });
-  fs.writeFileSync(path.join(root, "scripts", "compiler", "extract-schema.mjs"), stubSource, "utf8");
+  fs.mkdirSync(path.join(root, "compiler"), { recursive: true });
+  fs.writeFileSync(path.join(root, "compiler", "extract-schema.mjs"), stubSource, "utf8");
   const prevCwd = process.cwd();
   process.chdir(root);
   try {

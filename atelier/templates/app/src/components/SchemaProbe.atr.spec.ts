@@ -5,7 +5,7 @@
  * 渲染路径上断言（不绕过解释器直测校验）。
  *
  * 单一真相注记：spec 自己完成「注解→提取→sink→挂载」接线——从 vendored
- * ../../scripts/compiler/extract-schema.mjs import extractPropsSchemas 对本文件源码现算 schema，
+ * ../../compiler/extract-schema.mjs import extractPropsSchemas 对本文件源码现算 schema，
  * 经 ../runtime 的 registerExtractedSchemas 注册进 sink，再挂载。与 dev 插件 transform 的注入
  * 同源同函数（dev 期由插件 prepend，vitest 无 vite transform 故此处手工等价接线）。
  *
@@ -57,6 +57,9 @@ class MElement {
   childNodes: AnyNode[] = [];
   parentNode: AnyNode = null;
   listeners = new Map<string, ((e: unknown) => void)[]>();
+  /* style 面：{#if} 分支锚点 span 会被解释器写 style.display="contents"（template.ts renderNode）——
+   * SchemaProbe 模板含 {#if}，本 shim 必须承接该写（FormBinding/LiveNotes 无分支锚点故其 shim 缺此面）。 */
+  readonly style: Record<string, string> = {};
   constructor(tag: string, type: "element" | "fragment" = "element") {
     this.tag = tag;
     this.type = type;
@@ -166,7 +169,7 @@ describe("SchemaProbe — 静态面（当场绿）：注解即唯一 schema 源 
   });
 });
 
-/** 端到端环接线：提取器（vendored scripts/compiler/）对本文件源码现算 → sink 注册 → 加载组件。
+/** 端到端环接线：提取器（vendored compiler/）对本文件源码现算 → sink 注册 → 加载组件。
  * dev 期由插件 transform prepend 同源注入；vitest 无 vite transform，此处等价手工接线。
  * 类型层注记：提取器 specifier 运行时拼 URL + runtime 以 any 引用——合并窗口内（A/B 未落地）
  * 已知红必须落在**运行时**（用例红），不能落在类型层把 init 产物的 tsc/tsgo 零诊断门禁打红；
@@ -174,8 +177,8 @@ describe("SchemaProbe — 静态面（当场绿）：注解即唯一 schema 源 
 async function wireRing(): Promise<{ rt: any; SchemaProbe: any; map: Record<string, unknown> }> {
   try {
     const rt: any = await import("../runtime"); // registerExtractedSchemas 随 schema 批 B 进桶出口
-    const scannerUrl = new URL("../../scripts/compiler/extract-schema.mjs", import.meta.url).href;
-    const scanner: any = await import(scannerUrl); // 随 schema 批 A 落地 vendored scripts/compiler/
+    const scannerUrl = new URL("../../compiler/extract-schema.mjs", import.meta.url).href;
+    const scanner: any = await import(scannerUrl); // 随 schema 批 A 落地 vendored compiler/
     const entries = scanner.extractPropsSchemas(probeSource) as Array<{ name: string; schema: unknown }>;
     const map: Record<string, unknown> = {};
     for (const e of entries ?? []) if (e && e.name && e.schema != null) map[e.name] = e.schema;

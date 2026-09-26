@@ -1,6 +1,6 @@
 /**
  * SchemaProbe.atr.ts — 决策 26 schema 编译期提取 v1 的核对物组件：**注解即唯一 schema 源**。
- * props 类型注解 { label: string; times?: number } 经编译期提取（scripts/compiler/extract-schema.mjs，
+ * props 类型注解 { label: string; times?: number } 经编译期提取（compiler/extract-schema.mjs，
  * 与 dev 插件 transform 注入同源同函数）自动注册进 runtime sink，component() 求值时兜底取用——
  * 本文件【不写手写 schema 元数据】，映射面之外的注解会在 dev 提取期 ATR-102 显式拒绝（fix 指路手写）。
  *

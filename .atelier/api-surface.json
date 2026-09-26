@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-25T12:09:19.314Z",
+  "generatedAt": "2026-09-26T07:03:35.426Z",
   "root": "Agentic",
   "layout": "framework",
   "surfaces": {
@@ -130,6 +130,10 @@
         "kind": "value"
       },
       {
+        "id": "__resetExtractedSchemas",
+        "kind": "value"
+      },
+      {
         "id": "__withTracking",
         "kind": "value"
       },
@@ -203,6 +207,10 @@
       },
       {
         "id": "registerCompiled",
+        "kind": "value"
+      },
+      {
+        "id": "registerExtractedSchemas",
         "kind": "value"
       },
       {
