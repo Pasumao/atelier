@@ -5,9 +5,12 @@
  *   atelier build --root <dir> --target=node|bun [--out <dir>] [--no-smoke]
  *
  * 产物（§12：node/bun 单入口 + SQLite 卷；差异 = 启动壳 30 行——壳本身，框架侧零差异）：
- *   <out>/index.html + assets/   前端静态产物（应用自身 vite build——devDependency 零新增依赖）
- *   <out>/server.mjs             服务端启动壳（生成物）：env 三件解析 + withStaticHost 合成
- *                                静态/端点双面 + serve()（node-host 单源）监听握手
+ *   <out>/index.html + assets/   前端静态产物（应用自身 vite build——devDependency 零新增依赖；
+ *                                vite.config build define 注入 __ATELIER_BUILD_PROD__ → 决策 27
+ *                                浏览器面 DCE 通道，dev serve 不注）
+ *   <out>/server.mjs             服务端启动壳（生成物）：prod 旗预置（决策 27 服务面激活通道——
+ *                                置位先于 await import 装配单源）+ env 三件解析 + withStaticHost
+ *                                合成静态/端点双面 + serve()（node-host 单源）监听握手
  * 装配单源 = 应用 src/server/main-server.ts 的 createAppHandler()（dev 托管与产物同一份端点
  * 注册——绝不生成第二份注册表）。vendor 单源 = src/vendor/atelier/server/{node-host,static-host}.ts。
  *
@@ -19,7 +22,9 @@
  *         ——拒绝位即文档，绝不静默产出跑不起来的产物）。
  *
  * 产物冒烟自证（--no-smoke 跳过）：PORT=0 spawn 产物入口 → 收 ATELIER_SERVER_READY 握手 →
- * POST <mount>/app.ping（模板自带探活端点）+ GET / 静态 index → 杀进程。失败 exit 1 诚实红
+ * POST <mount>/app.ping（模板自带探活端点）+ GET / 静态 index + GET <mount>/__atelier/server-status
+ * → 405 ATR-311（决策 27 服务面激活实证：壳预置旗后调试面隐身，journal-subprocess.test.ts prod
+ * 负例同款断言口径）→ 杀进程。失败 exit 1 诚实红
  * （无探活端点的应用用 --no-smoke 显式跳过——不静默跳过）。
  *
  * 诚实边界（随手记）：
@@ -122,9 +127,16 @@ const shell = `/**
  * 部署（相对引用 vendor 单源——单文件打包归 package/桌面线）；TLS/压缩归反代。
  */
 import { fileURLToPath } from "node:url";
-import { serve } from "../src/vendor/atelier/server/node-host.ts";
-import { withStaticHost } from "../src/vendor/atelier/server/static-host.ts";
-import { createAppHandler } from "../src/server/main-server.ts";
+
+// 决策 27 F-2 prod 剥离：服务面激活 = 壳预置旗（endpoints.ts/introspect.ts 的 isProd() 逐请求
+// 动态读，端点模块零改动即激活：server-status 调试面隐身、生产语义全面点亮）。
+// 置位必须先于 await import——静态 import 会 ESM 提升到模块顶部，置位将晚于装配链模块 init，
+// 动态读永远赶不上（journal-subprocess.test.ts 生成夹具壳的同类置位陷阱 = 实证先例）。
+globalThis.__ATELIER_PROD__ = true;
+
+const { serve } = await import("../src/vendor/atelier/server/node-host.ts");
+const { withStaticHost } = await import("../src/vendor/atelier/server/static-host.ts");
+const { createAppHandler } = await import("../src/server/main-server.ts");
 
 const port = Number(process.env.ATELIER_SERVER_PORT ?? 5174);
 const mount = process.env.ATELIER_SERVER_MOUNT ?? "/api";
@@ -145,7 +157,7 @@ let smoke = "skipped (--no-smoke)";
 if (!noSmoke && bunMissing) {
   smoke = "未实测（本机无 bun——产物照出，挂账既有口径；有 bun 的宿主直接跑下述运行命令即可）";
 } else if (!noSmoke) {
-  console.log(`[atelier build] ③ 冒烟自证（${target} runtime，PORT=0 → 握手 → app.ping + 静态 index）…`);
+  console.log(`[atelier build] ③ 冒烟自证（${target} runtime，PORT=0 → 握手 → app.ping + 静态 index + server-status 405）…`);
   const entry = path.join(outDir, "server.mjs");
   const smokeMount = process.env.ATELIER_SERVER_MOUNT ?? "/api"; // 与产物壳同读一份 env（壳缺省同值）
   const proc = spawn(target === "bun" ? "bun" : process.execPath, [entry], {
@@ -182,8 +194,12 @@ if (!noSmoke && bunMissing) {
         signal: AbortSignal.timeout(5_000),
       });
       const index = await fetch(`http://127.0.0.1:${ready}/`, { signal: AbortSignal.timeout(5_000) });
-      ok = ping.status === 200 && index.status === 200;
-      note = `app.ping ${ping.status} · index ${index.status}`;
+      // 决策 27 服务面激活实证：壳预置 __ATELIER_PROD__ 旗 → server-status 调试面隐身，GET 落回
+      // 非 POST 分支 405 ATR-311（journal-subprocess.test.ts prod 负例同款口径——分发器顺序实读，非 404）
+      const hidden = await fetch(`http://127.0.0.1:${ready}${smokeMount}/__atelier/server-status`, { signal: AbortSignal.timeout(5_000) });
+      const hiddenBody = await hidden.json().catch(() => ({}));
+      ok = ping.status === 200 && index.status === 200 && hidden.status === 405 && hiddenBody?.code === "ATR-311";
+      note = `app.ping ${ping.status} · index ${index.status} · server-status ${hidden.status}${hiddenBody?.code ? ` ${hiddenBody.code}` : ""}`;
     } catch (e) {
       note = `探活请求失败：${e?.message ?? e}`;
     }
@@ -195,14 +211,19 @@ if (!noSmoke && bunMissing) {
   if (!ok) {
     die(`error: 产物冒烟自证未通过（${note}）\n子进程原样输出：\n${out.trim()}`, 1, "产物已生成可人工复查；无 app.ping 探活端点的应用可用 --no-smoke 显式跳过（不静默跳过）");
   }
-  smoke = `app.ping 200 · index 200（${target} runtime）`;
+  smoke = `app.ping 200 · index 200 · server-status 405 ATR-311（${target} runtime）`;
 }
 
 /* ---------------- 出账：产物清单 + 运行指引 + 诚实边界 ---------------- */
 
 const runCmd = target === "bun" ? `bun ${path.relative(root, path.join(outDir, "server.mjs"))}` : `node ${path.relative(root, path.join(outDir, "server.mjs"))}`;
+// 决策 27：prod 剥离体积 delta 诚实可见（define DCE 后的 JS 产物实况；数字不冻结——门禁只验行存在）
+const assetsDir = path.join(outDir, "assets");
+const jsAssets = fs.existsSync(assetsDir) ? fs.readdirSync(assetsDir).filter((f) => f.endsWith(".js")) : [];
+const jsKb = (jsAssets.reduce((sum, f) => sum + fs.statSync(path.join(assetsDir, f)).size, 0) / 1024).toFixed(1);
 console.log(`[atelier build] 产物齐备 → ${outDir}`);
 console.log(`  前端静态面: ${path.relative(root, path.join(outDir, "index.html"))} (+assets/，vite 产物)`);
+console.log(`  prod 剥离: JS 产物 ${jsAssets.length} 文件共 ${jsKb} KB（define DCE 后）`);
 console.log(`  服务端入口: ${path.relative(root, path.join(outDir, "server.mjs"))}（装配单源 main-server.createAppHandler）`);
 console.log(`  冒烟自证: ${smoke}`);
 console.log("\n运行（单容器整目录部署——dist 与 src/ 相对引用不拆件）：");
