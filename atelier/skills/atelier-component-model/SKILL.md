@@ -43,6 +43,14 @@ export const ChatMessage = component(function ChatMessage(props: { text: string;
 - Mutate via `.value =`; read in templates via `{sig.value}` — subscription is automatic
 - `$derived` is read-only (write → ATR-305). Derive, don't cache by hand.
 
+## bind: two-way binding (v1, decision 25)
+
+- `bind:value={sig}` / `bind:checked={sig}` — one attr, two directions: signal → control (attr effect) + control → signal (event write-back). Runtime funnels both into the single `bindTwoWay` point.
+- Target must be a **single writable `$state`** declared in the component: `$derived` → ATR-305 (read-only), non-signal / illegal target / element-attr pair outside the surface → ATR-324, duplicate `bind:` on same element+attr → ATR-325
+- Support surface (v1): `bind:value` × input(text-like) / textarea (`input` event) + select (`change` event); `bind:checked` × input[type=checkbox|radio] (`change` event). Outside it, use one-way `attr={expr}` + an explicit `on:` handler
+- v1 explicitly NOT supported: same-name radio group (multi-value binding), event modifiers (`.prevent`/`.stop`), two-way on non-form elements
+- No feedback loop: programmatic `el.value=` does not fire input/change (DOM spec) — signal → control writes never bounce back; see `templates/app/src/components/FormBinding.atr.ts` for the copy-friendly example
+
 ## Common failures
 
 | Symptom | Code | Fix |

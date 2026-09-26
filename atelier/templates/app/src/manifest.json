@@ -16,6 +16,11 @@
         "type": "object",
         "reqProps": { "title": { "type": "string" } }
       }
+    },
+    { "name": "FormBinding", "file": "components/FormBinding.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" } }
+      }
     }
   ],
   "primitives": [
