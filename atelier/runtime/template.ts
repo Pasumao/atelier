@@ -2,7 +2,7 @@
  * Atelier prototype — 类 HTML 模板解释器（决策 1/8 雏形）。
  * 支持子集：{expr} 文本插值（含对象/数组字面量 {{a: x.value}} 与 {a} 简写，F-4 第二期）
  *         / {#if}{:else if}{:else}{/if} / {#each arr as item, idx [by key]}
- *         / 动态属性 attr={expr} / on:click={handler} 事件 / bind:value·bind:checked 双向绑定（决策 25，ATR-324/325 渲染期校验）
+ *         / 动态属性 attr={expr} / on:click={handler} 事件（.prevent/.stop 修饰 v1，决策 25 后置候选 ATR-326） / bind:value·bind:checked 双向绑定（决策 25，ATR-324/325 渲染期校验）
  *         / HTML void 元素（<br>/<img>/<input>… 无闭合）
  *         / <style scoped>（token 校验）/ 子组件 <ModelCard ... />（大写标签）。
  * 解析期显式拒绝（ATR-101）：未闭合的 {#if}/{#each}/元素标签、错位与游离闭合标签——不静默吞掉
@@ -220,7 +220,14 @@ class Parser {
         break;
       }
       if (this.src.startsWith("</", i)) break;
-      const am = /^([A-Za-z_][\w:-]*)/.exec(this.src.slice(i));
+      // 属性名含点号（决策 25 后置候选 M9 事件修饰 v1）：on: 的修饰符段是 attr 全名的
+      // 组成部分——on:click.prevent.stop 整体落单个 attr（契约载体 = attr 全名）。旧正则
+      // 不含 `.` 会把修饰符段切成碎片 attr（on:click / prevent / stop 各自成段、handler
+      // 落在末段）：监听器对空表达式求值、修饰符静默失效 + 垃圾 attr（红检取证见
+      // tests/event-modifiers.test.ts 头注释）。点号 attr 统一单一名字文法：bind:x.y /
+      // x.y={z} 一类旧产物本是两段碎片（无合法语义），单名化后由各指令自身校验响亮报错
+      // （bind: 未知指令 → ATR-324，卡文随真实名字指认，不再随文法碎片误指）。
+      const am = /^([A-Za-z_][\w.:-]*)/.exec(this.src.slice(i));
       if (!am) {
         i++;
         continue;
@@ -683,6 +690,93 @@ function bindTwoWay(
   return dispose;
 }
 
+/* ---- 决策 25 后置候选（M9）：事件修饰 v1——on: 的 .prevent / .stop ----------------
+ * 载体 = attr 全名：on: 后第一段 = 基础事件名，其余按 `.` 切分 = 修饰符序列
+ * （on:click.prevent.stop = click + [prevent, stop]，解析产物单 attr {name: 全名,
+ * value: handler, dynamic: true}——名字文法含点号是此前提的落实，红检证据见
+ * tests/event-modifiers.test.ts 头注释）。语义：事件触发时按书写顺序依次应用修饰符
+ * （prevent = e.preventDefault()；stop = e.stopPropagation()），最后调用 handler；
+ * handler 语义逐字不变（事件期 evalExpr、typeof function 才调用——与无修饰符 on: 同一形状）。
+ * 白名单外修饰符 → ATR-326（四段式，不静默）：解释器路径在 createElement 之前预检
+ * （precheckEvents，纯名字语法检查、无需 scope——可与 precheckBinds 同阶段并跑），
+ * dev 错误卡整替换 / prod 记录后跳过该 on: attr 照常渲染（ATR-401 同款分层）；
+ * bindEvent 共用同一校验单点 parseEventMods（codegen 直调路径的唯一校验层，
+ * checkBindCore 先例——双路径同源、判定一致）。
+ * 诚实边界：on: 后事件名缺省（on:.prevent）v1 不扩语法校验面——事件名 "" 永不派发，
+ * 与既有空 on: 行为一致；.prevent/.stop 对 defaultPrevented/传播序的真 DOM 语义归
+ * 浏览器集成面（dom-shim 透传假事件，本实现只钉接线与调用序）。
+ */
+/** v1 修饰符白名单：prevent = handler 前阻止默认行为；stop = handler 前阻止冒泡。 */
+const EVENT_MODIFIERS = new Set(["prevent", "stop"]);
+
+/** on: attr 全名解析 + 修饰符校验（纯名字语法、无需 scope——precheckEvents 与 bindEvent
+ * 双路径同源）：通过返回 {event, mods}；白名单外修饰符返回 ATR-326。 */
+function parseEventMods(name: string): { event: string; mods: string[] } | AtrError {
+  const segs = name.slice(3).split(".");
+  const event = segs[0] ?? "";
+  for (let i = 1; i < segs.length; i++) {
+    if (!EVENT_MODIFIERS.has(segs[i]!)) {
+      return {
+        code: "ATR-326",
+        message: `on: 未知事件修饰符：${name} 中的 .${segs[i]}`,
+        context: { attr: name },
+        fix: `v1 修饰符白名单仅 prevent（阻止默认行为）与 stop（阻止冒泡）：移除 .${segs[i]}，或在 handler 内显式调用 e.preventDefault() / e.stopPropagation()`,
+      };
+    }
+  }
+  return { event, mods: segs.slice(1) };
+}
+
+/** on: attrs 预检（解释器 createElement 之前跑，与 precheckBinds 同阶段）：纯名字语法
+ * 检查，白名单外修饰符 → ATR-326。返回失败清单（保 attr 引用供 prod 跳过失败项）。 */
+function precheckEvents(node: { attrs: Attr[] }): Array<{ attr: Attr; error: AtrError }> {
+  const fails: Array<{ attr: Attr; error: AtrError }> = [];
+  for (const a of node.attrs) {
+    if (!a.name.startsWith("on:")) continue;
+    const parsed = parseEventMods(a.name);
+    if ("code" in parsed) fails.push({ attr: a, error: parsed });
+  }
+  return fails;
+}
+
+/** 决策 25 后置候选（M9 事件修饰 v1）单点：on:event[.mod…]={handler}。与 bindTwoWay
+ * 同款单点形态：返回 dispose（removeEventListener）并 captureCleanup 纳入当前受控重建
+ * 的 cleanup 集（F-5 teardown：换支/行移除随之析构）。修饰符应用先于 handler（书写
+ * 顺序）；handler 语义逐字不变。错误契约：白名单外修饰符（ATR-326）→ recordRuntimeError
+ * 后 dev 抛出 / prod 返回 noop dispose（不挂监听、不静默）——解释器路径被 precheckEvents
+ * 前置拦截永不触达（校验单点同源，判定一致）。codegen 面经 __compiledRT 注入（并行分支
+ * 发射 rt.bindEvent，产物零 import 不破）。 */
+export function bindEvent(
+  el: HTMLElement,
+  name: string,
+  expr: string,
+  scope: Record<string, unknown>,
+): () => void {
+  const parsed = parseEventMods(name);
+  if ("code" in parsed) {
+    recordRuntimeError(parsed);
+    if (!(BUILD_PROD || dynProd())) throw parsed;
+    return () => {}; // prod：元素照常语义，跳过该 on: 监听
+  }
+  const { event, mods } = parsed;
+  const handler = (e: Event): void => {
+    for (const mod of mods) {
+      if (mod === "prevent") e.preventDefault();
+      else if (mod === "stop") e.stopPropagation();
+    }
+    const fn = evalExpr(expr, scope) as ((ev: Event) => void) | undefined;
+    if (typeof fn === "function") fn(e);
+  };
+  el.addEventListener(event, handler);
+  const dispose = () => {
+    // dom-shim（tests/dom-shim.ts）未实现 removeEventListener——可选调用兼容微 shim 宿主，
+    // 真 DOM 全量退订（bindTwoWay dispose 同款口径）。
+    (el as { removeEventListener?: (type: string, fn: (e: Event) => void) => void }).removeEventListener?.(event, handler);
+  };
+  captureCleanup(dispose);
+  return dispose;
+}
+
 /** —— 渲染上下文 —— */
 export type ComponentDef<P = Record<string, unknown>> = {
   name: string;
@@ -975,32 +1069,31 @@ function renderNode(
       }
       // 决策 25：bind: 预检先于 createElement——dev 任一失败即错误卡替换整个元素；
       // prod 记录后跳过失败项、元素照常渲染（ATR-401 同款分层，不静默）。
-      const bindFails = precheckBinds(node, scope);
-      if (bindFails.length > 0) {
+      // 决策 25 后置候选（M9 事件修饰 v1）：on: 预检同阶段并入（precheckEvents，纯名字
+      // 语法检查——白名单外修饰符 ATR-326），dev 卡任取首条、prod 逐条记录。
+      const fails = [...precheckBinds(node, scope), ...precheckEvents(node)];
+      if (fails.length > 0) {
         if (BUILD_PROD || dynProd()) {
-          for (const f of bindFails) recordRuntimeError(f.error);
+          for (const f of fails) recordRuntimeError(f.error);
         } else {
-          const e = bindFails[0].error;
-          const bindCard = document.createElement("div");
-          bindCard.className = "atr-error-card";
-          bindCard.textContent = `${e.code} ${e.message} — fix: ${e.fix}`;
-          return bindCard;
+          const e = fails[0].error;
+          const precheckCard = document.createElement("div");
+          precheckCard.className = "atr-error-card";
+          precheckCard.textContent = `${e.code} ${e.message} — fix: ${e.fix}`;
+          return precheckCard;
         }
       }
       const el = document.createElement(node.tag);
-      const skippedBinds = new Set(bindFails.map((f) => f.attr)); // 仅 prod 非空（dev 已整元素替换）
+      const skippedFails = new Set(fails.map((f) => f.attr)); // 仅 prod 非空（dev 已整元素替换）
       for (const a of node.attrs) {
         if (a.name.startsWith("on:")) {
-          const ev = a.name.slice(3);
-          el.addEventListener(ev, (e) => {
-            const fn = evalExpr(a.value, scope) as ((ev: Event) => void) | undefined;
-            if (typeof fn === "function") fn(e);
-          });
+          // 决策 25 后置候选（M9 事件修饰 v1）：单点 bindEvent（含无修饰符情形——行为逐字不变）
+          if (!skippedFails.has(a)) bindEvent(el, a.name, a.value, scope);
           continue;
         }
         if (a.name.startsWith("bind:")) {
           // 决策 25：双向绑定单点（预检已过 → 校验正常；dispose 内部 captureCleanup 随分支析构）
-          if (!skippedBinds.has(a)) bindTwoWay(el, a.name, a.value, scope, node.tag);
+          if (!skippedFails.has(a)) bindTwoWay(el, a.name, a.value, scope, node.tag);
           continue;
         }
         if (a.dynamic) {
@@ -1198,6 +1291,7 @@ export const __compiledRT = {
   booly,
   bindExpr,
   bindTwoWay, // 决策 25：bind:value/bind:checked 双向绑定单点（codegen emitAttrs 同位支路发射 rt.bindTwoWay，产物零 import 不破）
+  bindEvent, // 决策 25 后置候选（M9 事件修饰 v1）：on:event[.mod…] 单点（codegen emitAttrs on: 支路同位发射 rt.bindEvent，分支 B 收口；产物零 import 不破）
   recordRuntimeError,
   mountComponent,
   bindProp, // F-5：动态属性 = 响应式 prop（编译路径与解释器同源同函数）

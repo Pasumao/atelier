@@ -48,8 +48,15 @@ export const ChatMessage = component(function ChatMessage(props: { text: string;
 - `bind:value={sig}` / `bind:checked={sig}` — one attr, two directions: signal → control (attr effect) + control → signal (event write-back). Runtime funnels both into the single `bindTwoWay` point.
 - Target must be a **single writable `$state`** declared in the component: `$derived` → ATR-305 (read-only), non-signal / illegal target / element-attr pair outside the surface → ATR-324, duplicate `bind:` on same element+attr → ATR-325
 - Support surface (v1): `bind:value` × input(text-like) / textarea (`input` event) + select (`change` event); `bind:checked` × input[type=checkbox|radio] (`change` event). Outside it, use one-way `attr={expr}` + an explicit `on:` handler
-- v1 explicitly NOT supported: same-name radio group (multi-value binding), event modifiers (`.prevent`/`.stop`), two-way on non-form elements
+- v1 explicitly NOT supported: same-name radio group (multi-value binding), two-way on non-form elements
 - No feedback loop: programmatic `el.value=` does not fire input/change (DOM spec) — signal → control writes never bounce back; see `templates/app/src/components/FormBinding.atr.ts` for the copy-friendly example
+
+## Event modifiers on `on:` (v1, decision 25 follow-up)
+
+- Modifier segments are part of the attr full name: `on:` + event name + `.mod` segments — `on:click.prevent={fn}` / `on:click.stop={fn}` / combo `on:click.prevent.stop={fn}` (single attr, applied in written order before the handler). Runtime funnels all of it into the single `bindEvent` point.
+- Whitelist (v1): `prevent` = `e.preventDefault()` before the handler; `stop` = `e.stopPropagation()` before the handler. Handler semantics unchanged: the expression is evaluated at event time and only a `typeof === "function"` value is invoked
+- The listener attaches to the bare event name (`on:click.prevent` listens on `click`) — no other modifiers in v1 (`self` / `once` / `passive`, …): write the logic inside the handler instead
+- Outside the whitelist → **ATR-326**: dev renders an error card replacing the whole element; prod records the error and skips that listener while the element still renders (never silent)
 
 ## Props annotation is the schema (v1 extraction, decision 26)
 
