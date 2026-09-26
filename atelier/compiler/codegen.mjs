@@ -15,9 +15,12 @@
  *   · 每处 {expr} / 动态 attr / {#if} / {#each} 的 effect 接线在编译期定点生成（静态 effect 图）
  *   · F-5 effect 所有权：{#if} 换支 / {#each} 行移除/全清重建的 teardown 经 rt.withTeardown/
  *     rt.runCleanup 发射，与解释器共用同一 teardownStack（僵尸 effect 红检见 tests/codegen.test.ts）
- *   · 运行时能力（$effect/evalExpr/bindExpr/bindTwoWay/mountComponent…）经 ctx.rt 注入
+ *   · 运行时能力（$effect/evalExpr/bindExpr/bindTwoWay/bindEvent/mountComponent…）经 ctx.rt 注入
  *     （runtime/template.ts 的 __compiledRT，解释器同函数）⇒ 产物与 runtime 路径/打包布局
  *     零耦合，语义同源。
+ *   · 错误卡分支双旗守卫（决策 27）：emitComponent 的组件未注册卡 / validateProps 失败卡均以
+ *     !(rt.BUILD_PROD || rt.dynProd()) 守卫发射——与解释器同款语义，vite build define 折叠后
+ *     dev 分支 DCE 剔除（形态与行为钉见 tests/codegen-prodflags.test.ts）。
  *   · 表达式仍走 rt.evalExpr（解析结果已按源文本 memoize，见 runtime/expr.ts）——
  *     「零解析」仅对模板结构成立，对本发射器生成的直线接线成立，对表达式求值不成立（诚实边界）。
  *
@@ -129,10 +132,11 @@ function emitAttrs(attrs, SV, el, tag, out, uid, st) {
   for (const a of attrs ?? []) {
     if (a.name.startsWith("on:")) {
       collect(st, "events", a.value);
-      out.push(`  ${el}.addEventListener(${esc(a.name.slice(3))}, (e) => {`);
-      out.push(`    const fn = rt.evalExpr(${esc(a.value)}, ${SV});`);
-      out.push(`    if (typeof fn === "function") fn(e);`);
-      out.push(`  });`);
+      // 事件修饰族 v1（决策 25 后置候选，m9 批集成收口）：整名发射 rt.bindEvent 单点——
+      // 修饰符解析/白名单/ATR-326 分层全部收在 runtime 单点（parseEventMods 双路径同源），
+      // 与解释器 renderNode element 分支 on: 支路同位同构；无修饰符行为逐字节不变。
+      // collect 论证：监听器内事件期 evalExpr 读 handler 表达式 ⇒ 静态清单收 events 桶不变。
+      out.push(`  rt.bindEvent(${el}, ${esc(a.name)}, ${esc(a.value)}, ${SV});`);
     } else if (a.name.startsWith("bind:")) {
       // 决策 25 双向绑定（bind:value/bind:checked）：与解释器 renderNode element 分支同位
       //（先于 dynamic 单向支路）同构——同一单点 rt.bindTwoWay(el, name, expr, scope, tag)，

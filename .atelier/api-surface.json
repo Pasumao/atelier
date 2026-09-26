@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-26T07:03:35.426Z",
+  "generatedAt": "2026-09-26T12:24:44.326Z",
   "root": "Agentic",
   "layout": "framework",
   "surfaces": {
@@ -135,6 +135,10 @@
       },
       {
         "id": "__withTracking",
+        "kind": "value"
+      },
+      {
+        "id": "bindEvent",
         "kind": "value"
       },
       {

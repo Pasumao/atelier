@@ -741,3 +741,77 @@ describe("F-5 teardown parity（effect 生命周期，编译 ≡ 解释器）", 
     expect(b).toBe(a);
   });
 });
+
+describe("事件修饰 v1 codegen 面（m9 批集成收口）：emitAttrs on: 支路整名发射 rt.bindEvent", () => {
+  it("golden parity：on:click.prevent={fn} 双路径同帧——handler 经修饰符监听触发（旧发射 slice(3) 监听 'click.prevent' 永不触发 = 集成前红态）", async () => {
+    const raw = `<div><button on:click.prevent={go}>Go</button><span data-done={done.value}>s</span></div>`;
+    const r = await parity("ParityEventMods", raw, (container) => {
+      const done = $state("no");
+      const go = () => {
+        done.value = "yes";
+      };
+      return {
+        scope: { done, go },
+        steps: [
+          async () => {
+            // 修饰符应用会调 e.preventDefault——派发对象携带 no-op 方法（dom-shim 透传任意对象）
+            findByTag(container, "button")[0]?.dispatchEvent({
+              type: "click",
+              preventDefault: () => {},
+              stopPropagation: () => {},
+            });
+          },
+        ],
+      };
+    });
+    expect(r.frames.at(-1)).toContain('data-done="yes"');
+  });
+
+  it("编译路径修饰符应用：prevent/stop 按书写顺序在 handler 前调用（spy 事件透传断言调用序）", async () => {
+    const raw = `<button on:click.prevent.stop={go}>Go</button>`;
+    const calls: string[] = [];
+    const container = makeContainer();
+    registerCompiled(compileFunction("CompiledModsSpy", raw));
+    const go = () => {
+      calls.push("handler");
+    };
+    const def: ComponentDef = { name: "CompiledModsSpy", render: () => ({ raw, scope: { go } }) as never };
+    mountComponent(def, {}, container, new Map(), okValidate as never);
+    findByTag(container, "button")[0]?.dispatchEvent({
+      type: "click",
+      calls,
+      preventDefault: () => calls.push("preventDefault"),
+      stopPropagation: () => calls.push("stopPropagation"),
+    });
+    expect(calls).toEqual(["preventDefault", "stopPropagation", "handler"]);
+  });
+
+  it("编译路径 ATR-326：未知修饰符 dev 抛穿组件级错误边界成卡（双路 DOM 粒度边界同 bind 先例）；prod record 后照常渲染", async () => {
+    const raw = `<button on:click.bogus={go}>Go</button>`;
+    // dev：bindEvent 单点抛 ATR-326 → mountComponent 组件级错误边界接住 → 错误卡
+    const devBox = makeContainer();
+    const def: ComponentDef = {
+      name: "CompiledModsUnknown",
+      render: () => ({ raw, scope: { go: () => {} } }) as never,
+    };
+    mountComponent(def, {}, devBox, new Map(), okValidate as never);
+    expect(serialize(devBox)).toContain("atr-error-card");
+    expect(serialize(devBox)).toContain("ATR-326");
+    // prod：recordRuntimeError 后跳过该监听、元素照常渲染（ATR-401 同款分层）
+    const setProd = (v: boolean): void => {
+      (globalThis as unknown as Record<string, unknown>).__ATELIER_PROD__ = v;
+    };
+    setProd(true);
+    try {
+      const prodBox = makeContainer();
+      mountComponent(def, {}, prodBox, new Map(), okValidate as never);
+      expect(serialize(prodBox)).not.toContain("atr-error-card");
+      expect(serialize(prodBox)).toContain("<button");
+      expect(
+        (globalThis as unknown as { __ATELIER_LAST_ERROR__?: { code?: string } }).__ATELIER_LAST_ERROR__?.code,
+      ).toBe("ATR-326");
+    } finally {
+      setProd(false);
+    }
+  });
+});
