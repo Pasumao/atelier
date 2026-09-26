@@ -7,6 +7,19 @@
  *   → POST /api/app.ping 通（§14.4 验收环同一端点）→ GET / 静态 index.html 通（单容器双面：静态
  *   前端 + /api 同口）→ 收尾杀进程（Windows 孤儿进程零容忍，openapi-golden 同款）。
  *
+ * 决策 27 F-2 prod 剥离门（本文件追加，构建链激活三分支之 B）：
+ *   · 壳旗标形状：dist/server.mjs 含 `__ATELIER_PROD__ = true` + `await import`（置位先于装配单源
+ *     init 的形状证明——静态 import 会 ESM 提升，置位将晚于模块 init 而永远赶不上动态读）；
+ *   · 服务面激活实证：spawn 产物后 GET /api/__atelier/server-status → 405 ATR-311（prod 旗下
+ *     introspect 路由隐身，journal-subprocess.test.ts prod 负例同款口径——分发器顺序实读，非 404）；
+ *   · bundle 标记门（独立 it）：node 产物 assets/*.js 不含 `atr-error-card`（dev 错误卡渲染分支
+ *     已被 define DCE；CSS 不检查）与 `__ATELIER_BUILD_PROD__` 残留标识符（折叠后无痕）。
+ *     **设计内已知红**：并行 A 分支（runtime/template.ts 调用点 reshape 为 BUILD_PROD || dynProd()）
+ *     未合并 → template.ts 无 bare 标识符 → define 无匹配 → 错误卡分支无法常量化 → `atr-error-card`
+ *     必然残留。红因抄进提交信息，A 合并后 define 折叠转绿（机检证明 = DCE 前提是 A 的 reshape）；
+ *   · 体积 delta 诚实可见：build 出账含「prod 剥离: JS 产物 N 文件共 X KB（define DCE 后）」行
+ *     （数字不冻结——只验行存在）。
+ *
  * 红证（§14.2 不假红）：
  *   · --target=edge → exit 2 显式拒绝（§12 不做清单：SQLite 数据层与 serverless 天然错配——
  *     拒绝位即文档，绝不静默产出跑不起来的产物）；
@@ -132,6 +145,10 @@ d("D-F14 atelier build：自托管单容器产线（node/bun 两 target + edge �
       expect(shellSrc).toContain("ATELIER_SERVER_PORT"); // env 三件契约（壳读 env，serve 只收解析值）
       expect(shellSrc).toContain("createAppHandler"); // 装配单源：壳不做第二份端点注册
 
+      // 决策 27 prod 剥离·壳旗标形状：置位 + 先于装配（静态 import 会 ESM 提升——必须 await import）
+      expect(shellSrc).toContain("__ATELIER_PROD__ = true");
+      expect(shellSrc).toContain("await import");
+
       // spawn 产物 → 握手 → 双面探活
       const srv = await startBuiltServer(path.join(outDir, "server.mjs"), "node");
       try {
@@ -147,6 +164,12 @@ d("D-F14 atelier build：自托管单容器产线（node/bun 两 target + edge �
         // 静态面诚实边界：缺文件 404（不做 SPA fallback——模板单页无客户端路由）
         const missing = await fetch(`http://127.0.0.1:${srv.port}/no-such-asset.js`);
         expect(missing.status).toBe(404);
+
+        // 决策 27 服务面激活实证：prod 旗下 server-status 调试面隐身 → GET 落回 405 ATR-311
+        //（journal-subprocess.test.ts prod 负例同款口径——分发器顺序实读，非 404/空数据）
+        const hidden = await fetch(`http://127.0.0.1:${srv.port}/api/__atelier/server-status`);
+        expect(hidden.status).toBe(405);
+        expect(((await hidden.json()) as { code: string }).code).toBe("ATR-311");
       } finally {
         await srv.stop();
       }
@@ -154,6 +177,31 @@ d("D-F14 atelier build：自托管单容器产线（node/bun 两 target + edge �
       // 运行指引诚实呈现（单容器整目录部署语义 + 端口/env 位可答）
       expect(b.stdout).toContain("server.mjs");
       expect(b.stdout).toContain("ATELIER_DB_PATH");
+      // 体积 delta 诚实可见（决策 27：数字不冻结——只验行存在）
+      expect(b.stdout).toContain("prod 剥离");
+      expect(b.stdout).toContain("（define DCE 后）");
+    },
+  );
+
+  it(
+    "prod 剥离门：node 产物 JS assets 不含 dev 错误卡（atr-error-card）与 define 标识符残留（设计内已知红）",
+    { timeout: 60_000, retry: 0 },
+    () => {
+      const appDir = ensureFixture();
+      const assetsDir = path.join(appDir, "dist", "assets"); // 全链正控 it 先跑：node target 产物已在此
+      const jsAssets = fs.readdirSync(assetsDir).filter((f) => f.endsWith(".js")); // CSS 不检查（.atr-error-card 样式仍在 = 决策 27 诚实边界）
+      expect(jsAssets.length).toBeGreaterThan(0);
+      for (const f of jsAssets) {
+        const js = fs.readFileSync(path.join(assetsDir, f), "utf8");
+        // 已知红红因（抄进提交信息）：并行 A 分支（runtime/template.ts 调用点 reshape 为
+        // BUILD_PROD || dynProd()）未合并 → 调用点无 bare 标识符 __ATELIER_BUILD_PROD__ →
+        // vite define 无匹配 → dev 错误卡分支（动态 isProd() 守卫）无法常量化 DCE → 字符串必然残留。
+        expect(
+          js.includes("atr-error-card"),
+          `${f} 残留 dev 错误卡渲染分支（atr-error-card）——设计内已知红：A 分支 BUILD_PROD||dynProd() reshape 未合并，define 无匹配可折叠（决策 27），A 合并后转绿`,
+        ).toBe(false);
+        expect(js.includes("__ATELIER_BUILD_PROD__"), `${f} 残留 define 标识符 __ATELIER_BUILD_PROD__（折叠后应无痕）`).toBe(false);
+      }
     },
   );
 
