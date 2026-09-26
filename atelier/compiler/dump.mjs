@@ -7,8 +7,15 @@
  * and walks every *.atr.ts in an app, dumping each exported component's html``
  * templates as JSON:
  *
- *   <root>/.atr/ast/<Component>.json   per-component: raw strings + parsed ASTs
+ *   <root>/.atr/ast/<Component>.json   per-component: raw strings + parsed ASTs (+ extracted
+ *                                      props schema when the (props: {...}) annotation maps —
+ *                                      decision 26, see compiler/extract-schema.mjs)
  *   <root>/.atr/ast/index.json         aggregate index for stage ③ (codegen)
+ *
+ * Props-schema extraction (decision 26) runs in the same pass: extractPropsSchemas maps
+ * in-surface (props: {...}) annotations to FlatSchema; out-of-surface annotations die with
+ * ATR-102 (fix: hand-written schema); unannotated components are skipped with a warning.
+ * The --stdout aggregate carries the same additive `schema` key on component entries.
  *
  * Stage ③ (static effect-graph codegen) will consume index.json; acceptance for ② is
  * structural: dump(whole file) === parseTemplate(raw) for every extracted literal
@@ -27,6 +34,7 @@ import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
 import { parseTemplate } from "../runtime/template.ts";
+import { extractComponentDecls, extractPropsSchemas } from "./extract-schema.mjs";
 
 const SCHEMA = "atelier-ast-dump/0.1";
 
@@ -94,14 +102,9 @@ export function extractHtmlLiterals(src) {
   return out;
 }
 
-/* ---------- component association ---------- */
-function extractComponents(src) {
-  const decls = [];
-  const re = /export\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*component\s*\(/g;
-  for (let m; (m = re.exec(src));) decls.push({ name: m[1], offset: m.index });
-  return decls;
-}
-
+/* ---------- component association ----------
+ * extractComponentDecls 单一真相已搬迁至 compiler/extract-schema.mjs（决策 26 扫描器自包含，
+ * vendor 闭包最小化）；本文件仅 import 消费，行为与原本地实现逐字节一致（既有测试锁定）。 */
 function ownerOf(decls, offset) {
   let owner = null;
   for (const d of decls) {
@@ -138,10 +141,24 @@ function main() {
   }
 
   const components = new Map(); // name → { file, templates: [{index, raw, ast}] }
+  const schemas = new Map(); // name → FlatSchema（决策 26 注解提取；仅可提取组件入表）
   const warnings = [];
   for (const file of files) {
     const src = fs.readFileSync(file, "utf8");
-    const decls = extractComponents(src);
+    const decls = extractComponentDecls(src);
+    /* ---------- 决策 26：(props: {...}) 注解 → FlatSchema。超面 ATR-102 四段式上 stderr（die），
+     * 无注解/参数名非 props → warn 收进既有 warnings（同款 warn: 前缀输出）。 ---------- */
+    let propResults;
+    try {
+      propResults = extractPropsSchemas(src);
+    } catch (e) {
+      if (e && e.code === "ATR-102") die(`${path.relative(ROOT, file)}: ${e.code} ${e.message}`, e.fix);
+      throw e;
+    }
+    for (const r of propResults) {
+      if (r.schema) schemas.set(r.name, r.schema);
+      else if (r.warn) warnings.push(`${path.relative(ROOT, file)}: ${r.warn}`);
+    }
     let lits;
     try {
       lits = extractHtmlLiterals(src);
@@ -172,11 +189,11 @@ function main() {
 
   const generatedAt = new Date().toISOString();
   if (STDOUT) {
-    console.log(JSON.stringify({ $schema: SCHEMA, generatedAt, root: ROOT, components: [...components.entries()].map(([name, v]) => ({ name, file: v.file, templates: v.templates })) }, null, 2));
+    console.log(JSON.stringify({ $schema: SCHEMA, generatedAt, root: ROOT, components: [...components.entries()].map(([name, v]) => ({ name, file: v.file, templates: v.templates, ...(schemas.has(name) ? { schema: schemas.get(name) } : {}) })) }, null, 2));
   } else {
     fs.mkdirSync(OUT, { recursive: true });
     for (const [name, v] of components) {
-      const payload = { $schema: SCHEMA, generatedAt, component: name, file: v.file, templates: v.templates };
+      const payload = { $schema: SCHEMA, generatedAt, component: name, file: v.file, templates: v.templates, ...(schemas.has(name) ? { schema: schemas.get(name) } : {}) };
       fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify(payload, null, 2) + "\n");
     }
     const index = {
