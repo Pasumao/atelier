@@ -945,6 +945,9 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 | ATR-321 | 3xx 运行 | live 重算失败（SSE error 事件，不断流） | §4.2 |
 | ATR-322 | 3xx 运行 | 端点超时（503） | §3.6 |
 | ATR-323 | 3xx 运行 | 模板表达式返回 Promise（异步泄漏进响应式图，显式拒绝） | §8.4（FS-11，已落地） |
+| ATR-324 | 3xx 运行 | bind: 目标非法——非单个可写信号 / 元素-attr 组合不在 v1 支持面 | 决策 25（bind 批，已落地；skills ERR_CATALOG 同步） |
+| ATR-325 | 3xx 运行 | 同元素同 attr 重复 bind:（WeakMap 守卫，后到者错误卡不双订） | 决策 25（bind 批，已落地） |
+| ATR-326 | 3xx 运行 | on: 事件修饰未识别（白名单 v1 = prevent/stop；dev 预检错误卡整替换 / prod record 后跳过该监听照常渲染） | 决策 25 后置候选 v1.1（m9 批，已落地） |
 | ATR-331 | 3xx 运行 | 迁移缺 down（不成对） | §5.4 |
 | ATR-332 | 3xx 运行 | 迁移 checksum 不匹配 | §5.4 |
 | ATR-333 | 3xx 运行 | down 缺失/执行失败 | §5.4 |

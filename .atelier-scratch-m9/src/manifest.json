@@ -1,0 +1,31 @@
+{
+  "components": [
+    { "name": "HelloCard", "file": "components/HelloCard.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" } },
+        "optProps": { "start": { "type": "number" } }
+      }
+    },
+    { "name": "ContractProbe", "file": "components/ContractProbe.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" }, "level": { "type": "number" } },
+        "optProps": { "note": { "type": "string" } }
+      }
+    },
+    { "name": "LiveNotes", "file": "components/LiveNotes.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" } }
+      }
+    },
+    { "name": "FormBinding", "file": "components/FormBinding.atr.ts", "schema": {
+        "type": "object",
+        "reqProps": { "title": { "type": "string" } }
+      }
+    },
+    { "name": "SchemaProbe", "file": "components/SchemaProbe.atr.ts" }
+  ],
+  "primitives": [
+    "$state", "$derived", "$effect", "streamValue", "optimisticList", "devFetch",
+    "store.commit", "store.rollback", "store.timeTravel", "validateFlat"
+  ]
+}

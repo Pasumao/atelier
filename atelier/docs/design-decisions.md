@@ -297,6 +297,18 @@
 > （成功路径严格帧对拍、错误路径双路各自呈现断言）。select 真语义/监听退订归真 DOM（dom-shim 边界）；
 > 动态 `type={...}` v1 不追。门禁：490 绿+8 skip / check-skills 56-0 / api-diff PASS / scratch 31/31。
 
+> **落地注记（2026-09-26 m9 批，事件修饰族 v1.1——v1 显式不做清单首枚销账，三分支并行 `5ce9676`/`e6d6727`/`b9d6cd8` 零冲突合并链至 `16e3f44`）**：
+> `on:<event>.<mod…>` v1 支持 `prevent`/`stop` 双修饰（书写序 handler 前应用）——runtime 单点
+> `bindEvent(el, name, expr, scope)`（bindTwoWay 同款形态，dispose+captureCleanup 随 F-5 析构）+
+> `parseEventMods` 校验单点双路径同源 + `precheckEvents` createElement 前预检（ATR-326 dev 元素级
+> 错误卡整替换 / prod recordRuntimeError 后跳过该监听照常渲染，ATR-401 分层同款）。**一处契约修正**：
+> 「解析器零改动」前提经实证为假——attr 名文法 `[\w:-]` 不含 `.`，`on:click.prevent` 实际解析成三段
+> 碎片 attr（监听空表达式 dispatch 即抛 ATR-301、handler 源码落垃圾 attr，比预判的「监听
+> click.prevent」更糟），修复 = 字符类扩 `[\w.:-]` 单一处（全仓 grep 无既有点号 attr 依赖，bind:x.y
+> 碎片产物由各指令自身校验响亮报错且卡文随真实名字指认更准）。错误码 **ATR-326**（事件修饰未识别）
+> 三处同步。门禁：580 绿+8 skip（546 基线 +16A）/ check-skills 56-0。诚实边界：修饰符应用语义
+> 归真 DOM（dom-shim 用 spy 假事件验证）；编译路径无预检=组件级错误边界（bind 同款粒度边界）。
+
 ## 决策 26：schema 编译期提取 v1（决策 6 完整版承诺兑现，F 线）
 - **定论**：dump.mjs 扫描器扩 `(props: {...})` 类型注解提取——落点为**自包含零依赖扫描器**
   `compiler/extract-schema.mjs`（花括号配对复用 matchBrace 技法；「纯文本扫描禁 TS 解析器」纪律不破；
@@ -336,6 +348,18 @@
 > （病理输入可能误命中）；注解内注释照切→必 ATR-102 不静默；类型别名引用不可解（warn 跳过）；
 > 编译产物流（codegen 嵌 schema）v1 留位；api-diff 面含 test-only 重置口（模块级导出即入面）。
 
+> **落地注记（2026-09-26 m9 批，编译产物流 v1 留位兑现，分支 `b9d6cd8`→`e332bec`）**：
+> 「工件字段」语义闭环——dump 的 `schema` 字段经 codegen CLI main 透传，`compileModuleSource` 加法
+> 第三参在产物 `export const compiled` 之后**仅当 schema 存在时**追加 `export const compiledSchema`
+> （JSON.stringify 确定性序列化，缺省产物逐字节一致 golden 钉死 + regen 幂等）；`registerCompiled`
+> 接受产物模块级 `compiledSchema` / 条目级 `schema` 双通道，注册时 ① 喂决策 26 sink（HMR 刷新语义
+> 保持）② 回填既有 registry 条目（仅当 `schema === undefined`，显式恒胜两时序端到端钉死）。循环核查：
+> template.ts→component.ts 单向运行时边（component.ts 对 template.ts 仅 type-only import）安全直连。
+> **既有形态边界如实修正**：模块产物条目实为 `{name,deps,program}` 无 `raw`，registerCompiled 的
+> raw 守卫本就把整条跳过（快路径命中需应用侧同源 raw）——schema 遂按组件名流动、不要求 raw，本批
+> 交付 = schema 随产物流动与校验生效（端到端违例 props 从静默通过 → ATR-201）；快路径 raw 形态
+> 边界非本批引入，维持既有口径。门禁：554 绿+8 skip（本支段）。
+
 ## 决策 27：F-2 prod 剥离 v1——发布面激活 + 浏览器面构建期 DCE（F 线收口件）
 - **头号事实（本批修的缺口）**：`__ATELIER_PROD__` 旗标今日**无任何产线设置方**（仅测试置位）——
   `atelier build` 产物等于跑 dev 面（契约校验执行、错误卡照渲染、server-status 调试面在线）。
@@ -374,6 +398,15 @@
 > api-diff churn 0.00% / 真实 build 冒烟（app.ping 200 · index 200 · **server-status 405 ATR-311**）/
 > 产物 JS 33.5KB atr-error-card **零出现**（字节级）+ dev 装配件零残留。**F 线 F-1~F-5 全清。**
 > 诚实边界照决策 27 原文；CDP 行为探针本机挂起，以字节级+HTTP 级证据收口。
+
+> **落地注记（2026-09-26 m9 批，codegen 产物错误卡折叠——诚实边界「归后置」销账，分支 `e6d6727`→`85d209a`）**：
+> `emitComponent` 两处错误卡源补双旗守卫，与解释器语义逐点同构——① 组件未注册卡：`!(rt.BUILD_PROD ||
+> rt.dynProd())` 守卫 dev 卡 / else 支 `recordRuntimeError({code:"ATR-401"})` + 空 span 占位（文案逐字
+> 对齐 template.ts:948-955）；② validateProps 失败卡：`!(rt.BUILD_PROD || rt.dynProd()) && !v.ok` 守卫
+> （prod 下 validateProps 早退 ok 本就不可达，守卫仅为 define 折叠后 DCE 剔除）。`__compiledRT` 增员
+> `BUILD_PROD`/`dynProd`（shorthand 标识符列表，无 `||` 形态——prod-flags 形态机检「恰好 N 处」钉不
+> 受扰）。产物发射经 `rt.*` 属性访问拿旗，双旗短路语义与解释器同款；真实 vite build 折叠归构建管线
+> （build-gate 模式），单测钉守卫形态与运行时行为。门禁：553 绿+8 skip（本支段）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。

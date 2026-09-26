@@ -1,0 +1,16 @@
+{
+  "//": "Atelier 应用类型守卫（FS-DESIGN §7.3 门禁一：生成后零修改可编译）。`npx tsc -p . --noEmit` 即验收；allowImportingTsExtensions 支撑 vendored .ts 显式 import 闭合。",
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "isolatedModules": true
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

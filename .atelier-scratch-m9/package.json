@@ -1,0 +1,21 @@
+{
+  "name": "m9scratch",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "M9Scratch — built with Atelier",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "vite": "^7.0.0",
+    "vitest": "^4.1.11",
+    "@types/node": "^24.0.0"
+  }
+}
