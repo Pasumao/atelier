@@ -15,8 +15,9 @@
  *   · 每处 {expr} / 动态 attr / {#if} / {#each} 的 effect 接线在编译期定点生成（静态 effect 图）
  *   · F-5 effect 所有权：{#if} 换支 / {#each} 行移除/全清重建的 teardown 经 rt.withTeardown/
  *     rt.runCleanup 发射，与解释器共用同一 teardownStack（僵尸 effect 红检见 tests/codegen.test.ts）
- *   · 运行时能力（$effect/evalExpr/bindExpr/mountComponent…）经 ctx.rt 注入（runtime/template.ts
- *     的 __compiledRT，解释器同函数）⇒ 产物与 runtime 路径/打包布局零耦合，语义同源。
+ *   · 运行时能力（$effect/evalExpr/bindExpr/bindTwoWay/mountComponent…）经 ctx.rt 注入
+ *     （runtime/template.ts 的 __compiledRT，解释器同函数）⇒ 产物与 runtime 路径/打包布局
+ *     零耦合，语义同源。
  *   · 表达式仍走 rt.evalExpr（解析结果已按源文本 memoize，见 runtime/expr.ts）——
  *     「零解析」仅对模板结构成立，对本发射器生成的直线接线成立，对表达式求值不成立（诚实边界）。
  *
@@ -102,7 +103,7 @@ function emitNode(n, SV, T, out, uid, st) {
       const el = uid("el");
       out.push(`{`);
       out.push(`  const ${el} = document.createElement(${esc(n.tag)});`);
-      emitAttrs(n.attrs, SV, el, out, uid, st);
+      emitAttrs(n.attrs, SV, el, n.tag, out, uid, st);
       if (n.children?.length) {
         const c = uid("c");
         out.push(`  const ${c} = document.createDocumentFragment();`);
@@ -118,13 +119,13 @@ function emitNode(n, SV, T, out, uid, st) {
     case "each":
       return emitEach(n, SV, T, out, uid, st);
     default:
-      throw new CodegenError(`unknown node kind: ${JSON.stringify(n?.kind)} — stage ③ 覆盖 text/expr/element/if/each；` +
+      throw new CodegenError(`unknown node kind: ${JSON.stringify(n?.kind)} — stage ③ 覆盖 text/expr/element（attr 面 on:/bind:/动态/静态）/if/each；` +
         `收到未知节点请先确认 stage ② dump 与 runtime 解析器版本一致`);
   }
 }
 
-/** 属性：保持原序（on: 事件 / 动态 bindExpr / 静态 setAttribute 按模板出现顺序发射） */
-function emitAttrs(attrs, SV, el, out, uid, st) {
+/** 属性：保持原序（on: 事件 / bind: 双向 / 动态 bindExpr / 静态 setAttribute 按模板出现顺序发射） */
+function emitAttrs(attrs, SV, el, tag, out, uid, st) {
   for (const a of attrs ?? []) {
     if (a.name.startsWith("on:")) {
       collect(st, "events", a.value);
@@ -132,6 +133,19 @@ function emitAttrs(attrs, SV, el, out, uid, st) {
       out.push(`    const fn = rt.evalExpr(${esc(a.value)}, ${SV});`);
       out.push(`    if (typeof fn === "function") fn(e);`);
       out.push(`  });`);
+    } else if (a.name.startsWith("bind:")) {
+      // 决策 25 双向绑定（bind:value/bind:checked）：与解释器 renderNode element 分支同位
+      //（先于 dynamic 单向支路）同构——同一单点 rt.bindTwoWay(el, name, expr, scope, tag)，
+      // 糖化形态（动态 attr effect 订阅 + 元素事件回写 sig.value）全部收在 runtime 单点内。
+      // 错误面同构：bindTwoWay 的校验失败（ATR-305 派生只读 / ATR-324 目标或组合非法 /
+      // ATR-325 重复绑定）由 runtime 单点呈现（dev 错误卡替换元素 / prod recordRuntimeError）——
+      // codegen 发射即信任 runtime 单点，不重复校验。
+      // collect 论证：bindTwoWay 内部自建 attr effect（bindExpr 同源订阅，自行 evalExpr 读
+      // 目标信号）⇒ 运行时追踪集必含 bind 目标；静态清单若漏收将破「语法级引用集 ⊇ 运行时
+      // 追踪集」超集不变式（F-2 依赖图 / 未来跳过追踪的可靠性依据）⇒ 与 dynamic 支路同桶
+      // 收集（reactive）。
+      collect(st, "reactive", a.value);
+      out.push(`  rt.bindTwoWay(${el}, ${esc(a.name)}, ${esc(a.value)}, ${SV}, ${esc(tag)});`);
     } else if (a.dynamic) {
       collect(st, "reactive", a.value);
       out.push(`  rt.bindExpr(${esc(a.value)}, ${SV}, (v) => {`);
