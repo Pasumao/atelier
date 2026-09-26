@@ -51,6 +51,15 @@ export const ChatMessage = component(function ChatMessage(props: { text: string;
 - v1 explicitly NOT supported: same-name radio group (multi-value binding), event modifiers (`.prevent`/`.stop`), two-way on non-form elements
 - No feedback loop: programmatic `el.value=` does not fire input/change (DOM spec) — signal → control writes never bounce back; see `templates/app/src/components/FormBinding.atr.ts` for the copy-friendly example
 
+## Props annotation is the schema (v1 extraction, decision 26)
+
+- The `(props: {...})` type annotation on a component IS its schema source: the compiler extracts a flat schema from it and the dev plugin registers it into the runtime sink (prepended before `component()` evaluates, so the fallback picks it up). No handwritten `schema:` needed — see `templates/app/src/components/SchemaProbe.atr.ts` (the no-handwritten-schema reference)
+- Mapping surface (v1): `string` / `number` / `boolean` / `Array<leaf>` → `{type:"array",items}` / string-literal union → `{type:"string",enum}`; `prop?: T` → `optProps`, required `prop: T` → `reqProps`
+- **Explicit handwritten schema still wins**: when both exist, `opts.schema` takes precedence (sink never overrides it) — delete the handwritten one after migrating to annotations, or the two will drift
+- Beyond the surface → **ATR-102** (generics / intersections / utility types / unions with non-literal members / nested objects / `any` / `unknown`): hand-write the flat schema for that prop instead
+- Annotation absent (no `(props: {...})` annotation, or param not named `props`) → silently skipped: no schema, no render-time validation — existing components are unaffected
+- Extraction runs at dev time via the vendored extractor (`scripts/compiler/extract-schema.mjs`): existing apps get it from `atelier sync`; without it the plugin degrades honestly (warn, no injection) and components render unvalidated
+
 ## Common failures
 
 | Symptom | Code | Fix |

@@ -21,7 +21,8 @@
         "type": "object",
         "reqProps": { "title": { "type": "string" } }
       }
-    }
+    },
+    { "name": "SchemaProbe", "file": "components/SchemaProbe.atr.ts" }
   ],
   "primitives": [
     "$state", "$derived", "$effect", "streamValue", "optimisticList", "devFetch",

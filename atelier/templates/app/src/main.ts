@@ -18,6 +18,7 @@ import { HelloCard } from "./components/HelloCard.atr.ts";
 import { ContractProbe } from "./components/ContractProbe.atr.ts"; // P1-9 契约路径演示
 import { LiveNotes } from "./components/LiveNotes.atr.ts"; // FS-7 live 直通 + §4.5 乐观对账演示
 import { FormBinding } from "./components/FormBinding.atr.ts"; // 决策 25 bind: v1 双向绑定演示
+import { SchemaProbe } from "./components/SchemaProbe.atr.ts"; // 决策 26 注解即 schema 核对物（无手写 schema）
 
 initTokens(config as { tokens: Record<string, Record<string, string>> });
 
@@ -47,6 +48,13 @@ const formSection = document.createElement("section");
 formSection.id = "form-demo";
 app.appendChild(formSection);
 mountComponent(FormBinding, { title: "Form Binding — bind: 双向绑定" }, formSection, registry, validate);
+
+// 决策 26 注解即 schema 演示：SchemaProbe 无手写 schema——props 注解经编译期提取（dev 插件
+// transform 同源注入 sink，component() 兜底取用）。提取器缺失（未 sync）时诚实降级、照常渲染。
+const schemaSection = document.createElement("section");
+schemaSection.id = "schema-demo";
+app.appendChild(schemaSection);
+mountComponent(SchemaProbe, { label: "Schema Probe — 注解即 schema", times: 2 }, schemaSection, registry, validate);
 
 // dev 状态桥（决策 7）：$state 图 → dev 面 → MCP `state.snapshot`。须在挂载后安装以捕获既有信号集。
 installStateBridge();

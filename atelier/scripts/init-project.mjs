@@ -8,9 +8,10 @@
  *   2. runtime/*.ts    → target/src/runtime/ vendored 零依赖内核（应用不依赖框架目录即可跑）
  *   2b. runtime+server → target/src/vendor/atelier/  FS 线规范布局（生成器产物 import 面，§4.4/§7.2）
  *   3. dev/*.mjs       → target/scripts/     dev 面六件：插件 + 无头截图 + tailwind 主题生成 + server 监督器 + review 扩展两件（FS-M6）
- *   3b. mcp 族十件     → target/{mcp,scripts,gen,compiler}/  MCP HTTP 直连的 import 闭包（FS-M7：
+ *   3b. mcp 族 11 件   → target/{mcp,scripts,scripts/compiler,gen,compiler}/  MCP HTTP 直连的 import 闭包（FS-M7：
  *                        mcp/{server,http,tasks,confirm,endpoint-tools}.mjs + mcp-definitions.json +
- *                        scripts/struct.mjs + gen/{impact,gen-endpoint}.mjs + compiler/project-json.mjs；
+ *                        scripts/struct.mjs + gen/{impact,gen-endpoint}.mjs + compiler/project-json.mjs +
+ *                        scripts/compiler/extract-schema.mjs（决策 26 schema 提取器，dev 插件注入源）；
  *                        目标布局与框架仓相对布局同构——server.mjs 经 HERE 解析 mcp-definitions.json、
  *                        经 ../scripts/struct.mjs 等相对 import 在 vendored 拷贝上原样成立。名单与
  *                        sync-project.mjs / tests/mcp-vendor.test.ts 三处同源）
@@ -97,17 +98,23 @@ for (const f of ["atelier-dev-plugin.mjs", "dev-server-host.mjs", "dev-screensho
   fs.copyFileSync(path.join(DEV, f), path.join(targetScripts, f));
 }
 
-/* 4b) vendored MCP 族十件（FS-M7，M6 尾件批候选池挂账销账）：应用 dev 面 /__atelier/mcp 直连的
- *     import 闭包——mcp/http.mjs → server/tasks/confirm/endpoint-tools → ../scripts/struct.mjs +
- *     ../gen/impact.mjs（→ ./gen-endpoint.mjs 传递）+ ../compiler/project-json.mjs，传递 import
- *     全为零依赖或 node 内建。目标布局与框架仓相对布局同构（dev/ 与 mcp/ 同级 → scripts/ 与
- *     mcp/ 同级），vendored 拷贝按同样的相对路径自成一体。运行时 spawn 的 scripts/checkpoint.mjs
- *     （checkpoint.* 与 diff.report）与 compiler/codegen.mjs（graph.static）不在 import 闭包，
- *     vendored 应用缺失时走工具级 ATR 结构化报错（诚实降级），不入名单。
- *     名单与 sync-project.mjs / tests/mcp-vendor.test.ts 三处同源，改动必须同步。 */
+/* 4b) vendored MCP 族 11 件（FS-M7，M6 尾件批候选池挂账销账；决策 26 起含 schema 提取器）：应用
+ *     dev 面 /__atelier/mcp 直连的 import 闭包——mcp/http.mjs → server/tasks/confirm/endpoint-tools
+ *     → ../scripts/struct.mjs + ../gen/impact.mjs（→ ./gen-endpoint.mjs 传递）+
+ *     ../compiler/project-json.mjs，传递 import 全为零依赖或 node 内建。决策 26 追加
+ *     scripts/compiler/extract-schema.mjs（零依赖自包含 schema 提取器，dev 插件 .atr.ts transform
+ *     的注入源；不属 /__atelier/mcp import 闭包，mcp-vendor.test.ts 以闭包种子根显式入队核对）。
+ *     目标布局与框架仓相对布局同构（dev/ 与 mcp/ 同级 → scripts/ 与 mcp/ 同级），vendored 拷贝按
+ *     同样的相对路径自成一体。运行时 spawn 的 scripts/checkpoint.mjs（checkpoint.* 与 diff.report）
+ *     与 compiler/codegen.mjs（graph.static）不在 import 闭包，vendored 应用缺失时走工具级 ATR
+ *     结构化报错（诚实降级），不入名单。
+ *     名单与 sync-project.mjs / tests/mcp-vendor.test.ts 三处同源，改动必须同步（两处名单逐字节一致）。
+ *     源缺失 → 通知 + 跳过（诚实降级，不炸 init/sync）：并行分支实现件未落地的合并窗口与名单漂移
+ *     都在此显式可见，闭包测试（mcp-vendor）事后兜底。 */
 const MCP_VENDOR_DIRS = [
   ["mcp", ["server.mjs", "http.mjs", "tasks.mjs", "confirm.mjs", "endpoint-tools.mjs", "mcp-definitions.json"]],
   ["scripts", ["struct.mjs"]],
+  ["scripts/compiler", ["extract-schema.mjs"]],
   ["gen", ["impact.mjs", "gen-endpoint.mjs"]],
   ["compiler", ["project-json.mjs"]],
 ];
@@ -116,7 +123,12 @@ for (const [dir, files] of MCP_VENDOR_DIRS) {
   const dst = path.join(target, dir);
   fs.mkdirSync(dst, { recursive: true });
   for (const f of files) {
-    fs.copyFileSync(path.join(PKG, dir, f), path.join(dst, f));
+    const src = path.join(PKG, dir, f);
+    if (!fs.existsSync(src)) {
+      console.log(`[atelier] vendor 源缺失，跳过：${dir}/${f}（框架侧未落地或名单漂移——重新 init/sync 补齐）`);
+      continue;
+    }
+    fs.copyFileSync(src, path.join(dst, f));
     mcpFiles++;
   }
 }

@@ -27,10 +27,13 @@
  *  - POST /__atelier/mcp                   MCP 2026-07-28 无状态 HTTP 直连（FS-M6 §10.2：
  *                                          Mcp-Method/Mcp-Name 头路由；逻辑单源 mcp/http.mjs，
  *                                          这里只接线）
+ * transform：.atr.ts 注入 HMR 边界（P0-5）+ props 注解 schema 提取注册（决策 26，prepend
+ *           registerExtractedSchemas——提取器 scripts/compiler/extract-schema.mjs，vendor 名单内）
  * 安全：/__atelier/* 一律校验 token（页面经 transformIndexHtml 注入；工具从 .atelier/dev-token 读取）。
  * 审计：非 GET 的 /__atelier/* 与命令回执均追加 .atelier/audit.jsonl。
  */
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { capturePagePersistent as capturePage, captureA11yPersistent } from "./dev-screenshot.mjs";
 import { createServerSupervisor, resolveServerConfig } from "./dev-server-host.mjs";
 /* FS-M6 尾件批（D-F16/§11.2/§11.3）：路由逻辑在独立模块——本文件只做接线注册 */
@@ -93,20 +96,85 @@ export function atelierDevPlugin() {
     });
   }
 
+  /* ---------- 决策 26：schema 编译期提取 v1 —— .atr.ts transform 注入 ----------
+   * 提取器 = <app>/scripts/compiler/extract-schema.mjs（零依赖自包含，init/sync vendor 名单内；
+   * 框架源 atelier/scripts/compiler/extract-schema.mjs ↔ 应用 scripts/ 同构映射）。运行时按
+   * ROOT（process.cwd() = 应用根，与 dev-token/audit/manifest 同一约定）惰性动态 import：
+   *   · 静态顶层 import 不可取——旧应用未 sync（缺提取器件）时整个插件模块加载即炸，dev 面全灭；
+   *     惰性 + 诚实降级（通知一次 + 跳过注入）与 /__atelier/mcp 503 指路同一分寸。结果按插件
+   *     实例缓存（失败也缓存）：sync 属 vendor 变更，本就要求重启 dev 生效。
+   *   · <rel> = 该 .atr.ts 所在目录 → src/runtime/index.ts（init vendor 布局的桶出口）的相对
+   *     import 说明符（posix 斜杠；无 ./ 前缀的相对 import 补 ./——Vite/ESM 语义）；文件在 src 外
+   *     → 解析失败，跳过注入 + console.warn（诚实不静默）。
+   *   · **prepend 而非 append**：component() 在模块求值期执行，sink 注册必须先于它——append 到
+   *     文件尾时组件已带着 schema=undefined 完成注册；prepend 段在 HMR 模块重求值时随之重跑，
+   *     sink 覆盖刷新（决策 26）。提取的 schema 与 dump 工件同源同函数（extractPropsSchemas），
+   *     单一真相不漂移；显式手写 schema 仍优先（sink 不覆盖 opts.schema，决策 26 ③）。
+   *   · extractPropsSchemas 抛 ATR-102（注解类型超出映射面）→ 原样上抛，Vite overlay 即红，
+   *     作者当场看到四段式；既有 HMR 尾巴逻辑不动，非 .atr.ts 文件零影响（早退分支保持）。
+   */
+  let extractorPromise = null;
+  function loadSchemaExtractor() {
+    extractorPromise ??= (async () => {
+      const file = path.join(ROOT, "scripts", "compiler", "extract-schema.mjs");
+      try {
+        return await import(pathToFileURL(file).href);
+      } catch (e) {
+        // 跳过通知走 stdout（与「dev 托管跳过」同款分寸）——build 门禁钉 stderr 干净，
+        // 降级通知要可见但不属于错误通道。
+        console.log(
+          `[atelier] schema 提取器不可达（${file} 缺失——旧应用请 node <repo>/atelier/cli.mjs sync --target <appDir> 补 vendor）：` +
+            `${e?.message ?? e}；.atr.ts 注解 schema 注入跳过（诚实降级，组件开发不受阻）`,
+        );
+        return null;
+      }
+    })();
+    return extractorPromise;
+  }
+  function runtimeRelImport(id) {
+    const fileDir = path.dirname(id);
+    const srcRoot = path.join(ROOT, "src");
+    const fromSrc = path.relative(srcRoot, fileDir);
+    if (fromSrc.startsWith("..") || path.isAbsolute(fromSrc)) return null; // 文件在 src 外 → 解析失败
+    let rel = path.relative(fileDir, path.join(srcRoot, "runtime", "index.ts")).split(path.sep).join("/");
+    if (!rel.startsWith(".")) rel = `./${rel}`; // ESM/Vite：相对 import 必须以 ./ 或 ../ 起
+    return rel.replace(/\/index\.ts$/, ""); // 桶出口按目录形式引（与组件既有 from "../runtime" 同型）
+  }
+  async function schemaInjectPrefix(code, id) {
+    const extractor = await loadSchemaExtractor();
+    if (!extractor?.extractPropsSchemas) return ""; // 提取器缺失 → 已通知（stdout），跳过
+    const entries = extractor.extractPropsSchemas(code); // ATR-102 → 原样上抛（Vite overlay 即红）
+    const map = {};
+    for (const en of entries ?? []) if (en && en.name && en.schema != null) map[en.name] = en.schema;
+    if (Object.keys(map).length === 0) return ""; // 映射为空（注解缺省/全部 null）→ 注入零变化
+    const rel = runtimeRelImport(id);
+    if (!rel) {
+      console.warn(`[atelier] ${id}: 不在 src/ 下，解析不到 src/runtime 桶出口——schema 注入跳过（诚实不静默）`);
+      return "";
+    }
+    return `import { registerExtractedSchemas as __atelierRs } from ${JSON.stringify(rel)};\n__atelierRs(${JSON.stringify(map)});\n`;
+  }
+
   return {
     name: "atelier-dev-plugin",
     transformIndexHtml(html) {
       // 页面注入一次性 dev token（EventSource 无法带自定义 header，走 query）
       return html.replace(/<head[^>]*>/i, (m) => `${m}\n<script>window.__ATELIER_TOKEN__=${JSON.stringify(TOKEN)};</script>`);
     },
-    transform(code, id) {
+    async transform(code, id) {
       // P0-5 HMR：给组件模块注入 HMR 边界。accept 回调在新模块求值（组件已重注册）后
       // 触发 runtime 的保值重挂载——替代整页 reload，$state 不再清零。
       const p = id.replace(/\\/g, "/");
       if (!p.endsWith(".atr.ts") || p.includes("/node_modules/")) return null;
-      if (code.includes("import.meta.hot")) return null;
+      // 决策 26：schema 注入段（prepend——理由见 schemaInjectPrefix 上方注释块）；
+      // ATR-102 由此原样上抛，映射为空时注入零变化。
+      const prefix = await schemaInjectPrefix(code, id);
+      if (code.includes("import.meta.hot")) {
+        return prefix ? { code: prefix + code, map: null } : null;
+      }
       return {
         code:
+          prefix +
           code +
           "\n;if (import.meta.hot) import.meta.hot.accept(() => { try { window.__ATELIER_HMR_REMOUNT__?.(); } catch (e) { console.error('[atelier] HMR remount failed', e); } });\n",
         map: null,
