@@ -192,7 +192,7 @@ describe("决策 26 产物流：registerCompiled 接收面（时序无关双路�
       // 兑现后缺 reqProps title 触发 ATR-201 错误卡（错误卡替换组件渲染，不白屏）
       expect(container.textContent).toContain("ATR-201");
       expect(container.textContent).toContain("缺少必填属性 title（string）");
-      expect(findByTag(container, "em")).toBeNull();
+      expect(findByTag(container, "em")).toHaveLength(0); // dom-shim findByTag 返回数组（无命中 = 空数组）
     } finally {
       fs.rmSync(outDir, { recursive: true, force: true });
     }
@@ -222,7 +222,7 @@ describe("决策 26 产物流：registerCompiled 接收面（时序无关双路�
     mountComponent(host, {}, container, reg, validateFlat);
     await flush();
     expect(container.textContent).toContain("ATR-201"); // 后于 component() 注入同样进校验路径
-    expect(findByTag(container, "em")).toBeNull();
+    expect(findByTag(container, "em")).toHaveLength(0); // dom-shim findByTag 返回数组（无命中 = 空数组）
   });
 
   it("显式 opts.schema 恒胜（两时序）：component({schema:X}) 后 registerCompiled 携带 Y → X 胜；sink 先有条目后显式注册 → X 胜", () => {
@@ -256,8 +256,8 @@ describe("决策 26 产物流：registerCompiled 接收面（时序无关双路�
     registerCompiled({ compiledList: [compileFunction("VariantB", raw)], compiledSchema: FLAT_SCHEMA });
     expect(component((_p: Record<string, unknown>) => html`<em>x</em>`, { name: "VariantB" }).schema).toBe(FLAT_SCHEMA);
     // 单条形态 + 条目级 schema（CompiledTemplate.schema 可选字段 = 按 entries 携带通道）
-    const entryC = compileFunction("VariantC", raw) as ComponentDef & { schema?: unknown } as never;
-    (entryC as unknown as { schema: unknown }).schema = FLAT_SCHEMA;
+    const entryC = compileFunction("VariantC", raw);
+    entryC.schema = FLAT_SCHEMA;
     registerCompiled(entryC);
     expect(component((_p: Record<string, unknown>) => html`<em>x</em>`, { name: "VariantC" }).schema).toBe(FLAT_SCHEMA);
     // 数组形态（无 compiledSchema 可言）→ 零 schema 副作用

@@ -13,6 +13,12 @@
 
 import { $effect, $effectStatic, $state, store, __creationSink, __effectSink, __withTracking, type Signal } from "./core.ts";
 import { booly, evalExpr, exprRootIdents } from "./expr.ts";
+// 决策 26 v1 留位兑现：registerCompiled 需把编译产物携带的 schema 喂进提取 sink（兜底求值）
+// 并回填既有 registry 条目（后于 component() 注入的时序）。分层核查（无真实循环）：
+// component.ts 对本文件只有 import type（component.ts:7，编译期擦除，无运行时边），
+// 且 component.ts 不被 core.ts/expr.ts 引用 ⇒ 本文件 → component.ts 是单向运行时依赖，
+// 模块求值无环（registry 绑定仅用于函数体内，非模块求值期）。
+import { registerExtractedSchemas, registry as globalRegistry } from "./component.ts";
 
 /** —— token 单源（决策 8）：由 main.ts 启动时加载 atelier.config.json 注入 —— */
 export const tokenState = {
@@ -1152,6 +1158,9 @@ export type CompiledTemplate = {
   name: string;
   raw: string;
   styles?: string[];
+  // 决策 26 v1：编译产物流携带的 FlatSchema——codegen 产物模块级 compiledSchema 经
+  // registerCompiled 应用时反射回条目（按 entries 携带的通道；schema 缺省 = undefined）
+  schema?: unknown;
   program: (ctx: {
     scope: Record<string, unknown>;
     registry: ComponentRegistry;
@@ -1164,20 +1173,45 @@ export type CompiledTemplate = {
 
 const compiledByRaw = new Map<string, CompiledTemplate>();
 
-/** 注册编译产物。接受 codegen 模块形态：`{compiled}` / `{compiledList}` / 数组 / 单条。
- * 按 raw 精确匹配——P0-2② 单一来源（dump 的树 = 解释器的树）⇒ raw 相同即模板相同，无歧义。 */
+/** 决策 26 产物流：把产物携带的 schema 落到运行时两面（registerCompiled 条目级应用单点）。
+ * ① 喂决策 26 sink（registerExtractedSchemas 冻结接口，逐键 set = HMR 刷新语义）——
+ *    registerCompiled 先于 component() 求值时经此兜底生效；
+ * ② 回填既有 registry 条目：仅当其 schema === undefined 时置入——显式 opts.schema 恒胜
+ *    （决策 26 承诺逐字保持：永不覆盖已定义 schema，无论显式还是先前回填所得）。
+ * 与 component() 的先后两时序由此都生效（时序无关钉，tests/schema-codegen.test.ts）。 */
+function applyCompiledSchema(name: string, schema: unknown): void {
+  registerExtractedSchemas({ [name]: schema });
+  const def = globalRegistry.get(name);
+  if (def && def.schema === undefined) def.schema = schema;
+}
+
+/** 注册编译产物。接受 codegen 模块形态：`{compiled}` / `{compiledList}` / 数组 / 单条；
+ * 决策 26 v1：另接受产物模块上的 `compiledSchema`（codegen 仅在 dump 携带 schema 时发射，
+ * per-component 单 schema 作用于本模块全部条目），条目级 `schema` 字段同样生效（entries
+ * 携带通道）。schema 应用只按组件名流动、不要求条目携带 raw——模块产物条目形态为
+ * {name, deps, program}（产物零 import 不冗余携带 raw；快路径命中所需的 raw 由应用侧
+ * 组件模板同源提供）。compiledByRaw 存储仍按 raw 精确匹配守卫——P0-2② 单一来源
+ * （dump 的树 = 解释器的树）⇒ raw 相同即模板相同，无歧义。 */
 export function registerCompiled(
   mod:
-    | { compiled?: CompiledTemplate; compiledList?: CompiledTemplate[] }
+    | { compiled?: CompiledTemplate; compiledList?: CompiledTemplate[]; compiledSchema?: unknown }
     | CompiledTemplate
     | CompiledTemplate[]
 ): void {
+  const modSchema = (mod as { compiledSchema?: unknown }).compiledSchema;
   const list: CompiledTemplate[] = Array.isArray(mod)
     ? mod
     : ((mod as { compiledList?: CompiledTemplate[] }).compiledList ??
       [(mod as { compiled?: CompiledTemplate }).compiled ?? (mod as CompiledTemplate)]);
   for (const c of list) {
-    if (c && typeof c.raw === "string" && typeof c.program === "function") {
+    if (!c) continue;
+    // 决策 26：schema 面（sink 兜底 + registry 回填）独立于 raw 守卫——有组件名即流动
+    const schema = c.schema ?? modSchema;
+    if (schema !== undefined && typeof c.name === "string" && c.name) {
+      applyCompiledSchema(c.name, schema);
+      c.schema = schema; // 条目反射：CompiledTemplate.schema 兑现（同引用，重注册幂等）
+    }
+    if (typeof c.raw === "string" && typeof c.program === "function") {
       compiledByRaw.set(c.raw, c);
     }
   }
