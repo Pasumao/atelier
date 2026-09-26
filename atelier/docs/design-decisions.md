@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-25**（决策 17-23 = 全站化批次，2026-09-19 定稿；决策 24 = FS-11 异步表达式显式拒绝定稿，同日回写；决策 25 = 属性级指令 v1，2026-09-26）；未决项 2 条见文末。
+> 已决 **0-26**（决策 17-23 = 全站化批次，2026-09-19 定稿；决策 24 = FS-11 异步表达式显式拒绝定稿，同日回写；决策 25 = 属性级指令 v1，2026-09-26；决策 26 = schema 编译期提取 v1，同日）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -296,6 +296,30 @@
 > 抛出经 mountComponent 错误边界=组件级错误卡——code/message/fix 同源同文，parity 用例按此口径分形
 > （成功路径严格帧对拍、错误路径双路各自呈现断言）。select 真语义/监听退订归真 DOM（dom-shim 边界）；
 > 动态 `type={...}` v1 不追。门禁：490 绿+8 skip / check-skills 56-0 / api-diff PASS / scratch 31/31。
+
+## 决策 26：schema 编译期提取 v1（决策 6 完整版承诺兑现，F 线）
+- **定论**：dump.mjs 扫描器扩 `(props: {...})` 类型注解提取——落点为**自包含零依赖扫描器**
+  `compiler/extract-schema.mjs`（花括号配对复用 matchBrace 技法；「纯文本扫描禁 TS 解析器」纪律不破；
+  零 import 使 vendor 闭包最小）。映射面 = `string`/`number`/`boolean` / `Array<叶>`→`{type:"array",items}`
+  / 字符串字面量联合→`{type:"string",enum}`；`prop?: T`→optProps、`prop: T`→reqProps。产物随 stage ②
+  落 `.atr/ast/<Component>.json` 新增 `schema` 字段（纯加法，index/codegen 既有消费者零影响）。
+  超出映射面的形态**显式拒绝 ATR-102**（四段式：泛型/交叉/工具类型/含非字面量成员的联合/嵌套对象
+  ——fix 指路手写 schema；「复杂类型手写 schema 不变」）。
+- **消费机制（决策 6「component() 未显式传 schema 时从 dump 工件取」的落地形态）**：runtime
+  `component.ts` 增提取 schema sink——`registerExtractedSchemas(map)` 纯加法注册 + `component()` 兜底
+  `opts.schema ?? sink.get(defName)`，**显式 schema 仍优先**（向后兼容承诺逐字兑现）。dev 面接线 =
+  dev 插件 `.atr.ts` transform **prepend** 注册调用（schema 由同源提取函数现算，先于 component() 求值，
+  HMR 模块重求值天然刷新）——dump 工件与 dev 注入共用 `extractPropsSchemas` 单一真相，不漂移。
+  「工件」语义 = 工件字段（机器可读记录 + 产物流备位）与 dev 注入同源等价，非运行时读文件（runtime
+  零依赖红线不破）。
+- **vendored 应用闭包**：extract-schema.mjs 零依赖自包含 → vendor 名单只加一件（init/sync 两处
+  `MCP_VENDOR_DIRS` 同步 + `tests/mcp-vendor.test.ts` 精确相等断言更新，M7 闭包纪律沿用）。
+- **边界 v1**：① 编译产物流（codegen 嵌入 schema → registerCompiled 携带）不在本批——dev 解释器循环
+  = 作者主循环先落地，工件 `schema` 字段已为产物流备位；schema 缺省且 sink 未注 = 无 schema 不校验
+  （validateProps no-op，诚实语义由用例钉死）。② 注解缺省/参数名非 `props` → 静默跳过 + dump warn
+  （非错误——向后兼容：既有组件零破坏）。③ 注解与手写 schema 并存 → 手写优先（sink 不覆盖显式），
+  漂移风险由文档引导作者删除手写件。④ 嵌套对象/索引签名/`any`/`unknown` 等 v1 全部 ATR-102。
+- 时间：2026-09-26（候选池设计备忘兑现；用户「继续」拍板；主/子智能体 worktree 三分支并行实施）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
