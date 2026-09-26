@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-26**（决策 17-23 = 全站化批次，2026-09-19 定稿；决策 24 = FS-11 异步表达式显式拒绝定稿，同日回写；决策 25 = 属性级指令 v1，2026-09-26；决策 26 = schema 编译期提取 v1，同日）；未决项 2 条见文末。
+> 已决 **0-27**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -335,6 +335,36 @@
 > tests=533 / scratch init 36/36 全绿 / 真 dev CDP 冒烟全通。诚实边界：codeMask 不解析正则字面量
 > （病理输入可能误命中）；注解内注释照切→必 ATR-102 不静默；类型别名引用不可解（warn 跳过）；
 > 编译产物流（codegen 嵌 schema）v1 留位；api-diff 面含 test-only 重置口（模块级导出即入面）。
+
+## 决策 27：F-2 prod 剥离 v1——发布面激活 + 浏览器面构建期 DCE（F 线收口件）
+- **头号事实（本批修的缺口）**：`__ATELIER_PROD__` 旗标今日**无任何产线设置方**（仅测试置位）——
+  `atelier build` 产物等于跑 dev 面（契约校验执行、错误卡照渲染、server-status 调试面在线）。
+  行为级剥离代码早已在（validateProps prod 跳过等），缺的是构建链激活。
+- **机制（双面分治）**：
+  ① **浏览器面 = BUILD_PROD 短路旗**。DCE 前提是调用点引用模块级常量绑定（esbuild 只折叠
+  `if (<常量>)`，不内联函数调用）；而模块级 `const PROD = <globalThis 读>` 的 init 捕获会杀死
+  既有 24 处运行时置旗测试（prod-strip/live/server-v2/dev-review/bind-directive）。定案 = 两者兼得：
+  `const BUILD_PROD = typeof __ATELIER_BUILD_PROD__ !== "undefined" && __ATELIER_BUILD_PROD__ === true`
+  （bare 标识符 + typeof 守卫）+ 调用点全改 `BUILD_PROD || dynProd()`——vite build 经 define
+  （`defineConfig(({command}) => command === "build" ? { __ATELIER_BUILD_PROD__: "true" } : undefined)`
+  ，dev serve 不注）折叠为 `true || …` → 分支常量化 → dev 专属代码（错误卡渲染/⚠ 文本/ATR 卡
+  分支）DCE 剔除；无 define 环境（vitest/dev serve/node 直跑）`false || dynProd()` = 既有动态读，
+  **置旗测试零改动**。
+  ② **服务面 = 壳预置旗**。server 无打包器，`build.mjs` 生成的 `dist/server.mjs` 壳先置
+  `globalThis.__ATELIER_PROD__ = true` 再 **await import** 装配单源（introspect/endpoints 的动态读
+  逐请求生效：调试面隐身、ATR-311 实证）。endpoints.ts/introspect.ts 读点零改动。
+  ③ **dev-only 装配门（模板 main.ts）**：`installStateBridge`/`devFetch` 自检/`store.commit` 等包
+  `if (import.meta.env.DEV)`（vite 静态替换，构建期折叠）。
+- **门禁三层**：bundle 标记检查（JS 产物**不含** `atr-error-card` 渲染分支与 `__ATELIER_BUILD_PROD__`
+  残留标识符——设计内已知红：define 无 reshape 时必然残留，合并后转绿）· 产物冒烟扩（server-status
+  GET → 405 ATR-311 = 服务面激活实证）· 真 dev/产物 CDP 行为证物（built 产物挂坏 props 实例无卡）。
+  build 输出打体积 delta（诚实可见）。
+- **语义声明**：`__ATELIER_BUILD_PROD__` = 构建期常量（仅 define 通道）；`__ATELIER_PROD__` = 运行时
+  旗（保留既有语义：服务面壳预置 / 测试置位）。两者任一为真即 prod 语义。
+- **诚实边界 v1**：server 面无打包器 = 行为级激活、无 DCE（代码仍在，语义关断）；runtime barrel 未
+  摇树（内核模块整装，dev 分支 DCE 是模块内折叠）；CSS 的 .atr-error-card 样式仍在（无害）；`--no-smoke`
+  逃生口不变。
+- 时间：2026-09-26（F-2 二期后唯一剩余项兑现；用户「继续」拍板；主/子智能体 worktree 三分支并行实施）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
