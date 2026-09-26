@@ -14,6 +14,7 @@ export type { FlatSchema, AtrError, FlatIssue } from "./contract.ts";
 export { withStandard, isStandardSchema, STANDARD_VENDOR } from "./standard-schema.ts"; // 决策 22（FS-2）：Standard Schema V1 互操作口
 export type { StandardSchemaFace, StandardSchemaProps, StandardValidateResult, StandardIssue } from "./standard-schema.ts";
 export { component, registry } from "./component.ts";
+export { registerExtractedSchemas } from "./component.ts"; // 决策 26：提取 schema sink 注册口（__resetExtractedSchemas test-only，不出桶）
 export { installStateBridge } from "./bridge.ts";
 export { hmrRemountAll } from "./template.ts"; // P0-5: 保值热交换（dev 插件注入的 accept 回调经 window 钩子调用）
 export { registerCompiled, compiledTemplateCount } from "./template.ts"; // P0-2③: 编译产物注册（codegen 模块接入零 tokenize 快路径）
