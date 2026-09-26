@@ -158,16 +158,20 @@ describe("事件修饰 v1：解释器路径行为（.prevent / .stop）", () => 
     expect(ev.calls, "修饰符先于 handler 守卫").toEqual(["preventDefault"]);
   });
 
-  it("事件期求值钉（既有 lazy 语义）：mount 后换 scope.fn，dispatch 调新 fn", () => {
-    const scope: Record<string, unknown> = { fn: (): void => {} };
-    const c = mountOnce("EvLazy", `<button on:click.prevent={fn}>Go</button>`, scope);
+  it("事件期求值钉（既有 lazy 语义）：事件触发时才求值——信号值换成新 handler，dispatch 调新 handler", () => {
+    // 钉法注记：mountComponentInner 会把 tpl.scope 摊平进组件内部 scope（{...tpl.scope}），
+    // mount 后改原 scope 对象属性到不了组件内部；且 evalExpr 求值出口不解包裸信号
+    //（探针实测 evalExpr("fn") 返回信号对象、"fn.value" 返回函数值）——lazy 语义的合法
+    // 观测面 = on: 表达式写 {fn.value}：事件期 evalExpr 读信号当期值（与既有 on: 同一形状）。
+    const fn = $state((): void => {});
+    const c = mountOnce("EvLazy", `<button on:click.prevent={fn.value}>Go</button>`, { fn });
     const btn = findByTag(c, "button")[0];
     let called = 0;
-    scope.fn = (): void => {
+    fn.value = (): void => {
       called++;
     };
     btn.dispatchEvent(fakeEvent("click"));
-    expect(called, "handler 事件期求值（非挂载期定死）").toBe(1);
+    expect(called, "事件期读信号当期值（非挂载期定死）").toBe(1);
   });
 
   it("无修饰符回归钉：on:click 行为与改动前逐字节一致（监听一份、无垃圾 attr、handler 收同一事件）", () => {
