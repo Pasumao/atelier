@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-24**（决策 17-23 = 全站化批次，2026-09-19 定稿；决策 24 = FS-11 异步表达式显式拒绝定稿，同日回写）；未决项 2 条见文末。
+> 已决 **0-25**（决策 17-23 = 全站化批次，2026-09-19 定稿；决策 24 = FS-11 异步表达式显式拒绝定稿，同日回写；决策 25 = 属性级指令 v1，2026-09-26）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -280,6 +280,14 @@
 - **分层事实**：调用语法 `{ fn() }` 早已被 ATR-301 解析期拒绝（迷你求值器无函数调用）；ATR-323 收口**值形态**（如 `$state(fetchUser())` 笔误把 Promise 存进信号）。若未来求值器扩函数调用，值层守卫自动接管，无改动。
 - **反例证据（守卫前红检实测）**：Promise 进图 → 文本插值静默渲染 `"{}"`（JSON.stringify 损坏，无错误卡无 journal）；`{#if}` 存 Promise.resolve(false) 仍渲染首分支（真值静默颠倒）；`{#each}` 裸抛无 fix；on: 静默 no-op。显式拒绝优于静默进图，Solid 2 async 经 Suspense/createAsync 边界收敛为同向先例。用例锁定 `tests/fs11-async.test.ts`（16 用例红绿双证 + 六正控 6/6）。
 - 时间：2026-09-19（原型验证当日定稿）。
+
+## 决策 25：属性级指令 v1——bind:value / bind:checked 双向绑定（F-4 覆盖扩张线）
+- **定论**：`bind:value={sig}` / `bind:checked={sig}` 双向绑定落地——**糖化形态** = 动态 attr effect（既有 bindExpr 同源订阅）+ 元素事件监听回写 `sig.value`。v1 支持面收窄：`bind:value` × input（文本类）/textarea（input 事件）+ select（change 事件）；`bind:checked` × input[type=checkbox|radio]（change 事件）。**v1 显式不做**：同名 radio group 多值绑定、事件修饰族（.prevent/.stop，候选后置）、非表单元素双向。
+- **错误面（沿用 + 两枚新码）**：写目标必须是可写信号——`$derived` → **ATR-305 沿用**（派生信号只读，渲染期前置拦截出错误卡，非事件期静默失败）；目标非信号 / 元素-attr 组合不在支持面 → **ATR-324**（四段式，fix 指路 $state 与支持面清单）；同元素同 attr 重复 bind: → **ATR-325**（WeakMap 守卫：同键只订阅一次，后到者错误卡，不双订）。错误渲染走 ATR-401 同款分层（dev 错误卡 / prod recordRuntimeError + 不静默）。
+- **无回环论证**：程序化 `el.value=` 赋值不触发 input/change 事件（DOM 规范）→ effect 写 DOM 与用户写信号天然单向，无乒乓；用例钉住。双向写回走 `sig.value =` 派生信号已被渲染期 ATR-305 挡住，事件期仅 belt-and-braces try/catch 入 recordRuntimeError。
+- **与决策 23①（语法冻结）关系**：冻结范围 = 全站化期间（决策 23 时间语境）；阶段 3.5 已收口（2026-09-22），本扩展属 F-4 覆盖扩张线既定候选（BACKLOG 候选池设计备忘原文），2026-09-26 用户拍板立项。语法面为**纯加法**：`bind:` 新命名空间前缀，不改动既有 attr 语义——解析器**零改动**（`bind:x={expr}` 现有产物 `{name:"bind:x", value:expr, dynamic:true}` 即契约载体）。
+- **双路同构**：解释器 `renderNode` element 分支加 `bind:` 支路（先于 dynamic 单向支路）→ 单点 `bindTwoWay(el, name, expr, scope, tag)`；codegen `emitAttrs` 同位支路发射 `rt.bindTwoWay(...)`，`__compiledRT` 增补同名函数（产物零 import 红线不破）；golden DOM parity 对拍钉双路逐字节一致。
+- 时间：2026-09-26（用户从候选池拍板；主/子智能体 worktree 三分支并行实施）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
