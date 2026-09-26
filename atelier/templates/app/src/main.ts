@@ -1,6 +1,7 @@
 /**
  * main.ts — 应用入口（Atelier starter）。
- * 流程：加载 atelier.config.json（token 单源）→ 导入组件（注册）→ 挂载根组件 → dev 状态桥。
+ * 流程：加载 atelier.config.json（token 单源）→ 导入组件（注册）→ 挂载根组件 → dev 状态桥
+ *（dev 装配三件经 import.meta.env.DEV 门，决策 27：build 时该分支被静态替换剔除）。
  */
 import config from "../atelier.config.json";
 import "./atelier-tailwind.css"; // 决策 16：token 派生 + Tailwind AOT 编译产物（生成产物，勿手改）
@@ -56,13 +57,19 @@ schemaSection.id = "schema-demo";
 app.appendChild(schemaSection);
 mountComponent(SchemaProbe, { label: "Schema Probe — 注解即 schema", times: 2 }, schemaSection, registry, validate);
 
-// dev 状态桥（决策 7）：$state 图 → dev 面 → MCP `state.snapshot`。须在挂载后安装以捕获既有信号集。
-installStateBridge();
+/* —— dev 装配门（决策 27 F-2 prod 剥离 v1）：vite 对 import.meta.env.DEV 静态替换——
+ * dev serve → true 照旧；build → false → 本分支构建期整体 DCE 剔除（产物不跑 dev 面）。
+ * 只门 dev 观测/自检/桥接件：组件挂载与用户态逻辑绝不进门（prod 照常渲染）。
+ * 静态 import 保留：installStateBridge/devFetch 模块仍随 barrel 携带（摇树 = 决策 27 诚实边界，不在此解决）。 */
+if (import.meta.env.DEV) {
+  // dev 状态桥（决策 7）：$state 图 → dev 面 → MCP `state.snapshot`。须在挂载后安装以捕获既有信号集。
+  installStateBridge();
 
-// 会话初始锚点：代理经 MCP `checkpoint.list` 即有非空时间线可依
-store.commit("session-start");
+  // 会话初始锚点：代理经 MCP `checkpoint.list` 即有非空时间线可依
+  store.commit("session-start");
 
-// 控制台自检：注册表查询面（决策 7；devFetch 携 token，避免 ATR-402 噪音）
-devFetch("/__atelier/registry")
-  .then((r) => r.json())
-  .then((j) => console.info("[atelier] registry:", j.components.map((c: { name: string }) => c.name)));
+  // 控制台自检：注册表查询面（决策 7；devFetch 携 token，避免 ATR-402 噪音）
+  devFetch("/__atelier/registry")
+    .then((r) => r.json())
+    .then((j) => console.info("[atelier] registry:", j.components.map((c: { name: string }) => c.name)));
+}
