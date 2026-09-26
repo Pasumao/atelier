@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { $state, __withTracking } from "../runtime/core.ts";
+import { $derived, $state, __withTracking } from "../runtime/core.ts";
 import {
   compiledTemplateCount,
   mountComponent,
@@ -22,7 +22,7 @@ import {
   tokenState,
   type ComponentDef,
 } from "../runtime/template.ts";
-import { compileFunction, compileModuleSource } from "../compiler/codegen.mjs";
+import { compileFunction, compileModuleSource, programSource } from "../compiler/codegen.mjs";
 import { evalExpr, exprRootIdents } from "../runtime/expr.ts";
 import { findByTag, makeContainer, serialize } from "./dom-shim.ts";
 
@@ -557,6 +557,104 @@ describe("F-4 解析期显式拒绝（ATR-101）", () => {
   });
 });
 
+
+/* ================= 决策 25 bind: v1 双向绑定（codegen 同构发射分支） =================
+ * 已知红状态（跨分支依赖，先红后绿）：rt.bindTwoWay 单点在并行 runtime 分支（决策 25 A 批）
+ * ——本分支上涉及编译路径执行的用例红因恰好为 mountComponent 兜底错误卡携带的
+ * 「rt.bindTwoWay is not a function」一类（帧 #0 起不一致，diff 卡面即红因原文）；
+ * 合并进 main 后由 runtime 侧补齐转为全绿。steps 全部 null 守卫：
+ * 编译路径错误卡缺 input 时 step 自身不得抛错掩盖真实红因。 */
+describe("决策 25 bind: v1 双向绑定 golden DOM parity", () => {
+  it("bind:value 文本输入双向：双路径 DOM 对拍 + input 事件回写信号 / 信号回写 el.value", async () => {
+    const raw = `<div><input bind:value={t.value}><p>{t.value}</p><i>{mirror.value}</i></div>`;
+    const r = await parity("BindValueText", raw, (container) => {
+      const t = $state("hello");
+      const mirror = $state("");
+      return {
+        scope: { t, mirror },
+        steps: [
+          async () => { t.value = "world"; }, // 信号 → DOM（bindTwoWay 的 attr effect 写回）
+          // shim 限制：serialize 只落 attributes，el.value 属性写不进帧——经镜像信号把
+          // el.value ?? getAttribute("value") 读回渲染进 DOM，钉住「信号→el.value」方向
+          //（属性写 / attr 写两种实现形态读值收敛，双路径同帧）。
+          async () => {
+            const el = findByTag(container, "input")[0];
+            if (el) mirror.value = `v=${(el as any).value ?? el.getAttribute("value")}`;
+          },
+          async () => {
+            const el = findByTag(container, "input")[0];
+            if (el) {
+              (el as any).value = "typed";
+              el.dispatchEvent({ type: "input" }); // DOM → 信号（事件回写）
+            }
+          },
+        ],
+      };
+    });
+    expect(r.frames[0]).toContain('"hello"');
+    expect(r.frames[1]).toContain('"world"'); // 信号更新 → 插值跟随
+    expect(r.frames[2]).toContain('"v=world"'); // 信号 → el.value 写回物证
+    expect(r.frames[3]).toContain('"typed"'); // input 事件 → 信号 → 插值
+  });
+
+  it("bind:checked checkbox 对拍：信号→checked 写回 + change 事件回写信号", async () => {
+    const raw = `<div><input type="checkbox" bind:checked={on.value}><p>{on.value}</p><i>{mirror.value}</i></div>`;
+    const r = await parity("BindCheckedBox", raw, (container) => {
+      const on = $state(false);
+      const mirror = $state("");
+      return {
+        scope: { on, mirror },
+        steps: [
+          async () => { on.value = true; }, // 信号 → checked 写回
+          async () => {
+            const el = findByTag(container, "input")[0];
+            if (el) mirror.value = `c=${(el as any).checked ?? el.getAttribute("checked")}`;
+          },
+          async () => {
+            const el = findByTag(container, "input")[0];
+            if (el) {
+              (el as any).checked = false;
+              el.dispatchEvent({ type: "change" }); // DOM → 信号（事件回写）
+            }
+          },
+        ],
+      };
+    });
+    expect(r.frames[1]).toContain('"true"'); // 信号更新 → 插值跟随
+    expect(r.frames[2]).toContain('"c=true"'); // 信号 → checked 写回物证
+    expect(r.frames[3]).toContain('"false"'); // change 事件 → 信号 → 插值
+  });
+
+  it("重复 bind:value → ATR-325 错误卡（WeakMap 守卫同键只订阅一次；双路径逐字节一致）", async () => {
+    const raw = `<div><input bind:value={t.value} bind:value={t.value}><p>{t.value}</p></div>`;
+    const r = await parity("BindDuplicate", raw, () => {
+      const t = $state("dup");
+      return { scope: { t }, steps: [] };
+    });
+    expect(r.frames[0]).toContain("ATR-325");
+  });
+
+  it("$derived 目标 → ATR-305 错误卡（派生信号只读，渲染期前置拦截；双路径一致）", async () => {
+    const raw = `<div><input bind:value={d.value}><p>{d.value}</p></div>`;
+    const r = await parity("BindDerived", raw, () => {
+      const base = $state("base");
+      const d = $derived(() => base.value.toUpperCase());
+      return { scope: { base, d }, steps: [] };
+    });
+    expect(r.frames[0]).toContain("ATR-305");
+  });
+
+  it("发射形态锚定：bind: 支路发射 rt.bindTwoWay 单点调用（同位同构）+ 目标入 reactive 依赖桶", () => {
+    const raw = `<div><input bind:value={t.value}><input type="checkbox" bind:checked={on.value}></div>`;
+    const body = programSource(parseTemplate(raw));
+    expect(body).toMatch(/rt\.bindTwoWay\(el\d+, "bind:value", "t\.value", scope, "input"\);/);
+    expect(body).toMatch(/rt\.bindTwoWay\(el\d+, "bind:checked", "on\.value", scope, "input"\);/);
+    expect(body).not.toContain('setAttribute("bind:value"'); // 未误入 dynamic 单向支路
+    const c = compileFunction("BindEmitDeps", raw);
+    // collect 论证的用例钉：bind 目标运行时必被 bindTwoWay 内部 effect 追踪 ⇒ 静态清单必收
+    expect([...c.deps.reactive].sort()).toEqual(["on", "t"]);
+  });
+});
 
 /* ---- F-5 teardown parity：两条路径的 effect 生命周期对拍（订阅数差分） ----
  * golden DOM diff 只对拍 DOM 形状，抓不住僵尸 effect（写入已脱离节点、订阅持续累积）。
