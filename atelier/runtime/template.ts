@@ -2,7 +2,8 @@
  * Atelier prototype — 类 HTML 模板解释器（决策 1/8 雏形）。
  * 支持子集：{expr} 文本插值（含对象/数组字面量 {{a: x.value}} 与 {a} 简写，F-4 第二期）
  *         / {#if}{:else if}{:else}{/if} / {#each arr as item, idx [by key]}
- *         / 动态属性 attr={expr} / on:click={handler} 事件 / HTML void 元素（<br>/<img>/<input>… 无闭合）
+ *         / 动态属性 attr={expr} / on:click={handler} 事件 / bind:value·bind:checked 双向绑定（决策 25，ATR-324/325 渲染期校验）
+ *         / HTML void 元素（<br>/<img>/<input>… 无闭合）
  *         / <style scoped>（token 校验）/ 子组件 <ModelCard ... />（大写标签）。
  * 解析期显式拒绝（ATR-101）：未闭合的 {#if}/{#each}/元素标签、错位与游离闭合标签——不静默吞掉
  * （编译路径构建期即抛，解释器路径渲染为可行动错误卡）。字面量花括号（非表达式候选）原样并入
@@ -59,7 +60,7 @@ export function html(strings: TemplateStringsArray): HtmlTemplateWithScope {
 export type AtrError = {
   code: string;
   message: string;
-  context: { file?: string; component?: string; hints?: string[] };
+  context: { file?: string; component?: string; hints?: string[]; attr?: string; expr?: string };
   fix: string;
 };
 
@@ -465,6 +466,213 @@ function recordRuntimeError(e: unknown): void {
   console.error("[atelier] render error:", e);
 }
 
+/* ---- 决策 25：属性级指令 v1——bind:value / bind:checked 双向绑定 ----------------
+ * 糖化形态 = 动态 attr effect（与 bindExpr 同源的下行订阅）+ 元素事件监听回写 sig.value。
+ * 解析器零改动：bind:x={expr} 的既有产物 {name:"bind:x", value:expr, dynamic:true} 即契约载体。
+ * 目标必须 scope[name] 直解析：evalExpr 读路径会把信号解包成值（expr.ts 求值出口），
+ * 表达式路径拿不到信号对象——bind:value={sig.value} 之类的目标在语法层即拒（ATR-324）。
+ * 分层：解释器 renderNode 在 createElement 之前先跑 precheckBinds（全量 attrs 可判定 type
+ * 细化面），dev 任一失败即错误卡替换整个元素 / prod 记录后跳过失败项照常渲染（ATR-401 同款
+ * 分层）；bindTwoWay 自身只校验参数可判定面（语法/信号性/derived/tag 矩阵）——codegen 直调
+ * 路径的唯一校验层，同时避免 attrs 循环中 type attr 源序在后时元素上尚未落 type 造成误拒。
+ * 无回环论证（决策 25）：程序化 el.value=/el.checked= 不触发 input/change 事件（DOM 规范）→
+ * effect 下行与用户上行天然单向（tests/bind-directive.test.ts 钉死）。
+ */
+/** 已订守卫（ATR-325）：键=元素、值=已订 bind: attr 名集合；同键第二次 bind 不建立第二份订阅。
+ * WeakMap 不阻止元素回收；同元素 bind:value 与 bind:checked 属不同键，合法共存。 */
+const bindSubscriptions = new WeakMap<object, Set<string>>();
+
+function atrBindDuplicate(name: string): AtrError {
+  return {
+    code: "ATR-325",
+    message: `bind: 重复绑定：同元素的 ${name} 已订阅`,
+    context: { attr: name },
+    fix: `移除重复的 ${name}——同元素 bind:value 与 bind:checked 属不同键可共存；同键只订阅一次`,
+  };
+}
+
+/** bind: 核心校验（参数可判定面，预检与 bindTwoWay 共用 = 双路径同源）：
+ * ① 目标语法 = 单个根标识符；② 目标可写（信号形状判定照抄 exactStaticDeps，derived → ATR-305）；
+ * ③ tag 级支持面矩阵。失败返回四段式 AtrError；通过返回 null。 */
+function checkBindCore(
+  name: string,
+  expr: string,
+  scope: Record<string, unknown>,
+  tagLc: string,
+): AtrError | null {
+  const target = expr.trim();
+  if (!/^[A-Za-z_$][\w$]*$/.test(target)) {
+    return {
+      code: "ATR-324",
+      message: `bind: 目标非法（须为单个信号名）：${name}={${expr}}`,
+      context: { attr: name, expr },
+      fix: "bind: 目标只能是单个信号名（不带 .value、不做属性链）——写 bind:value={text}，而非 bind:value={text.value} 或对象属性链",
+    };
+  }
+  const v = scope[target];
+  const isSignal =
+    v !== null && typeof v === "object" && typeof (v as { _kind?: unknown })._kind === "string" && (v as { _subs?: unknown })._subs instanceof Set;
+  if (!isSignal) {
+    return {
+      code: "ATR-324",
+      message: `bind: 目标不是可写信号：${name}={${target}}`,
+      context: { attr: name, expr: target },
+      fix: `bind: 回写目标必须是非 derived 信号——用 $state 声明：const ${target} = $state(...)；纯展示值走普通插值 {${target}}`,
+    };
+  }
+  if ((v as { _kind?: string })._kind === "derived") {
+    return {
+      code: "ATR-305",
+      message: "派生信号只读（$derived 由依赖计算）",
+      context: { attr: name, expr: target },
+      fix: "bind: 目标须为可写 $state 信号——$derived 只读不能作双向回写目标；改绑上游 $state，或经事件处理器写上游信号",
+    };
+  }
+  const matrixFix = "v1 支持面：bind:value × input（文本类）/textarea/select；bind:checked × input[type=checkbox|radio]";
+  if (name === "bind:value") {
+    if (tagLc !== "input" && tagLc !== "textarea" && tagLc !== "select") {
+      return {
+        code: "ATR-324",
+        message: `bind: 组合不在 v1 支持面：${name} 于 <${tagLc}>`,
+        context: { attr: name, expr: target },
+        fix: matrixFix,
+      };
+    }
+  } else if (name === "bind:checked") {
+    if (tagLc !== "input") {
+      return {
+        code: "ATR-324",
+        message: `bind: 组合不在 v1 支持面：${name} 于 <${tagLc}>`,
+        context: { attr: name, expr: target },
+        fix: matrixFix,
+      };
+    }
+  } else {
+    return {
+      code: "ATR-324",
+      message: `bind: 未知属性指令：${name}`,
+      context: { attr: name },
+      fix: "v1 仅支持 bind:value 与 bind:checked；元素事件用 on: 前缀（如 on:click）",
+    };
+  }
+  return null;
+}
+
+/** bind: type 细化面（attrs 可判定，仅解释器预检跑——bindTwoWay 无 attrs 视野）：
+ * input 须看 type attr——value 拒已知 checkbox/radio（checkbox/radio 用 checked）；
+ * checked 要求静态 type=checkbox|radio：type 缺省（缺省即 text）或动态 type={}（v1 不追）
+ * 均按未知保守拒绝——checked 绑上去必错，宁拒不漏。 */
+function checkBindTypeRefinement(name: string, tagLc: string, inputType: string | null): AtrError | null {
+  if (tagLc !== "input") return null; // 细化面只关 input；tag 级矩阵由 checkBindCore 把关
+  const matrixFix = "v1 支持面：bind:value × input（文本类）/textarea/select；bind:checked × input[type=checkbox|radio]";
+  const isCheckboxLike = inputType === "checkbox" || inputType === "radio";
+  if (name === "bind:value" && isCheckboxLike) {
+    return {
+      code: "ATR-324",
+      message: `bind: 组合不在 v1 支持面：bind:value 于 <input[type=${inputType}]>（checkbox/radio 用 checked）`,
+      context: { attr: name },
+      fix: matrixFix,
+    };
+  }
+  if (name === "bind:checked" && !isCheckboxLike) {
+    return {
+      code: "ATR-324",
+      message: `bind: 组合不在 v1 支持面：bind:checked 于 <input>${inputType === null ? "（缺静态 type）" : `[type=${inputType}]`}`,
+      context: { attr: name },
+      fix: matrixFix,
+    };
+  }
+  return null;
+}
+
+/** bind: attrs 预检（决策 25 步骤 1-4，解释器 createElement 之前跑）：逐条 bind: 校验
+ * （checkBindCore + type 细化面）+ 同元素同名去重（ATR-325 记后到者）。返回失败清单
+ * （保 attr 引用供 prod 跳过失败项）；dev 下调用方任取首条渲染错误卡。 */
+function precheckBinds(
+  node: { tag: string; attrs: Attr[] },
+  scope: Record<string, unknown>,
+): Array<{ attr: Attr; error: AtrError }> {
+  const fails: Array<{ attr: Attr; error: AtrError }> = [];
+  const seen = new Set<string>();
+  const tagLc = node.tag.toLowerCase();
+  // type 解析：仅认静态 type attr；动态 type={} v1 不追（按未知保守处理，见细化面注释）
+  const typeAttr = node.attrs.find((x) => x.name.toLowerCase() === "type" && !x.dynamic);
+  const inputType = typeAttr ? typeAttr.value.toLowerCase() : null;
+  for (const a of node.attrs) {
+    if (!a.name.startsWith("bind:")) continue;
+    let error: AtrError | null;
+    if (seen.has(a.name)) {
+      error = atrBindDuplicate(a.name);
+    } else {
+      seen.add(a.name);
+      error = checkBindCore(a.name, a.value, scope, tagLc) ?? checkBindTypeRefinement(a.name, tagLc, inputType);
+    }
+    if (error) fails.push({ attr: a, error });
+  }
+  return fails;
+}
+
+/** 决策 25 单点：bind:value / bind:checked 双向绑定。返回 dispose（$effect dispose +
+ * removeEventListener），并 captureCleanup 纳入当前受控重建的 cleanup 集（F-5 teardown：
+ * 换支/行移除随之析构，与 bindExpr 同款）。codegen 面经 __compiledRT 注入（产物零 import）。
+ * 错误契约：校验失败（核心面 + WeakMap 重复守卫）→ recordRuntimeError 后 dev 抛出（调用方 /
+ * 组件错误边界渲染错误卡）、prod 返回 noop dispose（不建订阅、不静默）——解释器路径被
+ * precheckBinds 前置拦截永不触达（校验函数同源，判定一致）。 */
+function bindTwoWay(
+  el: HTMLElement,
+  name: string,
+  expr: string,
+  scope: Record<string, unknown>,
+  tag: string,
+): () => void {
+  const fail = (err: AtrError): (() => void) => {
+    recordRuntimeError(err);
+    if (!isProd()) throw err;
+    return () => {}; // prod：元素照常语义，跳过该 bind: 绑定
+  };
+  const err = checkBindCore(name, expr, scope, tag.toLowerCase());
+  if (err) return fail(err);
+  let subs = bindSubscriptions.get(el);
+  if (!subs) {
+    subs = new Set();
+    bindSubscriptions.set(el, subs);
+  }
+  if (subs.has(name)) return fail(atrBindDuplicate(name));
+  subs.add(name);
+  const sig = scope[expr.trim()] as Signal;
+  const isChecked = name === "bind:checked";
+  const io = el as unknown as { value: string; checked: boolean };
+  // 正向下行：信号 → 元素。首跑即完成初始同步；value 不变不写（防光标跳动），
+  // checked 恒写（布尔无光标语义）。程序化赋值不触发事件（DOM 规范）= 无回环。
+  const disposeEffect = isChecked
+    ? $effect(() => {
+        io.checked = booly(sig.value);
+      })
+    : $effect(() => {
+        const s = stringify(sig.value);
+        if (io.value !== s) io.value = s;
+      });
+  // 反向回写事件（有效组合内由 (attr, tag) 完全决定）：input/textarea → input；
+  // select 与 checkbox/radio（bind:checked 仅落 input）→ change。
+  const event = name === "bind:value" && tag.toLowerCase() !== "select" ? "input" : "change";
+  const handler = () => {
+    try {
+      sig.value = isChecked ? io.checked : io.value; // 字符串/布尔原样回写，类型转换是用户的事
+    } catch (e) {
+      recordRuntimeError(e); // belt-and-braces：渲染期校验正常时不会触发（决策 25）
+    }
+  };
+  el.addEventListener(event, handler);
+  const dispose = () => {
+    disposeEffect();
+    // dom-shim（tests/dom-shim.ts）未实现 removeEventListener——可选调用兼容微 shim 宿主，
+    // 真 DOM 全量退订；effect 已先行 dispose，脱离节点不再被下行写（响应正确性不受影响）。
+    (el as { removeEventListener?: (type: string, fn: () => void) => void }).removeEventListener?.(event, handler);
+  };
+  captureCleanup(dispose);
+  return dispose;
+}
+
 /** —— 渲染上下文 —— */
 export type ComponentDef<P = Record<string, unknown>> = {
   name: string;
@@ -751,7 +959,22 @@ function renderNode(
         const wrapper = document.createElement("span");
         return mountComponent(def, props, wrapper, registry, validate);
       }
+      // 决策 25：bind: 预检先于 createElement——dev 任一失败即错误卡替换整个元素；
+      // prod 记录后跳过失败项、元素照常渲染（ATR-401 同款分层，不静默）。
+      const bindFails = precheckBinds(node, scope);
+      if (bindFails.length > 0) {
+        if (isProd()) {
+          for (const f of bindFails) recordRuntimeError(f.error);
+        } else {
+          const e = bindFails[0].error;
+          const bindCard = document.createElement("div");
+          bindCard.className = "atr-error-card";
+          bindCard.textContent = `${e.code} ${e.message} — fix: ${e.fix}`;
+          return bindCard;
+        }
+      }
       const el = document.createElement(node.tag);
+      const skippedBinds = new Set(bindFails.map((f) => f.attr)); // 仅 prod 非空（dev 已整元素替换）
       for (const a of node.attrs) {
         if (a.name.startsWith("on:")) {
           const ev = a.name.slice(3);
@@ -759,6 +982,11 @@ function renderNode(
             const fn = evalExpr(a.value, scope) as ((ev: Event) => void) | undefined;
             if (typeof fn === "function") fn(e);
           });
+          continue;
+        }
+        if (a.name.startsWith("bind:")) {
+          // 决策 25：双向绑定单点（预检已过 → 校验正常；dispose 内部 captureCleanup 随分支析构）
+          if (!skippedBinds.has(a)) bindTwoWay(el, a.name, a.value, scope, node.tag);
           continue;
         }
         if (a.dynamic) {
@@ -955,6 +1183,7 @@ export const __compiledRT = {
   stringify,
   booly,
   bindExpr,
+  bindTwoWay, // 决策 25：bind:value/bind:checked 双向绑定单点（codegen emitAttrs 同位支路发射 rt.bindTwoWay，产物零 import 不破）
   recordRuntimeError,
   mountComponent,
   bindProp, // F-5：动态属性 = 响应式 prop（编译路径与解释器同源同函数）
