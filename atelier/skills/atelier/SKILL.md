@@ -59,7 +59,7 @@ export const Greeting = component(function Greeting(props: { name: string }) {
 | streaming output / tool call cards | `atelier-streaming` |
 | state / rollback / time-travel | `atelier-state-transactions` |
 | styling / tokens / layout | `atelier-styling` |
-| run checks / tests / snapshots | `atelier-testing` |
+| run checks / tests / snapshots / build | `atelier-testing` |
 | query or change framework state (MCP tools) | `atelier-mcp-tools` |
 | any `ATR-xxx` error | `atelier-error-codes` |
 

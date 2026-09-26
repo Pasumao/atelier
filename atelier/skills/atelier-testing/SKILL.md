@@ -1,6 +1,6 @@
 ---
 name: atelier-testing
-description: Atelier acceptance loop. atelier check/lint/test/snapshot/e2e semantics, DoD mapping, screenshot diff MUST be reviewed (no auto-accept). Load when running checks, tests, snapshots, or verifying a task.
+description: Atelier acceptance loop. atelier check/lint/test/snapshot/e2e/build semantics, DoD mapping, build-artifact prod-strip semantics (decision 27), screenshot diff MUST be reviewed (no auto-accept). Load when running checks, tests, snapshots, builds, or verifying a task.
 ---
 
 # Acceptance Loop (DoD execution)
@@ -14,6 +14,18 @@ description: Atelier acceptance loop. atelier check/lint/test/snapshot/e2e seman
 | `atelier test` | behaviour/interaction assertions (Vitest) | assertions red |
 | `atelier snapshot [--update]` | visual regression vs `.atr/snapshots/` | pixel diff vs baseline |
 | `atelier e2e` | browser loop: structure assertions + screenshot diff | DOM mismatch |
+| `atelier build` | prod artifact: static face + single-container server shell, spawn smoke self-check | build or smoke exits non-zero |
+
+## Build prod-strip semantics (decision 27)
+
+`atelier build` artifacts run **prod semantics — the dev face is stripped**, two-sided:
+
+- **Browser face**: vite build folds the build-prod constant (dev serve does not define it) — dev-only branches are dead-code-eliminated; `src/main.ts` dev wiring (state bridge / registry self-check / session anchor) sits behind `if (import.meta.env.DEV)` and compiles out.
+- **Server face**: the generated `dist/server.mjs` shell presets the prod flag before loading the app — per-request behavior switches live.
+
+What the artifact no longer does: no ATR error cards, props/contract validation skipped (bugs surface as plain runtime errors, not ATR cards), `/__atelier/server-status` debug surface hidden (405 ATR-311).
+
+Honest boundaries (v1): server face is behavior-level activation, no DCE (code still ships, semantics switched off); runtime barrel not tree-shaken (dev branches fold inside modules); `.atr-error-card` CSS remains (harmless).
 
 ## DoD → commands (use this order; never skip 4)
 

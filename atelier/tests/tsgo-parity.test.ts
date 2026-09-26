@@ -12,6 +12,12 @@
  *     · tsc：0 诊断（gen-compile-gate 既有零诊断口径）；
  *     · tsgo：2 × TS2882（src/main.ts 对 ./atelier-tailwind.css / ./atelier-ui.css 的
  *       side-effect import，tsgo 新增的副作业导入检查——tsc 不报）。
+ *   留痕（2026-09-26，tsgo 7.0.0-dev.20260707.2）：决策 27 F-2 prod 剥离 C 分支为 main.ts 的
+ *     import.meta.env.DEV 装配门补了模板标准件 src/vite-env.d.ts（`/// <reference types="vite/client" />`，
+ *     create-vite 脚手架同款，init 整目录拷贝自动随模板走）——vite/client 自带 `*.css` ambient
+ *     模块声明，恰好满足 tsgo 的副作业导入检查，上述 2 × TS2882 差异消失；golden 收窄为空集
+ *     （双跑全 parity）。属模板补齐标准 vite 类型面的正向收窄，非放宽口径；此后 tsc/tsgo 任何
+ *     翻面差异（重现/新码/换文件）照旧即红。
  *   断言钉住的是差异集（{file, code} 对，语义身份粒度）而非诊断文案：only-in-tsc 必须为空、
  *   only-in-tsgo 必须恰等于上述 golden——tsgo/TS 升级翻出任何新差异（新码/新文件/消失）即红，
  *   人工复核后更新 golden 并记录（这正是 D-F18「钉住行为差」的作业方式：差异不隐瞒、不假绿，
@@ -25,8 +31,8 @@
  *
  * 诚实边界：tsgo 是 preview 质量钉版（@typescript/native-preview 7.0.0-dev.20260707.2，
  * 无 ^——preview 版次间诊断集可能翻动，golden 钉住机制即兜底）；tsgo 对模板 CSS 副作业导入
- * 报 TS2882 属模板×编译器交互，框架不改模板回避（差异如实钉住，修法归 tsgo 正式版观察）；
- * fixture 跑 node 宿主路径（bun:sqlite 分支同 sqlite.ts 既有挂账）。
+ * 报 TS2882 曾属模板×编译器交互（如实钉住），2026-09-26 决策 27 批补齐标准件 src/vite-env.d.ts
+ * 后差异自然消失（见上留痕）；fixture 跑 node 宿主路径（bun:sqlite 分支同 sqlite.ts 既有挂账）。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -41,11 +47,10 @@ const CLI = path.join(PKG, "cli.mjs");
 const TSGO_BIN = path.join(PKG, "node_modules", "@typescript", "native-preview", "bin", "tsgo");
 const TSGO_OK = fs.existsSync(TSGO_BIN);
 
-/** 钉住的 tsgo-only 诊断差异集（{file, code} 对；file 相对 fixture root、posix 斜杠、按序） */
-const PINNED_TSGO_ONLY: Array<{ file: string; code: string }> = [
-  { file: "src/main.ts", code: "TS2882" },
-  { file: "src/main.ts", code: "TS2882" },
-];
+/** 钉住的 tsgo-only 诊断差异集（{file, code} 对；file 相对 fixture root、posix 斜杠、按序）
+ *  2026-09-26 收窄为空集：src/vite-env.d.ts（vite/client）的 `*.css` ambient 声明消除了既有
+ *  2 × TS2882（CSS 副作业导入）tsgo-only 差异——留痕见文件头。 */
+const PINNED_TSGO_ONLY: Array<{ file: string; code: string }> = [];
 
 const roots: string[] = [];
 afterAll(() => {
@@ -141,7 +146,8 @@ describe.skipIf(!TSGO_OK)("D-F18 tsgo 双跑：同一 fixture tsc/tsgo 诊断行
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-tsgo-parity-"));
       roots.push(root);
 
-      // ① init（自包含应用：模板 tsconfig / vendor 布局 / 模板组件与 CSS 副作业导入——TS2882 观测面）
+      // ① init（自包含应用：模板 tsconfig / vendor 布局 / 模板组件与 CSS 副作业导入——
+      //    TS2882 曾在此观测；2026-09-26 起 vite-env.d.ts 的 ambient 声明已消除该差异）
       run(process.execPath, [CLI, "init", "--target", root, "--name", "TsgoParityFs", "--no-ai"]);
       expect(fs.existsSync(path.join(root, "tsconfig.json"))).toBe(true);
 
