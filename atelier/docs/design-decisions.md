@@ -366,6 +366,15 @@
   逃生口不变。
 - 时间：2026-09-26（F-2 二期后唯一剩余项兑现；用户「继续」拍板；主/子智能体 worktree 三分支并行实施）。
 
+> **落地注记（2026-09-26 prod 批，三分支并行 `db6e5da`/`7467f68`/`e6f7d72` 零冲突合并链至 `fa86184` + 集成收口）**：
+> 全文兑现，一处集成补口——renderNode 的 validateProps 失败卡是**唯一非旗控错误卡源**（prod 下动态
+> 不可达但条件非常量、DCE 不掉），集成补 `!(BUILD_PROD || dynProd()) && !v.ok` 守卫后整分支剔除
+> （形态机检钉 7→8 处同步）。A 分支实证机制边界：折叠是 vite 管线（rollup 保留 const + esbuild minify）
+> 专属，esbuild 直 bundler 作用域提升 const→var 不折叠。门禁：546 绿+8 skip / check-skills 56-0 /
+> api-diff churn 0.00% / 真实 build 冒烟（app.ping 200 · index 200 · **server-status 405 ATR-311**）/
+> 产物 JS 33.5KB atr-error-card **零出现**（字节级）+ dev 装配件零残留。**F 线 F-1~F-5 全清。**
+> 诚实边界照决策 27 原文；CDP 行为探针本机挂起，以字节级+HTTP 级证据收口。
+
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
 - ~~异步表达式策略（D-F9）~~ → **已定稿为决策 24**（2026-09-19，原型通过）。

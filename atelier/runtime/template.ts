@@ -960,7 +960,11 @@ function renderNode(
           else props[a.name] = a.value;
         }
         const v = validateProps(def.schema, props, validate);
-        if (!v.ok) {
+        // 决策 27 集成收口：此卡源代码非旗控（validateProps 在 prod 早退 ok 使其动态不可达，
+        // 但条件非常量 → DCE 不掉 → 产物 bundle 残留唯一 atr-error-card 字符串）——
+        // 包上双旗短路守卫后 define 折叠为 false && … 整分支剔除（形态机检按调用点计数）。
+        // 语义逐点核验：dev 无旗 = !v.ok 原语义；动态旗开 = validateProps 已早退 ok，本分支本就不可达。
+        if (!(BUILD_PROD || dynProd()) && !v.ok) {
           const errBox = document.createElement("div");
           errBox.className = "atr-error-card";
           errBox.textContent = `${v.error?.code} ${v.error?.message} — fix: ${v.error?.fix ?? ""}`;
