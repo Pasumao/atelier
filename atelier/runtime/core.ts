@@ -216,8 +216,13 @@ export function $effect(fn: () => void): () => void {
         fn();
       } finally {
         tracking = prev;
+        // P1-1：重订阅并入 finally——此前留在 try/finally 之外，fn() 抛错时旧订阅已在
+        // 删旧步清光、重订阅永不执行 ⇒ effect alive 仍真却收不到任何通知（永久失活，
+        // 红检见 tests/core.test.ts P1-1 组：抛错后上游再写不再触发）。并入 finally 后
+        // 抛错路径同样以「本次已追踪到的依赖」恢复订阅：上游再写 ⇒ 重跑重试（抛错后可
+        // 恢复）。alive 守卫：fn 内自 dispose 的情形不得复活订阅（dispose 已注销，语义保持）。
+        if (alive) for (const s of record.deps) s._subs.add(sub);
       }
-      for (const s of record.deps) s._subs.add(sub);
     },
   };
 

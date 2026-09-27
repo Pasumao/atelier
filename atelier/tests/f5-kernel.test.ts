@@ -8,7 +8,7 @@
  */
 import "./dom-shim.ts";
 import { describe, expect, it } from "vitest";
-import { $state } from "../runtime/core.ts";
+import { $state, store } from "../runtime/core.ts";
 import { mountComponent } from "../runtime/template.ts";
 import type { ComponentDef, ComponentRegistry } from "../runtime/template.ts";
 import { validateFlat } from "../runtime/contract.ts";
@@ -143,5 +143,45 @@ describe("F-5 红检（锐评取证复现）", () => {
     title.value = "t2"; // 子组件的 bindProp 父侧 effect 与子侧 bindExpr effect 均应已析构
     await flush();
     expect(em.textContent).toBe("t1"); // 期望：级联析构后不再被写（仍为 "t1"）
+  });
+
+  it("红检（P1-4）：{#if} 反复切换含 bindProp 子组件，store._signals 稳定不涨", async () => {
+    const show = $state(true);
+    const title = $state("t1");
+    const reg: ComponentRegistry = new Map();
+    reg.set("LeakSub", {
+      name: "LeakSub",
+      render: () => ({ raw: `<em>{props.title}</em>`, scope: {} }) as never,
+    });
+    const host: ComponentDef = {
+      name: "LeakSignalsHost",
+      render: () =>
+        ({ raw: `{#if show.value}<LeakSub title={title.value} />{/if}`, scope: { show, title } }) as never,
+    };
+    reg.set("LeakSignalsHost", host);
+    const container = document.createElement("div");
+    const before = store._signals.size;
+    mountComponent(host, {}, container, reg, validateFlat);
+    await flush();
+
+    const em = findByTag(container, "em");
+    expect(em.textContent).toBe("t1");
+    const afterMount = store._signals.size;
+    expect(afterMount).toBeGreaterThan(before); // prop 信号已注册（挂载期恰好 +1）
+
+    for (let i = 0; i < 6; i++) {
+      show.value = !show.value;
+      await flush();
+    }
+    const afterSix = store._signals.size;
+    for (let i = 0; i < 6; i++) {
+      show.value = !show.value;
+      await flush();
+    }
+    // 修复前：分支重建发生在 mount 窗口之外，每次重建的 bindProp 信号无条件入 store._signals
+    // 且无人注销（disposeInstance 只删实例收集到的信号）→ 切换轮数越多涨得越多。
+    // 判据取「再切 6 轮数量不变」：与当前分支恰有一个活跃 prop 信号的稳态解耦（空分支交替
+    // 使每轮进入分支净 +1/-1），只钉"不随切换轮数增长"。
+    expect(store._signals.size, "再切 6 轮 _signals 稳定不涨（bindProp 信号随分支 cleanup 注销）").toBe(afterSix);
   });
 });

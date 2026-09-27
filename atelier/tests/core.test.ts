@@ -237,3 +237,39 @@ describe("transaction store v0.3 (decision 5 — merge / journal / graph)", () =
     expect(g2.signals.every((s) => typeof s.id === "number")).toBe(true);
   });
 });
+
+describe("P1-1 $effect 抛错后可恢复（重订阅并入 finally）", () => {
+  it("红检：更新期抛错一次，上游再写仍触发重跑（修复前旧订阅删光后重订阅永不执行 → 永久失活）", async () => {
+    const src = $state(0);
+    let runs = 0;
+    $effect(() => {
+      runs++;
+      void src.value;
+      if (runs === 2) throw new Error("boom-on-update");
+    });
+    await settled();
+    expect(runs).toBe(1);
+    src.value = 1; // 第二跑抛错（scheduleFlush 捕获记录，不中断同批其他订阅）
+    await settled();
+    expect(runs).toBe(2);
+    src.value = 2; // 修复前：订阅已在删旧步清空且重订阅留在 try/finally 之外永不执行
+    await settled();
+    expect(runs, "抛错后可恢复：上游再次写入仍触发 effect").toBe(3);
+  });
+
+  it("红检：首跑抛错后已追踪依赖仍被订阅（错误同步传播给调用方，但 effect 不失活）", async () => {
+    const src = $state(0);
+    let runs = 0;
+    expect(() =>
+      $effect(() => {
+        runs++;
+        void src.value;
+        throw new Error("boom-on-first");
+      }),
+    ).toThrowError(/boom-on-first/);
+    expect(runs).toBe(1);
+    src.value = 1;
+    await settled();
+    expect(runs, "首跑抛错后订阅仍建立：上游再写触发第二跑").toBe(2);
+  });
+});

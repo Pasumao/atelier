@@ -358,3 +358,41 @@ describe("决策 25 v1.2 bind:group __compiledRT.bindGroup 直调契约（codege
     expect((getLast()?.code ?? undefined), "一次性旗标：信号变化不重复刷屏").toBe(undefined);
   });
 });
+
+describe("P1-3 bind:group 身份键读取时序（与 attr 书写顺序解耦）", () => {
+  it("红检：bind-first 与 value-first 两种书写初始 checked 一致，且无假 ATR-327", async () => {
+    setLast(undefined);
+    const selBindFirst = $state("a");
+    const selValueFirst = $state("a");
+    const c = mountOnce(
+      "GroupAttrOrder",
+      `<input type="radio" bind:group={selBindFirst} value="a"><input type="radio" value="a" bind:group={selValueFirst}>`,
+      { selBindFirst, selValueFirst },
+    );
+    await flush();
+    const radios = findByTag(c, "input");
+    expect(radios[0].checked, "bind 在前：初始选中（修复前 effect 首跑同步、value 尚未落 → 假 ATR-327 + checked 恒 false）").toBe(true);
+    expect(radios[1].checked, "value 在前：初始选中").toBe(true);
+    expect(getLast()?.code, "value 属性存在（只是落定在 bind 之后）——不得记假 ATR-327").toBeUndefined();
+  });
+
+  it("bind-first radio 的 roundtrip 不受时序影响：change 上行 + 信号下行互斥", async () => {
+    const sel = $state("a");
+    const c = mountOnce(
+      "GroupBindFirstRoundtrip",
+      `<input type="radio" bind:group={sel} value="a"><input type="radio" bind:group={sel} value="b">`,
+      { sel },
+    );
+    await flush();
+    const radios = findByTag(c, "input");
+    expect(radios[0].checked, "初始选中（bind-first）").toBe(true);
+    expect(radios[1].checked).toBe(false);
+
+    radios[1].checked = true;
+    radios[1].dispatchEvent({ type: "change" });
+    await flush();
+    expect(sel.value, "上行：change 回写 = 身份键").toBe("b");
+    expect(radios[0].checked, "下行：组内互斥重判").toBe(false);
+    expect(radios[1].checked).toBe(true);
+  });
+});
