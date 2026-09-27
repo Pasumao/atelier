@@ -35,7 +35,8 @@ registry.register(noteList).register(addNote);
  * db 是 opt-in（最小全栈先行，数据面按需接线）：
  *   1. node ../../atelier/cli.mjs gen db --root .        —— schema.ts → tables/crud + 迁移骨架
  *   2. 在 import 区追加：import { openSqlite } from "../vendor/atelier/server/index.ts";
- *   3. const db = openSqlite(process.env.ATELIER_DB_PATH ?? ".atelier/dev.db");
+ *   3. mkdirSync(path.dirname(dbPath), { recursive: true }) 后再 openSqlite(dbPath)（宿主不建父目录；
+ *      build 冒烟 cwd=dist=整目录部署语义，相对 db 路径须自足——m11 批 B 实测）
  *   4. createHandler({ mount, db })                       —— 迁移：node ../../atelier/cli.mjs migrate up
  *   鉴权（gen auth 后）：createHandler({ mount, db, auth: createSessionReader(db) })
  */

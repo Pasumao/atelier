@@ -4,9 +4,10 @@
  * **锁死在本文件**（prepare/run/all/get 四原语量级），上层只见 SqliteDb 接口——与 dev 面
  * 多运行时 vendor 策略同构。决策 19 红线：不引 libSQL（维护态）、不用 Bun.SQL 多方言
  * 统一 API；**参数化是唯一路径**（无字符串拼接逃生门，Kysely CVE-2026-33442 教训）。
- * 诚实边界：本环境（Node 24，无 Bun）只能集成测试 node 路径；bun 路径以 API 形状
- * 对照 bun:sqlite 官方文档实现（Database/Statement.run/all/get 同名同义），待 Bun 环境
- * 回归（FS-3 剩余项挂 BACKLOG）。
+ * 诚实边界：bun 路径已回归（2026-09-27，m11 批 B：真实 Bun 1.4.2 win32-x64 下经
+ * `bun atelier/scripts/bun-adapter-smoke.mjs` 全语义面验证——四原语/exec/tx 提交回滚/
+ * 写捕获槽；红检抓出「无行 get 返回 null ≠ 契约 undefined」真差异并归一修复）。
+ * 可重复验证口径 = 该冒烟脚本；node 路径由 vitest 套件常规覆盖。
  * FS-7 加法（live 写侧失效的自动表名启发式，FS-DESIGN §4.1"薄层即可"）：写捕获槽
  * （beginWriteCapture/endWriteCapture）——prepare 时轻量正则提取写目标表、run 真执行时记入
  * 活跃捕获槽；纯加法不改既有四原语语义（无捕获槽时零开销直通）。
@@ -119,15 +120,27 @@ export async function openSqlite(path: string): Promise<SqliteDb> {
     const spec = "bun:sqlite"; // 变量间接 + 动态 import：非 Bun 宿主加载本模块不炸（vite 静态分析跳过）
     const mod = (await import(/* @vite-ignore */ spec)) as { Database: new (path: string) => { prepare(sql: string): RawStatement; exec(sql: string): void; close(): void } };
     const db = new mod.Database(path);
+    // exec 归一单点（handle.exec 与 tx 内 exec 同源——tx 直用裸 db.exec 会让归一漏进事务路径）
+    const execNormalized = (sql: string): void => {
+      recordWrite(extractWriteTables(sql));
+      try {
+        db.exec(sql);
+      } catch (e) {
+        // 宿主差异锁死（m11 批 B 真实 Bun 1.4.2 实测后归一）：node:sqlite 对纯注释/空白 SQL
+        // 容忍（no-op），bun:sqlite 抛 "Query contained no valid SQL statement"——归一到 node
+        // 语义：零可执行语句 = 零效果 no-op（gen db 种子骨架「整文件注释」场景真实撞上，
+        // migrate seed 曾在 bun 下 ATR-336 误红）。仅吞该确定性退化输入错误，其余原样上抛
+        // （fail-visible）；bun 若改报错文案，差异重新可见而非被静默。
+        if (e instanceof Error && /no valid SQL statement/i.test(e.message)) return;
+        throw e;
+      }
+    };
     const handle: SqliteDb = {
       host: "bun",
       prepare: (sql: string) => wrapStatement(db.prepare(sql), extractWriteTables(sql)),
-      exec: (sql: string) => {
-        recordWrite(extractWriteTables(sql));
-        db.exec(sql);
-      },
+      exec: execNormalized,
       close: () => db.close(),
-      tx: <T,>(fn: (tx: SqliteDb) => T | Promise<T>) => runTx(handle, (sql: string) => db.exec(sql), fn),
+      tx: <T,>(fn: (tx: SqliteDb) => T | Promise<T>) => runTx(handle, execNormalized, fn),
     };
     return handle;
   }
@@ -159,6 +172,11 @@ function wrapStatement(raw: RawStatement, writeTables: string[]): SqliteStatemen
       return { changes: Number(r.changes ?? 0), lastInsertRowid: (r.lastInsertRowid ?? 0) as number | bigint };
     },
     all: (...params: unknown[]) => raw.all(...params) as Record<string, unknown>[],
-    get: (...params: unknown[]) => raw.get(...params) as Record<string, unknown> | undefined,
+    get: (...params: unknown[]) => {
+      // 宿主差异锁死：node:sqlite 无行返回 undefined，bun:sqlite 返回 null——归一到契约的
+      // undefined（m11 批 B 在真实 Bun 1.4.2 下由 bun-adapter-smoke 红检抓出后修复）。
+      const row = raw.get(...params);
+      return (row === null || row === undefined ? undefined : row) as Record<string, unknown> | undefined;
+    },
   };
 }
