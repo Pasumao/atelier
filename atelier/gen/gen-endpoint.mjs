@@ -23,6 +23,11 @@
  * 的 flatFieldType/table()/pick() 语义对表，交叉引用见 resolveLocalPickTypes）③auth 元数据
  * （auth: { type: "none" } 等）对本生成器无影响、解析须容忍（只认 contract/output 键）。
  *
+ * 端点名与派生标识符校验（P1-8，ATR-342）：字面量端点名入口校验字符集（对齐 server/endpoints.ts
+ * 的 NAME_RE——ATR-313 同源规则，字母开头的 [A-Za-z0-9_.-]）；pascalOf/camelOf 派生标识符
+ * 合法性（含独立导出名撞 JS 保留字）二次闸——坏名字在生成器侧四段式 die，绝不流入产物破碎
+ * api.ts；进生成码的端点名/URL 一律 JSON.stringify 转义（name as const / fetch / EventSource）。
+ *
  * 自包含红线：本文件在 init/sync 的 vendor 名单内（M7 批），mcp-vendor.test.ts 机械核对
  * import 闭包精确相等——只准 import node: 内建，绝不 import 框架其他文件。与 export-openapi.mjs
  * 各自持有一份 scanner（parseFlatValue / resolveLocalPickTypes / flatSchemaToTs 为其
@@ -40,6 +45,47 @@ import path from "node:path";
 import url from "node:url";
 
 const INVOKED_DIRECTLY = process.argv[1] && url.pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+
+/* ---------- 端点名与派生标识符校验（P1-8，ATR-342：坏名字绝不流入产物） ---------- */
+
+/** 生成器侧四段式错误（code/message/fix——与 gen-db 的 GenDbError 同构，扫描器边界即纪律边界） */
+export class GenEndpointError extends Error {
+  constructor(code, message, fix) {
+    super(message);
+    this.name = "GenEndpointError";
+    this.code = code;
+    this.fix = fix;
+  }
+}
+
+function die(code, message, fix) {
+  throw new GenEndpointError(code, message, fix);
+}
+
+/** 端点名字符集口径 = server/endpoints.ts 的 NAME_RE（ATR-313 同源：URL 路径拼接的安全前提） */
+const ENDPOINT_NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+
+/** 独立导出名（export const <c> = …）撞即编译不过的 JS 保留字（camelOf 产物闸） */
+const RESERVED_WORDS = new Set([
+  "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
+  "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "implements", "import",
+  "in", "instanceof", "interface", "let", "new", "null", "package", "private", "protected", "public",
+  "return", "static", "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void",
+  "while", "with", "yield",
+]);
+
+const DERIVED_IDENT_RE = /^[A-Za-z_$][\w$]*$/;
+
+/** 端点名入口校验：字面量名此前全程无字符集校验，`"`/`\`/换行可静默流入产物破碎整份 api.ts
+ * （报错位置在生成文件里）；现扫描时即 ATR-342 die，诊断回到生成器侧。 */
+function assertEndpointName(name, line) {
+  if (ENDPOINT_NAME_RE.test(name)) return;
+  die(
+    "ATR-342",
+    `端点名非法：「${JSON.stringify(name)}」${line > 0 ? `（端点文件第 ${line} 行）` : ""}——只允许字母开头的 [A-Za-z0-9_.-]（对齐 server/endpoints.ts NAME_RE / ATR-313）`,
+    '改成合法端点名，如 "chat.ask" 或 "notes.list"（字母开头，后接字母/数字/下划线/点/连字符）'
+  );
+}
 
 /* ---------- 文本扫描原语（字符串/注释感知的括号匹配——无 eval、无 TS 解析器） ---------- */
 
@@ -458,6 +504,7 @@ export function scanEndpointSource(src, opts = {}) {
     const nameStart = i;
     while (i < src.length && src[i] !== q) i += src[i] === "\\" ? 2 : 1;
     const name = src.slice(nameStart, i).replace(/\\(.)/g, "$1");
+    assertEndpointName(name, src.slice(0, m.index).split("\n").length);
     i++;
     while (i < src.length && /\s/.test(src[i])) i++;
     if (src[i] !== ",") continue;
@@ -630,19 +677,29 @@ export function scanSpecIntents(root) {
 
 /* ---------- 产物生成 ---------- */
 
-/** 端点名 → PascalCase（"chat.ask" → "ChatAsk"，类型别名用） */
+/** 端点名 → PascalCase（"chat.ask" → "ChatAsk"，类型别名用）。派生不出合法标识符 = ATR-342
+ * （P1-8 派生闸：绝不产出 `type 1Input` 形态的编译不过产物）。 */
 function pascalOf(name) {
-  return name
+  const p = name
     .split(/[.\-_]+/)
     .filter(Boolean)
     .map((s) => s[0].toUpperCase() + s.slice(1))
     .join("");
+  if (!DERIVED_IDENT_RE.test(p)) {
+    die("ATR-342", `端点 ${name} 派生不出合法 TS 标识符（PascalCase → 「${p}」）`, '改端点名使其 PascalCase 化后是合法标识符，如 "chat.ask" → ChatAsk');
+  }
+  return p;
 }
 
-/** 端点名 → camelCase 导出标识符（"chat.ask" → "chatAsk"——§4.4 样例形态，调用点 .call(/.live( 的静态可 grep 面） */
+/** 端点名 → camelCase 导出标识符（"chat.ask" → "chatAsk"——§4.4 样例形态，调用点 .call(/.live( 的静态可 grep 面）。
+ * 产物是独立导出名（export const <c>）——撞 JS 保留字（如端点名 "delete"）= 生成物编译不过，ATR-342 拦截（P1-8）。 */
 function camelOf(name) {
   const p = pascalOf(name);
-  return p[0].toLowerCase() + p.slice(1);
+  const c = p[0].toLowerCase() + p.slice(1);
+  if (!DERIVED_IDENT_RE.test(c) || RESERVED_WORDS.has(c)) {
+    die("ATR-342", `端点 ${name} 派生不出合法导出标识符（camelCase → 「${c}」${RESERVED_WORDS.has(c) ? "——撞 JS 保留字" : ""}）`, '改端点名避免派生出保留字或非法标识符，如 "chat.ask" → chatAsk');
+  }
+  return c;
 }
 
 /** 相对 import 路径（posix 分隔；同目录补 ./） */
@@ -764,9 +821,10 @@ export function generateApi(root, opts = {}) {
       : "";
     L.push(`/** ${e.name}（${kindLabel}${e.authSurface ? "·auth 面" : ""}）—— POST ${mount}/${e.name}${e.live ? `；live SSE GET ${mount}/${e.name}/live（§4.3）` : ""}${authNote} */`);
     L.push(`export const ${camelOf(e.name)} = Object.freeze({`);
-    L.push(`  name: "${e.name}" as const,`);
+    // P1-8：端点名进生成码一律 JSON.stringify 转义（非法字符已在入口/派生闸 die——此处转义是纵深防御）
+    L.push(`  name: ${JSON.stringify(e.name)} as const,`);
     L.push(`  async call(input: ${inType}): Promise<${outType}> {`);
-    L.push(`    const res = await fetch("${mount}/${e.name}", {`);
+    L.push(`    const res = await fetch(${JSON.stringify(`${mount}/${e.name}`)}, {`);
     L.push(`      method: "POST",`);
     L.push(`      headers: { "content-type": "application/json" },`);
     L.push(`      body: JSON.stringify(input),`);
@@ -775,10 +833,11 @@ export function generateApi(root, opts = {}) {
     L.push(`    return (await res.json()) as ${outType};`);
     L.push(`  },`);
     if (e.live) {
+      const liveUrl = JSON.stringify(`${mount}/${e.name}/live?input=`); // P1-8：URL 进生成码 JSON.stringify 转义
       L.push(`  /** live 订阅：SSE data → streamValue 三态原语直通；error 事件 → ATR 四段式帧赋 sv.error（§8.3 已落地：订阅保持，不断流） */`);
       L.push(`  live(input: ${inType}) {`);
       L.push(`    const sv = streamValue<${outType}>();`);
-      L.push(`    const es = new EventSource("${mount}/${e.name}/live?input=" + encodeURIComponent(JSON.stringify(input)));`);
+      L.push(`    const es = new EventSource(${liveUrl} + encodeURIComponent(JSON.stringify(input)));`);
       L.push(`    es.addEventListener("data", (e) => {`);
       L.push(`      sv.push(JSON.parse((e as MessageEvent).data) as ${outType});`);
       L.push(`    });`);
@@ -914,7 +973,7 @@ export function scanApiClient(root) {
 
 /* ---------- CLI ---------- */
 
-function main() {
+function run() {
   const argv = process.argv.slice(2);
   const getOpt = (flag) => {
     const i = argv.indexOf(flag);
@@ -942,6 +1001,16 @@ function main() {
     if (sk.intents.length === 0) console.log(`  note: specs 未发现 ## 端点意图 段（§7.4 行格式：- <name>（<kind>）：描述）`);
   }
   console.log(`done（诚实清单如上；识别不了的形态记 note 不猜——文件头边界声明）`);
+}
+
+/** CLI 壳：四段式诊断上 stderr（error/fix 两行，同 gen-db CLI 形态）+ exit 1，不裸栈崩溃 */
+function main() {
+  try {
+    run();
+  } catch (e) {
+    console.error(`error: ${e.code ? `${e.code} ` : ""}${e.message}${e.fix ? `\nfix: ${e.fix}` : ""}`);
+    process.exit(1);
+  }
 }
 
 if (INVOKED_DIRECTLY) main();
