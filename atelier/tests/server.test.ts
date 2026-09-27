@@ -26,7 +26,8 @@ function makeRegistry(): EndpointRegistry {
   reg.register(
     defineQuery("live.feed", {
       live: true,
-      auth: { type: "session" },
+      // P1-5 后 live×auth(type≠none) 组合注册期拒绝（ATR-315）——显式免鉴权声明是与 live 合法的唯一 auth 形态
+      auth: { type: "none" },
       handler: () => ({ items: [] }),
     })
   );
@@ -43,7 +44,7 @@ describe("atelier-server 端点运行时（决策 18/20，FS-1）", () => {
     const feed = reg.get("live.feed")! as EndpointDef;
     expect(feed.kind).toBe("query");
     expect(feed.live).toBe(true);
-    expect(feed.auth?.type).toBe("session");
+    expect(feed.auth?.type).toBe("none");
     expect(reg.get("chat.send")!.kind).toBe("command");
   });
 
@@ -60,7 +61,7 @@ describe("atelier-server 端点运行时（决策 18/20，FS-1）", () => {
     const feed = summaries.find((s) => s.name === "live.feed")!;
     expect(feed.live).toBe(true);
     expect(feed.hasContract).toBe(false);
-    expect(feed.authType).toBe("session");
+    expect(feed.authType).toBe("none");
   });
 
   it("query POST 合法输入 → 200 JSON + kind/名 头", async () => {

@@ -369,3 +369,62 @@ describe("鉴权拦截（FS-DESIGN §6.2，FS-M2(m2d)：ATR-340/341 + setCookie 
     expect(summary.authRole).toBe("editor");
   });
 });
+
+/* ================= journal 敏感键脱敏（P1-6：写入单源 journalPush 收口） =================
+ * EndpointJournalEntry.input 记录完整输入对象（成功与失败条目同记），并经 GET /__atelier/server-status
+ * 全量吐出（introspect.ts）——auth.login 的密码明文由此进入 review 页/MCP 工具整条消费链。
+ * 修在 journal 写入单源（registry.journalPush 窄口，POST 分发与 live 引擎 ATR-321 失败条目同源）：
+ * 递归敏感键脱敏——键名含 password/secret/token/authorization 等词根（不区分大小写）→ 值替换 "[redacted]"。
+ */
+describe("journal 敏感键脱敏（P1-6：分发层源头收口，server-status/review/MCP 消费面同受保护）", () => {
+  it("红检：含 password 的 command 成功与失败两条，journal 条目不含明文密码；非敏感字段与键结构照常（回归）", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineCommand("auth.login", { handler: (input) => ({ ok: true, user: (input as { username?: string }).username }) }));
+    reg.register(
+      defineCommand("boom.cmd", {
+        handler: () => {
+          throw new Error("内部炸了");
+        },
+      })
+    );
+    const handler = reg.createHandler();
+    await post(handler, "auth.login", { username: "alice", password: "s3cret-pw-1", remember: true });
+    await post(handler, "boom.cmd", { username: "bob", password: "s3cret-pw-2", meta: { apiKey: "key-xyz", retries: 3, tags: ["a"] } });
+
+    expect(reg.journal().length).toBe(2);
+    const [okEntry, failEntry] = reg.journal();
+    // 成功条目：敏感键 → 占位，非敏感键照常
+    expect(okEntry.status).toBe("ok");
+    expect(okEntry.input).toEqual({ username: "alice", password: "[redacted]", remember: true });
+    // 失败条目同记同脱敏；嵌套对象递归
+    expect(failEntry.status).toBe("failed");
+    expect(failEntry.input).toEqual({ username: "bob", password: "[redacted]", meta: { apiKey: "[redacted]", retries: 3, tags: ["a"] } });
+    // 明文断言：整份 journal 序列化后不含任何明文敏感值
+    const dump = JSON.stringify(reg.journal());
+    expect(dump).not.toContain("s3cret-pw-1");
+    expect(dump).not.toContain("s3cret-pw-2");
+    expect(dump).not.toContain("key-xyz");
+  });
+
+  it("脱敏面：键名不区分大小写、词根命中（token/authorization/PASSWORD）即替换；数组内对象同脱敏；无敏感键输入原形状（回归）", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineCommand("sweep.cmd", { handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler();
+    await post(handler, "sweep.cmd", {
+      Password: "pw-upper",
+      accessToken: "tok-1",
+      AUTHORIZATION: "Bearer x",
+      api_key: "k-1",
+      identity: { Secret: "s-1", nested: [{ token: "t-2" }] },
+      plain: { note: "普通调试信息", nums: [1, 2] },
+    });
+    expect(reg.journal()[0].input).toEqual({
+      Password: "[redacted]",
+      accessToken: "[redacted]",
+      AUTHORIZATION: "[redacted]",
+      api_key: "[redacted]",
+      identity: { Secret: "[redacted]", nested: [{ token: "[redacted]" }] },
+      plain: { note: "普通调试信息", nums: [1, 2] }, // 非敏感结构原形状照常（排查可用）
+    });
+  });
+});
