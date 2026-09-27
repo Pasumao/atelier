@@ -432,7 +432,8 @@ function withTeardown<T>(set: Array<() => void>, build: () => T): T {
  * 读属性即读信号（getter 内 .value 触发 track ⇒ 子组件 effect 自动追踪）；
  * 父侧 effect 求值表达式回写信号（创建即归属实例/分支两级回收）。
  * 诚实边界：组件函数体内对 props 的直接读取仍是一次性（`$state(props.x)` 初始化语义不变，
- * 与主流框架 initial-only 一致）；prop 信号是真实信号——进入依赖图/journal/HMR 按序还原。
+ * 与主流框架 initial-only 一致）；prop 信号是真实信号——进入依赖图/journal，HMR 按
+ * 未命名创建序兜底还原（m11 边界②正修复后的既有语义，见 hmrSwap 注释）。
  */
 function bindProp(expr: string, scope: Record<string, unknown>, target: Record<string, unknown>, name: string): void {
   const sig = $state(__withTracking(() => evalExpr(expr, scope)).result);
@@ -1009,6 +1010,7 @@ function mountComponentInner(
   // P0-5 HMR：栈式创建收集——本次 render 新建的 $state 与 $effect 归属本实例（嵌套 mount 各自接管）
   const collected: Signal[] = [];
   const collectedEffects: Array<() => void> = [];
+  let tplScope: Record<string, unknown> = {}; // m11 边界②：.locals() scope（信号命名的单一来源）
   const prevSink = __creationSink.fn;
   __creationSink.fn = (s) => collected.push(s);
   const prevEffectSink = __effectSink.fn;
@@ -1017,6 +1019,7 @@ function mountComponentInner(
   let root!: HTMLElement;
   try {
     const tpl = def.render(props as never) ?? { raw: "", scope: {} };
+    tplScope = tpl.scope ?? {};
     const scope = { ...(tpl.scope ?? {}), props };
     const file = `components/${def.name}.atr.ts`;
     // P0-2③：已编译模板按 raw 精确命中 → 完全跳过 parseTemplate（该组件运行时零 tokenize）。
@@ -1050,6 +1053,7 @@ function mountComponentInner(
     validate,
     registry,
     signals: collected,
+    names: buildSignalNames(collected, tplScope),
     effects: collectedEffects,
     nested: mountDepth >= 1, // 记录时外层尚未自减：≥2 即嵌套挂载
   };
@@ -1066,11 +1070,19 @@ function mountComponentInner(
 /* ---- P0-5 HMR 热交换：保值重挂载 --------------------------------------
  * dev 插件给 *.atr.ts 注入 import.meta.hot.accept → 新模块重注册组件后调
  * window.__ATELIER_HMR_REMOUNT__()：对所有顶层活实例「快照信号值 → 卸旧树 →
- * 用新 def 重挂载 → 按创建序还原信号值」。按序还原是启发式（模板结构大改可能
- * 错位——多出的新信号保持初值，文档已标注）。已知边界（诚实标注）：
- *   · 模板结构大改时按序还原可能错位（多出的新信号保持初值）——P1-4 处置：保留为已文档化启发式
- *   · store 旧 checkpoint 引用被换信号，跨交换的 timeTravel 不回落到新信号——保留为已文档化边界
- *   （第三边界"旧 effects 不 dispose"已由 __effectSink + disposeInstance 关闭，P1-4）
+ * 用新 def 重挂载 → 按名锚定还原信号值」（m11 边界②③正修复）。
+ *
+ * 信号身份 = .locals() scope 里的变量名：scope 条目与创建沉降收集到的信号是同一
+ * 对象身份，运行时免费可得（尾巴原文「正修复需编译器闭包捕获」的前提经实读证伪
+ * ——无需编译器参与）。还原规则：
+ *   · 同名同实例对 → 按名还原（声明序重排/新增插队均不错位）；
+ *   · 改名/删除 → 保守不还原（绝不把旧值写进语义不同的新信号）；
+ *   · 未命名信号（prop 信号/未入 locals 的内部信号）→ 维持创建序启发式，
+ *     相对序在未命名子集内对齐（P0-5 既有语义，逐字保留）。
+ * 边界③同批关闭：checkpoint 快照按名重锚到新信号（快照值原样迁移，跨交换的
+ * timeTravel/rollback 回落到新信号、DOM 跟随）；改名/删除的旧条目保留原样
+ * （写死信号无害，与未挂载信号的既有口径一致）。
+ * （第三边界"旧 effects 不 dispose"已由 __effectSink + disposeInstance 关闭，P1-4）
  */
 type LiveInstance = {
   defName: string;
@@ -1080,6 +1092,8 @@ type LiveInstance = {
   validate: (schema: unknown, data: Record<string, unknown>) => { ok: boolean; error?: AtrError };
   registry: ComponentRegistry;
   signals: Signal[];
+  /** m11 边界②：信号 → .locals() scope 变量名（同名取首个；未入 scope 的信号不在表内） */
+  names: Map<Signal, string>;
   effects: Array<() => void>;
   nested: boolean;
 };
@@ -1108,12 +1122,26 @@ function reapDisconnected(): void {
   }
 }
 
+/** m11 边界②：信号命名表——scope 条目与收集信号同一对象身份，同名取首个（别名取先见者）。
+ * 只认本次 mount 收集到的信号（模块级共享信号不属实例，不在还原面——既有口径不变）。 */
+function buildSignalNames(collected: Signal[], scope: Record<string, unknown>): Map<Signal, string> {
+  const names = new Map<Signal, string>();
+  if (collected.length === 0 || !scope) return names;
+  const set = new Set(collected);
+  for (const [k, v] of Object.entries(scope)) {
+    if (set.has(v as Signal) && !names.has(v as Signal)) names.set(v as Signal, k);
+  }
+  return names;
+}
+
 function hmrSwap(): number {
   reapDisconnected(); // 先清陈旧（含上轮遗留），并处置其 effects
   let swapped = 0;
   for (const inst of [...liveInstances]) {
     if (inst.nested) continue;
-    const values = inst.signals.map((s) => s.get());
+    const values = inst.signals.map((s) => s.get()); // 未命名兜底用：创建序快照
+    const namedValues = new Map<string, unknown>(); // m11 边界②：按名快照（名称与创建序解耦）
+    for (const [s, name] of inst.names) namedValues.set(name, s.get());
     disposeInstance(inst); // 旧 effects 逐个 dispose + 摘除旧树 + 注销信号
     liveInstances.delete(inst);
     reapDisconnected(); // 顶层树移除后其嵌套实例随即断连——立即回收
@@ -1122,11 +1150,35 @@ function hmrSwap(): number {
     const root = mountComponentInner(def, inst.props, inst.container, inst.registry, inst.validate);
     const fresh = [...liveInstances].find((i) => i.root === root);
     if (fresh) {
-      fresh.signals.forEach((s, i) => {
-        if (i < values.length) {
-          try { s.set(values[i]); } catch { /* 只读信号跳过 */ }
+      const freshByName = new Map<string, Signal>();
+      for (const [s, name] of fresh.names) if (!freshByName.has(name)) freshByName.set(name, s);
+      // 按名还原：同名同实例对才写（改名/删除=保守不还原，绝不把旧值写进语义不同的新信号）
+      for (const [s, name] of fresh.names) {
+        if (namedValues.has(name)) {
+          try { s.set(namedValues.get(name) as never); } catch { /* 只读信号跳过 */ }
+        }
+      }
+      // 未命名信号维持创建序启发式：相对序在未命名子集内对齐（prop 信号/内部信号，P0-5 既有语义）
+      const oldUnnamed = inst.signals.filter((s) => !inst.names.has(s));
+      const newUnnamed = fresh.signals.filter((s) => !fresh.names.has(s));
+      newUnnamed.forEach((s, i) => {
+        if (i < oldUnnamed.length) {
+          try { s.set(oldUnnamed[i].get() as never); } catch { /* 只读信号跳过 */ }
         }
       });
+      // m11 边界③：checkpoint 快照按名重锚——跨交换 timeTravel/rollback 回落到新信号。
+      // 快照值原样迁移（非当前值）；改名/删除的旧条目保留原样（写死信号无害）。
+      for (const cp of store._checkpoints) {
+        for (const [oldSig, name] of inst.names) {
+          if (!cp.snap.has(oldSig)) continue;
+          const target = freshByName.get(name);
+          if (target && !cp.snap.has(target)) {
+            const v = cp.snap.get(oldSig);
+            cp.snap.delete(oldSig);
+            cp.snap.set(target, v);
+          }
+        }
+      }
       swapped++;
     }
   }
