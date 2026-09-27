@@ -90,17 +90,17 @@ node <atelier仓库路径>/atelier/mcp/server.mjs   # MCP 工具面（ATELIER_PR
 
 AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@num:tools-->36<!--@/--> 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按面分组按需启用）· W3C Design Tokens（DTCG）标准互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`）。
 
-## 性能基线（`atelier bench` 实测 2026-09-06 / Windows / Node 24）
+## 性能基线（`atelier bench` 实测 2026-09-27 / Windows / Node 24 · 1.0 发布前复测口径）
 
 | 指标 | 目标 | 实测 | 判定 |
 |---|---|---|---|
-| 核心运行时体积 | gzip ≤ 30 KB | **9.09 KB** | PASS |
-| 10³ 节点挂载+首渲染 | ≤ 50 ms | **3.2 ms** | PASS |
-| HMR（保存→可见） | ≤ 100 ms | **52 ms**（热交换保留 `$state`，不清零） | PASS |
-| 截图回环 | ≤ 500 ms | **267 ms**（常驻无头实例） | PASS |
+| 核心运行时体积 | gzip ≤ 30 KB | **12.28 KB** | PASS |
+| 10³ 节点挂载+首渲染 | ≤ 50 ms | **3.7 ms** | PASS |
+| HMR（保存→可见） | ≤ 100 ms | **51 ms**（热交换按名锚定保留 `$state`，不清零） | PASS |
+| 截图回环 | ≤ 500 ms | **318 ms**（常驻无头实例） | PASS |
 
 复现：`node atelier/cli.mjs init --target my-app --name App && cd my-app && pnpm install && node <atelier仓库路径>/atelier/cli.mjs bench --app ./my-app`。
-诚实性：FAIL 不粉饰、不豁免；数字会随修复移动（HMR 曾 108ms → 52ms，截图曾 1933ms → 267ms）。
+诚实性：FAIL 不粉饰、不豁免；数字会随修复移动（HMR 曾 108ms → 51ms，截图曾 1933ms → 318ms；体积自 09-06 的 9.09KB 随 bind 指令族/事件修饰/schema 提取/error 语义增长至 12.28KB，仍远低于判据）。
 
 ## 路线与现状（详见 ROADMAP.md）
 
@@ -113,7 +113,7 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 - **未发布 npm**：需 clone 仓库使用；无第三方生产用户。
 - **全站化推进中**：FS-M1 已落地（`atelier/server` 端点运行时 + Standard Schema 互操作口 + SQLite 薄宿主适配，决策 17-23）；生成器 / 迁移 / MCP 全栈工具族未落地，见 `BACKLOG.md` FS 线。
 - **正确率主张克制**：三臂对照实验在简单层与加难层（Wave-7 正式波 45 run）均全平——绝对口径 100% 达标、相对区分力为零；「技能包优势」主张悬置待干扰面/混合实验出数，我们不引用任何"首遍正确率优势"数字，请引用者同样克制。
-- **性能数字为单机实测**（2026-09-06 / Windows / Node 24），会随修复移动。
+- **性能数字为单机实测**（2026-09-27 / Windows / Node 24，1.0 发布前复测；上轮 2026-09-06），会随修复移动。
 - **未实现即明说**：CLI 命令按实现程度标注（完整 / 最小 / 未实现），未实现的命令返回 exit 4 并指路规格文档，永不伪造成功。
 - 所有"未确认"结论明确标注，不写成事实。
 
