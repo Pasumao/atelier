@@ -6,7 +6,8 @@
  * POST-free GET /__atelier/screenshot (transient headless instance, waits for mount).
  *
  * Semantics honour the acceptance discipline (SPEC §5):
- *   save          capture → .atr/snapshots/baseline.png (git-managed truth)
+ *   save          capture → .atr/snapshots/<platform>/baseline.png (git-managed truth; per-platform
+ *                 since m10 批 C — win32/linux/darwin render differently, one baseline per platform)
  *   check         capture fresh → compare vs baseline on TWO tiers (P1-8):
  *                 byte sha256 equal → MATCH
  *                 bytes differ, pixel mismatchRatio (in-instance canvas evaluate) ≤
@@ -16,22 +17,65 @@
  *                 Never auto-promotes: only explicit `--update` promotes after human review.
  *   check --update compare-then-promote (intended for intentional changes reviewed by humans)
  *
+ * Per-platform resolution is exported here as pure functions and consumed by
+ * scripts/checkpoint.mjs's snapshot gate (single source — the old duplicated path
+ * construction in checkpoint.mjs is gone; m10 批 C). Legacy flat baselines
+ * (.atr/snapshots/baseline.png, pre-m10) are still READ as a fallback (with a re-save
+ * hint) — never auto-migrated, never auto-promoted.
+ *
  * Every save/check writes a receipt to .atelier/snapshot-lastcheck.json (P2-2) so
  * `checkpoint save` can enforce 未检不锚 (no anchoring a tree whose snapshot gate is red).
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const DEV = process.env.ATELIER_DEV_URL ?? "http://127.0.0.1:5173";
-const SNAPDIR = path.join(process.cwd(), ".atr", "snapshots");
-const BASE = path.join(SNAPDIR, "baseline.png");
-const CURR = path.join(SNAPDIR, "current.png");
+
+/* ---- per-platform baseline path resolution (m10 批 C) — exported pure functions,
+ *      consumed by snapshot CLI below AND scripts/checkpoint.mjs (single source) ---- */
+
+/** Baseline directory platform key: win32 / linux / darwin (process.platform). */
+export function platformKey(platform = process.platform) {
+  return platform;
+}
+
+/** `.atr/snapshots/<platform>/` under the given root (app dir or repo root). */
+export function snapshotsDir(root = process.cwd(), platform = process.platform) {
+  return path.join(root, ".atr", "snapshots", platformKey(platform));
+}
+
+/** Per-platform baseline path. */
+export function baselinePathFor(root = process.cwd(), platform = process.platform) {
+  return path.join(snapshotsDir(root, platform), "baseline.png");
+}
+
+/** Per-platform current-capture path. */
+export function currentPathFor(root = process.cwd(), platform = process.platform) {
+  return path.join(snapshotsDir(root, platform), "current.png");
+}
+
+/** Legacy flat baseline (pre-m10 layout) — read-only fallback, never auto-migrated. */
+export function legacyBaselinePath(root = process.cwd()) {
+  return path.join(root, ".atr", "snapshots", "baseline.png");
+}
+
+/** Effective baseline resolution: platform baseline wins; legacy flat baseline is a
+ * read-only fallback (legacy: true → caller prints the re-save hint); neither →
+ * missing: true (the snapshot gate's vacuous-ladder input). */
+export function resolveBaseline(root = process.cwd(), platform = process.platform) {
+  const base = baselinePathFor(root, platform);
+  if (fs.existsSync(base)) return { path: base, legacy: false };
+  const legacy = legacyBaselinePath(root);
+  if (fs.existsSync(legacy)) return { path: legacy, legacy: true };
+  return { path: base, legacy: false, missing: true };
+}
 
 const sha256 = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 
 /** render-relevant source fingerprint (P2-2 gate) — MUST stay in sync with scripts/checkpoint.mjs */
-function sourceFingerprint(root = process.cwd()) {
+export function sourceFingerprint(root = process.cwd()) {
   const h = crypto.createHash("sha256");
   const files = [];
   const walk = (dir, depth) => {
@@ -78,56 +122,72 @@ async function captureTo(file, query = "") {
   if (!r.ok) throw new Error(`dev face HTTP ${r.status} (is 'atelier dev' running at ${DEV}?)`);
   const j = await r.json();
   if (!j.ok || !j.imageBase64) throw new Error(j.error ?? "screenshot payload missing");
-  fs.mkdirSync(SNAPDIR, { recursive: true });
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, Buffer.from(j.imageBase64, "base64"));
   return j;
 }
 
+/* ---- CLI body — main-module guarded (m10 批 C) so tests can import the pure
+ *      functions above without executing the capture flow. cli.mjs spawns this file
+ *      directly, so the guard holds for the real CLI path (argv[1] = this file). ---- */
 const [, , cmd, ...flags] = process.argv;
-try {
-  if (cmd === "save") {
-    await captureTo(BASE);
-    writeReceipt({ result: "SAVED", baselineSha: sha256(BASE), sourceFp: sourceFingerprint() });
-    console.log(`baseline saved → ${path.relative(process.cwd(), BASE)} (${Math.round(fs.statSync(BASE).size / 1024)} KB)`);
-    console.log('remember: the baseline is git-managed truth — commit it with the change it validates.');
-  } else if (cmd === "check" || cmd === undefined) {
-    const j = await captureTo(CURR, "?compare=1"); // P1-8: 同实例像素级对比
-    if (!fs.existsSync(BASE)) {
-      console.error(`error: no baseline at ${path.relative(process.cwd(), BASE)}`);
-      console.error("fix: run 'atelier snapshot save' once the page looks right, then treat it as the regression floor.");
-      process.exit(1);
-    }
-    const baseSha = sha256(BASE);
-    const curSha = sha256(CURR);
-    const same = baseSha === curSha;
-    const threshold = Number(j.threshold ?? 0.12);
-    const ratio = j.pixelDiff ? j.pixelDiff.mismatchRatio : null;
-    // verdict ladder: byte-equal → MATCH；bytes differ but pixels within threshold → PIXMATCH
-    // （字体抗锯齿/亚像素抖动不是回归）；否则 MISMATCH
-    const verdict = same ? "MATCH" : ratio !== null && !j.pixelDiff.dimsDiffer && ratio <= threshold ? "PIXMATCH" : "MISMATCH";
-    writeReceipt({ result: verdict, baselineSha: baseSha, currentSha: curSha, sourceFp: sourceFingerprint(), pixelRatio: ratio, threshold });
-    console.log(`current  → ${path.relative(process.cwd(), CURR)}`);
-    console.log(`baseline → ${path.relative(process.cwd(), BASE)}`);
-    if (verdict === "MATCH") {
-      console.log("MATCH — pixel-stable against baseline ✔");
-    } else if (verdict === "PIXMATCH") {
-      console.log(`PIXMATCH — bytes differ but pixel mismatchRatio ${ratio.toExponential(2)} ≤ threshold ${threshold} ✔ (fonts/AA jitter is not a regression)`);
-      console.log("review note: promotion still requires human eyes — never auto-promote to silence red.");
+const isMain = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
+if (isMain) {
+  try {
+    if (cmd === "save") {
+      const BASE = baselinePathFor();
+      await captureTo(BASE);
+      writeReceipt({ result: "SAVED", baselineSha: sha256(BASE), sourceFp: sourceFingerprint() });
+      console.log(`baseline saved → ${path.relative(process.cwd(), BASE)} (${Math.round(fs.statSync(BASE).size / 1024)} KB)`);
+      console.log('remember: the baseline is git-managed truth — commit it with the change it validates.');
+    } else if (cmd === "check" || cmd === undefined) {
+      const CURR = currentPathFor();
+      const j = await captureTo(CURR, "?compare=1"); // P1-8: 同实例像素级对比
+      const resolved = resolveBaseline();
+      if (resolved.missing) {
+        console.error(`error: no baseline at ${path.relative(process.cwd(), resolved.path)}`);
+        console.error("fix: run 'atelier snapshot save' once the page looks right, then treat it as the regression floor.");
+        process.exit(1);
+      }
+      const BASE = resolved.path;
+      if (resolved.legacy) {
+        console.log("note: legacy flat baseline (.atr/snapshots/baseline.png) detected — re-run 'snapshot save' to arm the per-platform layout (win32/linux/darwin). Read-only fallback; never auto-migrated.");
+      }
+      const baseSha = sha256(BASE);
+      const curSha = sha256(CURR);
+      const same = baseSha === curSha;
+      const threshold = Number(j.threshold ?? 0.12);
+      const ratio = j.pixelDiff ? j.pixelDiff.mismatchRatio : null;
+      // verdict ladder: byte-equal → MATCH；bytes differ but pixels within threshold → PIXMATCH
+      // （字体抗锯齿/亚像素抖动不是回归）；否则 MISMATCH
+      const verdict = same ? "MATCH" : ratio !== null && !j.pixelDiff.dimsDiffer && ratio <= threshold ? "PIXMATCH" : "MISMATCH";
+      writeReceipt({ result: verdict, baselineSha: baseSha, currentSha: curSha, sourceFp: sourceFingerprint(), pixelRatio: ratio, threshold });
+      console.log(`current  → ${path.relative(process.cwd(), CURR)}`);
+      console.log(`baseline → ${path.relative(process.cwd(), BASE)}`);
+      if (verdict === "MATCH") {
+        console.log("MATCH — pixel-stable against baseline ✔");
+      } else if (verdict === "PIXMATCH") {
+        console.log(`PIXMATCH — bytes differ but pixel mismatchRatio ${ratio.toExponential(2)} ≤ threshold ${threshold} ✔ (fonts/AA jitter is not a regression)`);
+        console.log("review note: promotion still requires human eyes — never auto-promote to silence red.");
+      } else {
+        const ratioNote = ratio !== null ? ` (pixel mismatchRatio ${ratio.toExponential(2)} > threshold ${threshold})` : "";
+        console.error(`MISMATCH — render differs from baseline${ratioNote}.`);
+        console.error("fix: REVIEW both images side by side; if the change is intended, run 'atelier snapshot check --update' to promote. Never auto-promote to silence red.");
+        if (flags.includes("--update")) {
+          // --update 晋升到 per-platform 新布局路径（旧布局文件保持只读——绝不自动迁移/删除）
+          const target = baselinePathFor();
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.copyFileSync(CURR, target);
+          writeReceipt({ result: "SAVED", baselineSha: sha256(target), sourceFp: sourceFingerprint() });
+          console.log("promoted (--update): current → baseline. Commit both together with the change rationale.");
+        } else process.exit(1);
+      }
     } else {
-      const ratioNote = ratio !== null ? ` (pixel mismatchRatio ${ratio.toExponential(2)} > threshold ${threshold})` : "";
-      console.error(`MISMATCH — render differs from baseline${ratioNote}.`);
-      console.error("fix: REVIEW both images side by side; if the change is intended, run 'atelier snapshot check --update' to promote. Never auto-promote to silence red.");
-      if (flags.includes("--update")) {
-        fs.copyFileSync(CURR, BASE);
-        writeReceipt({ result: "SAVED", baselineSha: sha256(BASE), sourceFp: sourceFingerprint() });
-        console.log("promoted (--update): current → baseline. Commit both together with the change rationale.");
-      } else process.exit(1);
+      console.error("usage: snapshot save | check [--update]");
+      process.exit(2);
     }
-  } else {
-    console.error("usage: snapshot save | check [--update]");
-    process.exit(2);
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(1);
   }
-} catch (e) {
-  console.error(`error: ${e.message}`);
-  process.exit(1);
 }
