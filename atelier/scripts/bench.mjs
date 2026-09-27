@@ -25,9 +25,20 @@ import { openTransientBrowser } from "../dev/dev-screenshot.mjs";
 const TARGETS = { bundleGzipKB: 30, mountMs: 50, hmrMs: 100, screenshotMs: 500 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function die(message, fix) {
-  console.error(`error: ${message}${fix ? `\nfix: ${fix}` : ""}`);
-  process.exit(1);
+// P1-10（建议书 A5）：die 改抛专用错误——退出统一收口到外层 catch/finally 之后，失败路径也走
+// finally 清理（关浏览器/killTree/删生成物），不再有 process.exit 跳过 finally 留下孤儿 dev server
+// 占住 strictPort（下次 bench 的 waitUp 只探端口可达，会对陈旧实例出数）
+class DieExit extends Error {
+  constructor(msg, code) {
+    super(msg);
+    this.name = "DieExit";
+    this.dieExit = true;
+    this.code = code;
+  }
+}
+// die 签名全仓大一统（建议书 A5）：die(msg, code = 2)——msg 单串自含 error/fix 全部文案
+function die(msg, code = 2) {
+  throw new DieExit(msg, code);
 }
 
 const argv = process.argv.slice(2);
@@ -38,16 +49,19 @@ const JSON_OUT = argv.includes("--json");
 const KEEP = argv.includes("--keep");
 const DEV = `http://127.0.0.1:${PORT}`;
 
-if (!fs.existsSync(path.join(APP, "package.json"))) die(`no app at ${APP}`, "pass an init'd Atelier app (--app <dir>)");
-if (!fs.existsSync(path.join(APP, "node_modules"))) die("app deps not installed", `cd ${APP} && pnpm install`);
-if (!fs.existsSync(path.join(APP, "src", "runtime"))) die("no vendored runtime at src/runtime", "re-init the app: atelier init --target . --name <Name>");
-
 const results = {};
 const BENCH_HTML = path.join(APP, "bench.html");
 const BENCH_TS = path.join(APP, "bench-main.ts");
 const BENCH_PROBE = path.join(APP, "bench-probe.atr.ts"); // .atr.ts 后缀 → dev 插件注入 HMR accept（P0-5 路径）
 const BENCH_DIST = path.join(APP, ".atelier", "bench-dist");
 const generated = [];
+const APP_OK = () => {
+  // 前提检查（原在模块顶层的三个 die 前置门——die 改 throw 后移入 run 的 try 由外层 catch 承接，
+  // 语义不变：缺件即非零退出 + error/fix 双行）
+  if (!fs.existsSync(path.join(APP, "package.json"))) die(`error: no app at ${APP}\nfix: pass an init'd Atelier app (--app <dir>)`, 1);
+  if (!fs.existsSync(path.join(APP, "node_modules"))) die(`error: app deps not installed\nfix: cd ${APP} && pnpm install`, 1);
+  if (!fs.existsSync(path.join(APP, "src", "runtime"))) die(`error: no vendored runtime at src/runtime\nfix: re-init the app: atelier init --target . --name <Name>`, 1);
+};
 
 function writeBenchFiles() {
   generated.push(BENCH_HTML, BENCH_TS, BENCH_PROBE);
@@ -226,68 +240,84 @@ async function benchBundle() {
 
 /* ---------- run ---------- */
 const log = (m) => { if (!JSON_OUT) console.error(`[bench] ${m}`); };
-const server = startDevServer();
-let cdpSession = null;
+// P1-10：外层 try/catch 收口——die 抛 DieExit 由 catch 记录，finally（关浏览器/killTree/清理）
+// 在任何失败路径都先执行，之后才以非零码退出；成功路径自然落出（stdout JSON 完整冲刷）
+let exitCode = 0;
 try {
-  log(`starting dev server on :${PORT} …`);
-  if (!(await waitUp(60000))) die("dev server never came up on port " + PORT, "check the app starts: pnpm dev");
-  log("dev server up");
+  APP_OK();
+  const server = startDevServer();
+  let cdpSession = null;
+  try {
+    log(`starting dev server on :${PORT} …`);
+    if (!(await waitUp(60000))) die(`error: dev server never came up on port ${PORT}\nfix: check the app starts: pnpm dev`, 1);
+    log("dev server up");
 
-  writeBenchFiles();
-  // bench.html 首次写入发生在 server 起来之后没关系——vite 按请求转换
-  log("spawning transient browser (cdp :9346) …");
-  cdpSession = await openTransientBrowser({ debugPort: 9346 });
-  const { cdp } = cdpSession;
-  await cdp.send("Page.enable");
-  await cdp.send("Page.navigate", { url: `${DEV}/bench.html` });
-  await cdp.waitEvent("Page.loadEventFired", 20000);
-  log("bench page navigating …");
+    writeBenchFiles();
+    // bench.html 首次写入发生在 server 起来之后没关系——vite 按请求转换
+    log("spawning transient browser (cdp :9346) …");
+    cdpSession = await openTransientBrowser({ debugPort: 9346 });
+    const { cdp } = cdpSession;
+    await cdp.send("Page.enable");
+    await cdp.send("Page.navigate", { url: `${DEV}/bench.html` });
+    await cdp.waitEvent("Page.loadEventFired", 20000);
+    log("bench page navigating …");
 
-  // wait for page bootstrap
-  let ready = false;
-  for (let i = 0; i < 60; i++) {
-    try { if (await evalIn(cdp, "window.__BENCH_READY__ === true")) { ready = true; break; } } catch { /* retry */ }
-    await sleep(500);
-  }
-  if (!ready) die("bench page never became ready", "check bench-main.ts compiled (vite logs)");
-
-  log("①/② mount bench (7 samples, 10³ nodes) …");
-  results.mount = await benchMount(cdp);
-  log(`③ HMR probe …`);
-  results.hmr = await benchHmr(cdp);
-  log("④ screenshot roundtrip (3 samples) …");
-  results.screenshot = await benchScreenshot();
-  log("runtime bundle + gzip -9 (app's vite build) …");
-  results.bundle = await benchBundle();
-
-  const verdicts = {
-    bundleGzipKB: { value: +(results.bundle.gzipBytes / 1024).toFixed(2), target: TARGETS.bundleGzipKB, pass: results.bundle.gzipBytes / 1024 <= TARGETS.bundleGzipKB, unit: "KB gzip -9" },
-    mountMedianMs: { value: +results.mount.median.toFixed(2), target: TARGETS.mountMs, pass: results.mount.median <= TARGETS.mountMs, unit: "ms (10³ nodes, median/7)", extra: `nodes=${results.mount.nodes}` },
-    hmrMs: { value: results.hmr.latencyMs, target: TARGETS.hmrMs, pass: results.hmr.latencyMs !== null && results.hmr.latencyMs <= TARGETS.hmrMs, unit: "ms save→visible", note: results.hmr.note },
-    screenshotMs: { value: results.screenshot.median, target: TARGETS.screenshotMs, pass: results.screenshot.median <= TARGETS.screenshotMs, unit: "ms roundtrip (median/3)" },
-  };
-  results.verdicts = verdicts;
-
-  if (JSON_OUT) {
-    console.log(JSON.stringify(results, null, 2));
-  } else {
-    console.log(`\nAtelier 性能基线 — SPEC §7 (${new Date().toISOString()})`);
-    console.log("─".repeat(74));
-    for (const [k, v] of Object.entries(verdicts)) {
-      const val = v.value === null ? "n/a" : `${v.value}${v.unit.startsWith("KB") ? " " + v.unit.split(" ")[0] : " ms"}`;
-      console.log(`${v.pass ? "PASS" : "FAIL"}  ${k.padEnd(16)} ${String(val).padEnd(16)} 目标 ${v.target}${v.note ? `  — ${v.note}` : ""}${v.extra ? `  (${v.extra})` : ""}`);
+    // wait for page bootstrap
+    let ready = false;
+    for (let i = 0; i < 60; i++) {
+      try { if (await evalIn(cdp, "window.__BENCH_READY__ === true")) { ready = true; break; } } catch { /* retry */ }
+      await sleep(500);
     }
-    console.log("─".repeat(74));
-    const fails = Object.entries(verdicts).filter(([, v]) => !v.pass);
-    if (fails.length) {
-      console.log(`FAIL×${fails.length} — 按 SPEC §7，超标项转为 P0 修复工单（详见 docs/BACKLOG.md），不默认豁免。`);
-    } else console.log("ALL PASS ✔");
-    console.log(`full results → ${path.join(APP, ".atelier", "bench.json")}`);
+    if (!ready) die(`error: bench page never became ready\nfix: check bench-main.ts compiled (vite logs)`, 1);
+
+    log("①/② mount bench (7 samples, 10³ nodes) …");
+    results.mount = await benchMount(cdp);
+    log(`③ HMR probe …`);
+    results.hmr = await benchHmr(cdp);
+    log("④ screenshot roundtrip (3 samples) …");
+    results.screenshot = await benchScreenshot();
+    log("runtime bundle + gzip -9 (app's vite build) …");
+    results.bundle = await benchBundle();
+
+    const verdicts = {
+      bundleGzipKB: { value: +(results.bundle.gzipBytes / 1024).toFixed(2), target: TARGETS.bundleGzipKB, pass: results.bundle.gzipBytes / 1024 <= TARGETS.bundleGzipKB, unit: "KB gzip -9" },
+      mountMedianMs: { value: +results.mount.median.toFixed(2), target: TARGETS.mountMs, pass: results.mount.median <= TARGETS.mountMs, unit: "ms (10³ nodes, median/7)", extra: `nodes=${results.mount.nodes}` },
+      hmrMs: { value: results.hmr.latencyMs, target: TARGETS.hmrMs, pass: results.hmr.latencyMs !== null && results.hmr.latencyMs <= TARGETS.hmrMs, unit: "ms save→visible", note: results.hmr.note },
+      screenshotMs: { value: results.screenshot.median, target: TARGETS.screenshotMs, pass: results.screenshot.median <= TARGETS.screenshotMs, unit: "ms roundtrip (median/3)" },
+    };
+    results.verdicts = verdicts;
+
+    if (JSON_OUT) {
+      console.log(JSON.stringify(results, null, 2));
+    } else {
+      console.log(`\nAtelier 性能基线 — SPEC §7 (${new Date().toISOString()})`);
+      console.log("─".repeat(74));
+      for (const [k, v] of Object.entries(verdicts)) {
+        const val = v.value === null ? "n/a" : `${v.value}${v.unit.startsWith("KB") ? " " + v.unit.split(" ")[0] : " ms"}`;
+        console.log(`${v.pass ? "PASS" : "FAIL"}  ${k.padEnd(16)} ${String(val).padEnd(16)} 目标 ${v.target}${v.note ? `  — ${v.note}` : ""}${v.extra ? `  (${v.extra})` : ""}`);
+      }
+      console.log("─".repeat(74));
+      const fails = Object.entries(verdicts).filter(([, v]) => !v.pass);
+      if (fails.length) {
+        console.log(`FAIL×${fails.length} — 按 SPEC §7，超标项转为 P0 修复工单（详见 docs/BACKLOG.md），不默认豁免。`);
+      } else console.log("ALL PASS ✔");
+      console.log(`full results → ${path.join(APP, ".atelier", "bench.json")}`);
+    }
+    fs.mkdirSync(path.join(APP, ".atelier"), { recursive: true });
+    fs.writeFileSync(path.join(APP, ".atelier", "bench.json"), JSON.stringify(results, null, 2) + "\n");
+  } finally {
+    try { cdpSession?.close(); } catch { /* already gone */ }
+    try { server.killTree(); } catch { /* already gone */ }
+    cleanupBenchFiles();
   }
-  fs.mkdirSync(path.join(APP, ".atelier"), { recursive: true });
-  fs.writeFileSync(path.join(APP, ".atelier", "bench.json"), JSON.stringify(results, null, 2) + "\n");
-} finally {
-  try { cdpSession?.close(); } catch { /* already gone */ }
-  try { server.killTree(); } catch { /* already gone */ }
-  cleanupBenchFiles();
+} catch (e) {
+  // die（DieExit）= 已格式化文案直接上报；意外异常 = 连栈上报（诊断面不缩水）；exit 一律非零
+  if (e?.dieExit) {
+    console.error(e.message);
+    exitCode = e.code ?? 1;
+  } else {
+    console.error(e?.stack ?? String(e));
+    exitCode = 1;
+  }
 }
+if (exitCode) process.exit(exitCode);
