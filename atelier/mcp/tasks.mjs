@@ -125,7 +125,9 @@ export function createTaskStore({ now = () => Date.now(), ttlMs = DEFAULT_TTL_MS
       return view(rec);
     },
 
-    /** 取消：queued/running → cancelled 终态 + abort 信号（协作式；同步段不可中断，如实落终态） */
+    /** 取消：queued/running → cancelled 终态 + abort 信号。P1-11 起 run 侧（http.mjs → callTool
+     * → spawnCaptured）把 signal 接到子进程树杀——cancel 即真终止，不再是「对同步段无效」的
+     * 空信号；残余诚实边界：run 的纯同步 CPU 段（不经过 signal 的代码）仍不可中断。 */
     cancel(taskId) {
       sweep();
       const rec = tasks.get(String(taskId ?? ""));

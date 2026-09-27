@@ -30,7 +30,7 @@ import path from "node:path";
 import url from "node:url";
 import readline from "node:readline";
 import crypto from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { inspectStructure } from "../scripts/struct.mjs";
 import {
   readAgentConfig,
@@ -164,10 +164,84 @@ async function bridgeCall(op, args = {}, ctx = defaultCtx()) {
   );
 }
 
-/** run scripts/checkpoint.mjs in the app root; its --json payload is stdout (pretty for list, single-line for save/rollback) */
-function checkpointCli(args, cwd) {
+/* ---------- P1-11：长操作异步 spawn。spawnSync 在 /__atelier/mcp 直连形态下跑在 Vite 进程内，
+ * checkpoint/test.run 一触发即冻结页面服务/HMR/SSE 到子进程结束，且 Tasks 的 abort 信号对其无效。
+ * 这里改为 spawn + stdio 流式收集（promise 包装），超时/abort 一律树杀——win32 参照仓库既有
+ * taskkill /T /F 写法（scripts/bench.mjs:135 / scripts/snapshot-smoke.mjs:48），POSIX 用独立
+ * 进程组负 pid 组杀；结果形状与 spawnSync 同构（{ status, stdout, stderr, error }，超时
+ * ETIMEDOUT / 取消 ABORT_ERR 同款错误码），调用面最小改动。 */
+function killTree(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return; // 已退出
+  try {
+    if (process.platform === "win32") {
+      // 树杀必须同步落地：fire-and-forget 的异步 taskkill 在宿主紧随 cancel 退出时会被
+      // process.exit 连线程池里未分发的 CreateProcess 一起丢弃——实测整树漏杀（红检④）。
+      // 同步开销有界（taskkill /F 树走查典型 50~300ms，10s 自保超时），仅发生在
+      // cancel/timeout 路径，且完成后才 settle——resolution 即树已死。
+      if (child.pid) spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 10_000 });
+    } else {
+      try { process.kill(-child.pid, "SIGTERM"); } // detached → 独立进程组，组杀含孙进程
+      catch { child.kill("SIGTERM"); }
+    }
+  } catch { /* best-effort：kill 失败不改变 promise 的 settle 语义 */ }
+}
+
+export function spawnCaptured(cmd, args, { cwd, timeoutMs, shell = false, signal, env } = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    let timer = null;
+    const child = spawn(cmd, args, {
+      cwd,
+      shell,
+      env,
+      windowsHide: true,
+      detached: process.platform !== "win32", // POSIX 树杀依赖独立进程组
+    });
+    const finish = (patch) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve({ status: null, stdout, stderr, error: null, ...patch });
+    };
+    const onAbort = () => {
+      killTree(child);
+      finish({ error: Object.assign(new Error("operation was aborted"), { code: "ABORT_ERR" }), aborted: true });
+    };
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    }
+    if (timeoutMs) {
+      timer = setTimeout(() => {
+        killTree(child);
+        finish({ error: Object.assign(new Error("operation timed out"), { code: "ETIMEDOUT" }), timedOut: true });
+      }, timeoutMs);
+      timer.unref?.(); // 子进程被外部收尸时不让 timer 单独挂住宿主事件循环
+    }
+    child.stdout?.on("data", (c) => { stdout += c; });
+    child.stderr?.on("data", (c) => { stderr += c; });
+    child.on("error", (e) => finish({ error: e })); // spawn 失败（ENOENT 等；close 可能不触发）
+    child.on("close", (code) => finish({ status: code }));
+  });
+}
+
+/** run scripts/checkpoint.mjs in the app root; its --json payload is stdout (pretty for list, single-line for save/rollback)
+ *  P1-11：异步 spawn（门禁内建跑全量测试套件，601s 兜底超时防无限悬挂）；signal 供 Tasks cancel 树杀。 */
+async function checkpointCli(args, cwd, signal = null) {
   const script = path.join(HERE, "..", "scripts", "checkpoint.mjs");
-  const r = spawnSync(process.execPath, [script, ...args], { cwd, encoding: "utf8" });
+  const r = await spawnCaptured(process.execPath, [script, ...args], { cwd, timeoutMs: 601_000, signal });
+  if (r.error) {
+    if (r.error.code === "ETIMEDOUT") {
+      throw toolError("ATR-4xx-checkpoint: checkpoint run timed out after 601s", "run checkpoint via CLI ('atelier checkpoint <verb>') to inspect — the gate suite may be hung");
+    }
+    if (r.error.code === "ABORT_ERR") {
+      throw toolError("ATR-4xx-checkpoint: checkpoint run cancelled", "re-issue the checkpoint tool when ready");
+    }
+    throw toolError(`ATR-4xx-checkpoint: checkpoint run terminated (${r.error.code ?? "killed"})`, "run checkpoint via CLI ('atelier checkpoint <verb>') to inspect");
+  }
   const errLines = (r.stderr ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
   if (r.status !== 0) {
     const msg = (errLines.find((l) => l.startsWith("error: ")) ?? errLines.at(-1) ?? `checkpoint exited ${r.status}`).replace(/^error: /, "");
@@ -180,8 +254,11 @@ function checkpointCli(args, cwd) {
   try { return JSON.parse(last); } catch { return { ok: true, raw: last }; }
 }
 
-export async function callTool(name, args, ctx = defaultCtx()) {
+export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
   const PROJECT_ROOT = ctx.projectRoot;
+  /** P1-11：可选取消信号（Tasks 扩展 server 主导创建时经 http.mjs 注入）——长操作子进程随
+   * tasks.cancel 即时树杀；stdio 直调不传，行为与既有完全一致。 */
+  const signal = opts?.signal ?? null;
 
   /* ---- confirm 三档（决策 15 + FS-M6 §10.2 多轮审批）：deny 墙语义照旧；ask 档走
    *      InputRequiredResult + requestState 两轮——首轮不执行只发审批句柄，二轮携
@@ -240,13 +317,13 @@ export async function callTool(name, args, ctx = defaultCtx()) {
   /* decision-15 source checkpoints: thin spawn over scripts/checkpoint.mjs — same code path as the
    * CLI, so the P2-2 未检不锚 snapshot gate applies identically to MCP-originated anchors. No
    * --no-gate over the wire: the escape hatch stays a human CLI act. */
-  if (name === "checkpoint.source_list") return checkpointCli(["list", "--json"], PROJECT_ROOT);
+  if (name === "checkpoint.source_list") return checkpointCli(["list", "--json"], PROJECT_ROOT, signal);
   if (name === "checkpoint.source_commit") {
-    return checkpointCli(["save", String(args?.message ?? `AI turn ${new Date().toISOString()}`), "--json"], PROJECT_ROOT);
+    return checkpointCli(["save", String(args?.message ?? `AI turn ${new Date().toISOString()}`), "--json"], PROJECT_ROOT, signal);
   }
   if (name === "checkpoint.source_rollback") {
     if (!args?.id) throw toolError("ATR-401: checkpoint.source_rollback requires args.id", "pick one from checkpoint.source_list output");
-    return checkpointCli(["rollback", String(args.id), "--json"], PROJECT_ROOT);
+    return checkpointCli(["rollback", String(args.id), "--json"], PROJECT_ROOT, signal);
   }
 
   /* ---- F-2 二期：构建期静态依赖图查询（read-only，不跑应用、不需要 dev face）----
@@ -262,7 +339,15 @@ export async function callTool(name, args, ctx = defaultCtx()) {
       );
     }
     const codegen = path.join(HERE, "..", "compiler", "codegen.mjs");
-    const r = spawnSync(process.execPath, [codegen, "--ast", astDir, "--graph-only", "--quiet"], { encoding: "utf8", timeout: 60000 });
+    const r = await spawnCaptured(process.execPath, [codegen, "--ast", astDir, "--graph-only", "--quiet"], { timeoutMs: 60000, signal });
+    if (r.error) {
+      if (r.error.code === "ETIMEDOUT") {
+        throw toolError("ATR-500: static graph build failed (ETIMEDOUT after 60s)", "inspect .atr/ast dump integrity — codegen --graph-only did not finish within 60s");
+      }
+      if (r.error.code === "ABORT_ERR") {
+        throw toolError("ATR-500: static graph build cancelled", "re-issue graph.static when ready");
+      }
+    }
     if (r.status !== 0) {
       throw toolError("ATR-500: static graph build failed", (r.stderr ?? "").trim().split("\n").slice(-3).join(" | ") || "inspect .atr/ast dump integrity");
     }
@@ -366,12 +451,19 @@ export async function callTool(name, args, ctx = defaultCtx()) {
     if (/["'`|;&<>]/.test(filter)) {
       throw toolError("ATR-401: test.run filter must be a plain file-name pattern", `got ${JSON.stringify(filter)} — no shell metacharacters; e.g. "contract" or "src/greeting"`);
     }
-    // 与应用 package.json "test" 同一表面（vitest run）；filter 作 vitest 位置参数（文件名过滤）
-    const r = spawnSync("pnpm", filter ? ["test", filter] : ["test"], {
-      cwd: PROJECT_ROOT, encoding: "utf8", timeout: 180000,
+    // 与应用 package.json "test" 同一表面（vitest run）；filter 作 vitest 位置参数（文件名过滤）。
+    // P1-11：异步 spawn + 180s 兜底超时；signal 使 tasks.cancel 真正树杀 pnpm 子进程树。
+    const r = await spawnCaptured("pnpm", filter ? ["test", filter] : ["test"], {
+      cwd: PROJECT_ROOT, timeoutMs: 180000, signal,
       shell: process.platform === "win32", // pnpm 在 Windows 是 .cmd
     });
     if (r.error) {
+      if (r.error.code === "ETIMEDOUT") {
+        throw toolError("ATR-4xx-test: test run terminated (ETIMEDOUT after 180s)", "run the suite locally ('pnpm test') to inspect the hanging test");
+      }
+      if (r.error.code === "ABORT_ERR") {
+        throw toolError("ATR-4xx-test: test run cancelled", "re-issue test.run when ready");
+      }
       if (r.error.code === "ENOENT") throw toolError("ATR-4xx-test: pnpm not found on PATH", "install pnpm, or run the suite via CLI ('atelier test')");
       throw toolError(`ATR-4xx-test: test run terminated (${r.error.code ?? "killed"})`, "run the suite locally ('pnpm test') to inspect the hanging test");
     }
@@ -391,7 +483,7 @@ export async function callTool(name, args, ctx = defaultCtx()) {
   if (name === "diff.report") {
     // 基线 = 最近一条 source checkpoint 锚点；本工具提供机器可核的文件级事实
     //（per-change 语义摘要由发起评审的 agent 附在报告后），落盘 .atelier/diff-report.md 供人审。
-    const cps = checkpointCli(["list", "--json"], PROJECT_ROOT);
+    const cps = await checkpointCli(["list", "--json"], PROJECT_ROOT, signal);
     // checkpoints.jsonl 的锚字段是 sha（旧条目兼容 commit）；回滚条目无 sha，自然被过滤
     const base = [...(Array.isArray(cps) ? cps : [])].reverse().find((c) => c?.sha || c?.commit) ?? null;
     if (!base?.sha && !base?.commit) {
@@ -400,16 +492,17 @@ export async function callTool(name, args, ctx = defaultCtx()) {
     const baseCommit = base.sha ?? base.commit;
     const baseId = base.id ?? "?";
     const baseName = base.name ?? "";
-    const git = (gitArgs) => {
-      const g = spawnSync("git", gitArgs, { cwd: PROJECT_ROOT, encoding: "utf8" });
+    const git = async (gitArgs) => {
+      // P1-11：git 补 30s 兜底超时（修前无超时——网络盘/钩子卡死即永久冻结宿主）；signal 同参透传
+      const g = await spawnCaptured("git", gitArgs, { cwd: PROJECT_ROOT, timeoutMs: 30000, signal });
       if (g.status !== 0) {
         throw toolError(`ATR-4xx-git: git ${gitArgs[0]} failed`, (g.stderr ?? "").trim() || "run inside a git-managed app workspace");
       }
       return g.stdout ?? "";
     };
-    const stat = git(["diff", "--stat", baseCommit]).trim();
-    const numstat = git(["diff", "--numstat", baseCommit]).trim();
-    const status = git(["status", "--short"]).trim();
+    const stat = (await git(["diff", "--stat", baseCommit])).trim();
+    const numstat = (await git(["diff", "--numstat", baseCommit])).trim();
+    const status = (await git(["status", "--short"])).trim();
     const short = String(baseCommit).slice(0, 7);
     const report = [
       "# Atelier diff report",

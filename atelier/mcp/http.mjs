@@ -152,11 +152,13 @@ async function toolsCall(body, request, d) {
   }
 
   /* 服务端主导创建（SEP-2133）：长操作清单内且非 confirm 受闸（审批必须交互式内联走）的工具，
-   * 不内联执行——建任务返回显式 taskId 句柄；客户端 tasks/get 轮询至终态。 */
+   * 不内联执行——建任务返回显式 taskId 句柄；客户端 tasks/get 轮询至终态。
+   * P1-11：run(signal) 把 store 的 AbortController 透传进 callTool 的长操作子进程——
+   * tasks/cancel 即时树杀（spawnCaptured），不再只是对同步 spawnSync 无效的空信号。 */
   if (TASK_ELIGIBLE.has(name) && !isAskGated(name) && !args._approval) {
     let task;
     try {
-      task = d.tasks.create({ tool: name, args, run: () => callTool(name, args, ctxOf(d)) });
+      task = d.tasks.create({ tool: name, args, run: (signal) => callTool(name, args, ctxOf(d), { signal }) });
     } catch (e) {
       if (e?.atr) return errEnvelope(503, e.atr.code, e.atr.message, e.atr.fix);
       throw e;
