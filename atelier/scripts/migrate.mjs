@@ -26,9 +26,9 @@ const seedsDir = path.join(root, "src", "server", "db", "seeds");
 const to = argOf("--to");
 const force = rest.includes("--force");
 
-function die(msg, code = 2, fix) {
+// die 签名全仓大一统（建议书 A5）：die(msg, code = 2)——msg 单串自含 error/usage/fix 全部文案
+function die(msg, code = 2) {
   console.error(msg);
-  if (fix) console.error(`fix: ${fix}`);
   process.exit(code);
 }
 

@@ -45,9 +45,9 @@ import url from "node:url";
 
 const PKG = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), ".."); // atelier/
 
-function die(msg, code = 2, fix) {
+// die 签名全仓大一统（建议书 A5）：die(msg, code = 2)——fix 文案以 "\nfix: " 并入 msg（原第三参废止）
+function die(msg, code = 2) {
   console.error(msg);
-  if (fix) console.error(`fix: ${fix}`);
   process.exit(code);
 }
 
@@ -69,32 +69,30 @@ const outDir = path.resolve(argOf("--out") ?? path.join(root, "dist"));
 if (!target) die("usage: atelier build --root <dir> --target=node|bun [--out <dir>] [--no-smoke]", 2);
 if (target !== "node" && target !== "bun") {
   die(
-    `error: 不支持的 build target "${target}"`,
+    `error: 不支持的 build target "${target}"\nfix: §12 不做清单：edge/serverless 是编译期观察位（SQLite 数据层与 serverless 天然错配，适配出现真实需求再议）——v1 两 target = node | bun`,
     2,
-    "§12 不做清单：edge/serverless 是编译期观察位（SQLite 数据层与 serverless 天然错配，适配出现真实需求再议）——v1 两 target = node | bun",
   );
 }
 
 /* ---------------- 应用前提检查（诚实红：缺件指路，绝不猜） ---------------- */
 
 if (!fs.existsSync(path.join(root, "package.json"))) {
-  die(`error: ${root} 不是 Atelier 应用（缺 package.json）`, 2, "node atelier/cli.mjs init --target <dir> --name <Name>");
+  die(`error: ${root} 不是 Atelier 应用（缺 package.json）\nfix: node atelier/cli.mjs init --target <dir> --name <Name>`, 2);
 }
 const mainServerFile = path.join(root, "src", "server", "main-server.ts");
 if (!fs.existsSync(mainServerFile)) {
-  die(`error: 缺 ${path.relative(root, mainServerFile)}（server 面装配点）`, 2, "init 产物自带；自定义布局请补装配点文件");
+  die(`error: 缺 ${path.relative(root, mainServerFile)}（server 面装配点）\nfix: init 产物自带；自定义布局请补装配点文件`, 2);
 }
 const mainServerSrc = fs.readFileSync(mainServerFile, "utf8");
 if (!/createAppHandler/.test(mainServerSrc)) {
   die(
-    `error: ${path.relative(root, mainServerFile)} 未导出 createAppHandler()（D-F14 build 装配单源——本应用先于该形态）`,
+    `error: ${path.relative(root, mainServerFile)} 未导出 createAppHandler()（D-F14 build 装配单源——本应用先于该形态）\nfix: 对照框架模板 templates/app/src/server/main-server.ts 重构：导出 createAppHandler()（createHandler 装配收口）+ 主模块判定才 serve；或重 init`,
     2,
-    "对照框架模板 templates/app/src/server/main-server.ts 重构：导出 createAppHandler()（createHandler 装配收口）+ 主模块判定才 serve；或重 init",
   );
 }
 for (const f of ["node-host.ts", "static-host.ts"]) {
   if (!fs.existsSync(path.join(root, "src", "vendor", "atelier", "server", f))) {
-    die(`error: vendor 缺 src/vendor/atelier/server/${f}（应用 vendor 落后于框架时点）`, 2, `node atelier/cli.mjs sync --target ${root}`);
+    die(`error: vendor 缺 src/vendor/atelier/server/${f}（应用 vendor 落后于框架时点）\nfix: node atelier/cli.mjs sync --target ${root}`, 2);
   }
 }
 
@@ -112,7 +110,7 @@ if (vite.status !== 0) {
   die(`error: vite build 失败（exit ${vite.status}）——上方为原样输出`, 1);
 }
 if (!fs.existsSync(path.join(outDir, "index.html"))) {
-  die(`error: 产物缺 ${outDir}/index.html（vite outDir 与 --out 错配？）`, 1, "应用自定义了 outDir 时，--out 传同一目录");
+  die(`error: 产物缺 ${outDir}/index.html（vite outDir 与 --out 错配？）\nfix: 应用自定义了 outDir 时，--out 传同一目录`, 1);
 }
 
 /* ---------------- ② 服务端启动壳（生成物勿手改；重跑 build 再生） ---------------- */
@@ -209,7 +207,7 @@ if (!noSmoke && bunMissing) {
   if (proc.exitCode === null && !proc.killed) proc.kill(); // Windows kill=即终止；握手失败也不留孤儿
   await new Promise((r) => (proc.exitCode !== null ? r() : proc.once("exit", r)));
   if (!ok) {
-    die(`error: 产物冒烟自证未通过（${note}）\n子进程原样输出：\n${out.trim()}`, 1, "产物已生成可人工复查；无 app.ping 探活端点的应用可用 --no-smoke 显式跳过（不静默跳过）");
+    die(`error: 产物冒烟自证未通过（${note}）\n子进程原样输出：\n${out.trim()}\nfix: 产物已生成可人工复查；无 app.ping 探活端点的应用可用 --no-smoke 显式跳过（不静默跳过）`, 1);
   }
   smoke = `app.ping 200 · index 200 · server-status 405 ATR-311（${target} runtime）`;
 }

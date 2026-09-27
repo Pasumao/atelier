@@ -19,9 +19,10 @@ import url from "node:url";
 const INVOKED_DIRECTLY =
   process.argv[1] && url.pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
-function die(message, fix) {
-  console.error(`error: ${message}${fix ? `\nfix: ${fix}` : ""}`);
-  process.exit(1);
+// die 签名全仓大一统（建议书 A5）：die(msg, code = 2)——msg 单串自含 error/usage/fix 全部文案
+function die(msg, code = 2) {
+  console.error(msg);
+  process.exit(code);
 }
 
 /** DTCG $type 推断（诚实边界：启发式——语义仅靠值形态，写配置时可手工覆写 $type） */
@@ -69,10 +70,10 @@ function main() {
   const sub = argv[0];
   const argOf = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : undefined);
   if (sub !== "export" && sub !== "import") {
-    die("usage: atelier tokens export|import --in <file> --out <file>", "export: atelier.config.json → DTCG；import: DTCG → 扁平 tokens 片段");
+    die("usage: atelier tokens export|import --in <file> --out <file>\nfix: export: atelier.config.json → DTCG；import: DTCG → 扁平 tokens 片段", 1);
   }
-  const inPath = path.resolve(argOf("--in") ?? die("--in is required", "传 atelier.config.json（export）或 .tokens.json（import）"));
-  const outPath = path.resolve(argOf("--out") ?? die("--out is required", "产物落盘路径（不覆盖既有配置，审阅后手工合并）"));
+  const inPath = path.resolve(argOf("--in") ?? die("error: --in is required\nfix: 传 atelier.config.json（export）或 .tokens.json（import）", 1));
+  const outPath = path.resolve(argOf("--out") ?? die("error: --out is required\nfix: 产物落盘路径（不覆盖既有配置，审阅后手工合并）", 1));
   const data = JSON.parse(fs.readFileSync(inPath, "utf8"));
   const result = sub === "export" ? exportDtcg(data) : importDtcg(data);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2) + "\n");

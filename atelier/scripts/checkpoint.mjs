@@ -43,8 +43,10 @@ import { currentPathFor, resolveBaseline } from "./snapshot.mjs";
 const STORE_DIR = ".atelier";
 const STORE_FILE = path.join(STORE_DIR, "checkpoints.jsonl");
 
-function die(code, message, fix) {
-  console.error(`${message}${fix ? `\nfix: ${fix}` : ""}`);
+// die 签名全仓大一统（建议书 A5）：die(msg, code = 2)——原 (code, message, fix) 参数序相反（全仓孤例），
+// 是 P1-9 同族隐患源；fix 文案以 "\nfix: " 并入 msg
+function die(msg, code = 2) {
+  console.error(msg);
   process.exit(code);
 }
 
@@ -52,7 +54,10 @@ function git(repo, args) {
   // inject identity locally so fresh machines can still commit without global config
   const full = ["-C", repo, "-c", "user.name=atelier-bot", "-c", "user.email=atelier@local", ...args];
   const r = spawnSync("git", full, { encoding: "utf8" });
-  if (r.status !== 0) die(1, `error: git ${args.join(" ")} failed`, (r.stderr || r.stdout || "").trim());
+  if (r.status !== 0) {
+    const out = (r.stderr || r.stdout || "").trim();
+    die(`error: git ${args.join(" ")} failed${out ? `\nfix: ${out}` : ""}`, 1);
+  }
   return (r.stdout ?? "").trim();
 }
 
@@ -159,9 +164,9 @@ function testGate(repo, skip) {
     if (r.error && r.error.code === "ENOENT") r = run("npm");
     if (r.status === 0) { console.log("[gate] tests green — anchor permitted ✔"); return; }
     const tail = `${r.stdout ?? ""}\n${r.stderr ?? ""}`.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12).join("\n  ");
-    die(1,
-      "error: 未检不锚 — test suite failed; refusing to anchor this checkpoint",
-      `fix the failing tests first (tail below), or deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.\n  ${tail}`,
+    die(
+      `error: 未检不锚 — test suite failed; refusing to anchor this checkpoint\nfix: fix the failing tests first (tail below), or deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.\n  ${tail}`,
+      1,
     );
   }
   console.log("[gate] no package.json test script found — test gate vacuous");
@@ -244,9 +249,9 @@ async function snapshotGate(repo, skip) {
     );
   } catch { /* receipt is best-effort */ }
   if (same) { console.log("[gate] snapshot MATCH — 未检不锚 satisfied ✔"); return; }
-  die(1,
-    "error: 未检不锚 — render MISMATCHES the snapshot baseline; refusing to anchor this checkpoint",
-    "review both images ('atelier snapshot check' prints the paths). Intended change → 'atelier snapshot check --update' after human review, then re-save. Deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.",
+  die(
+    `error: 未检不锚 — render MISMATCHES the snapshot baseline; refusing to anchor this checkpoint\nfix: review both images ('atelier snapshot check' prints the paths). Intended change → 'atelier snapshot check --update' after human review, then re-save. Deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.`,
+    1,
   );
 }
 
@@ -273,14 +278,14 @@ function apiDiffGate(repo, skip) {
     return;
   }
   const list = (result.violations ?? []).map((v) => `  · ${v.surface}:${v.id} [${v.kind}]`).join("\n");
-  die(1,
-    `error: 未检不锚 — public API surface drifted with ${result.violations?.length ?? "?"} unexempted breaking change(s); refusing to anchor`,
-    `intended change → re-baseline with 'atelier api-diff snapshot' (drift stays recorded in git history);\n  deliberate carve-out → register the entry in an '--allow' allowlist;\n  deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.\n${list}`,
+  die(
+    `error: 未检不锚 — public API surface drifted with ${result.violations?.length ?? "?"} unexempted breaking change(s); refusing to anchor\nfix: intended change → re-baseline with 'atelier api-diff snapshot' (drift stays recorded in git history);\n  deliberate carve-out → register the entry in an '--allow' allowlist;\n  deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.\n${list}`,
+    1,
   );
 }
 
 async function cmdSave(repo, name, skipGate, jsonMode, dbRel) {
-  if (!name) die(1, 'usage: checkpoint save <name> [--no-gate] [--db <file>] [--json]', 'e.g. atelier checkpoint save "AI round 4: added ModelCard"');
+  if (!name) die('usage: checkpoint save <name> [--no-gate] [--db <file>] [--json]\nfix: e.g. atelier checkpoint save "AI round 4: added ModelCard"', 1);
   ensureRepo(repo);
   const dirty = git(repo, ["status", "--porcelain"]).length > 0;
   if (!dirty) {
@@ -321,25 +326,24 @@ function cmdList(repo, json) {
 }
 
 async function cmdRollback(repo, id, jsonMode, dbRel) {
-  if (!id) die(1, "usage: checkpoint rollback <id> [--db <file>]", "pick an id from: atelier checkpoint list");
+  if (!id) die("usage: checkpoint rollback <id> [--db <file>]\nfix: pick an id from: atelier checkpoint list", 1);
   const rows = readStore(repo);
   const target = rows.find((r) => r.type === "save" && (r.id === id || r.sha.startsWith(id)));
   if (!target) {
     const known = rows.filter((r) => r.type === "save").map((r) => r.id).join(", ");
-    die(1, `error: unknown checkpoint id "${id}"`, `known checkpoints: ${known || "(none)"}`);
+    die(`error: unknown checkpoint id "${id}"\nfix: known checkpoints: ${known || "(none)"}`, 1);
   }
   ensureRepo(repo);
   if (git(repo, ["status", "--porcelain"]).length > 0) {
-    die(1, `error: refusing rollback with uncommitted changes`,
-      `one round = one checkpoint — run 'atelier checkpoint save "wip"' first, then roll back`);
+    die(`error: refusing rollback with uncommitted changes\nfix: one round = one checkpoint — run 'atelier checkpoint save "wip"' first, then roll back`, 1);
   }
   // 决策 21-③：锚点带的 migrationHead 低于当前库 head → 拒绝（代码回滚 ≠ 数据回滚——库状态
   // 不随 git 回退，双轨必须显式各走各的）。绝不自动执行 down（破坏性操作 confirm=ask，v1 = 人工先跑）。
   const mig = await readMigrationHead(repo, dbRel);
   if (target.migrationHead && mig.head && target.migrationHead.id < mig.head.id) {
-    die(1,
-      `error: refusing rollback — checkpoint ${target.id} anchors migration head #${target.migrationHead.id} (${target.migrationHead.name}) but the db is already at #${mig.head.id} (${mig.head.name})`,
-      `rewind the db first: run 'migrate down --to ${target.migrationHead.id}' (destructive — review what is dropped), then re-run 'atelier checkpoint rollback ${target.id}'`,
+    die(
+      `error: refusing rollback — checkpoint ${target.id} anchors migration head #${target.migrationHead.id} (${target.migrationHead.name}) but the db is already at #${mig.head.id} (${mig.head.name})\nfix: rewind the db first: run 'migrate down --to ${target.migrationHead.id}' (destructive — review what is dropped), then re-run 'atelier checkpoint rollback ${target.id}'`,
+      1,
     );
   }
   const cur = headSha(repo);
@@ -380,12 +384,12 @@ const jsonMode = rest.includes("--json");
 if (cmd === "save") {
   const skipGate = rest.includes("--no-gate");
   const { dbRel, rest: restClean } = takeDbFlag(rest);
-  cmdSave(repo, restClean.filter((a) => !a.startsWith("--")).join(" "), skipGate, jsonMode, dbRel).catch((e) => die(1, `error: ${e?.message ?? e}`));
+  cmdSave(repo, restClean.filter((a) => !a.startsWith("--")).join(" "), skipGate, jsonMode, dbRel).catch((e) => die(`error: ${e?.message ?? e}`, 1));
 }
 else if (cmd === "list") cmdList(repo, jsonMode);
 else if (cmd === "rollback") {
   const { dbRel, rest: restClean } = takeDbFlag(rest);
-  cmdRollback(repo, restClean.find((a) => !a.startsWith("--")), jsonMode, dbRel).catch((e) => die(1, `error: ${e?.message ?? e}`));
+  cmdRollback(repo, restClean.find((a) => !a.startsWith("--")), jsonMode, dbRel).catch((e) => die(`error: ${e?.message ?? e}`, 1));
 }
 else {
   console.error("usage: checkpoint save <name> [--no-gate] [--db <file>] [--json] | list [--json] | rollback <id> [--db <file>] [--json]");

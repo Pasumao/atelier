@@ -35,17 +35,18 @@ const RUNTIME = path.join(PKG, "runtime");
 const DEV = path.join(PKG, "dev");
 const TEMPLATE = path.join(PKG, "templates", "app");
 
-function die(message, fix) {
-  console.error(`error: ${message}${fix ? `\nfix: ${fix}` : ""}`);
-  process.exit(1);
+// die 签名全仓大一统（建议书 A5）：die(msg, code = 2)——msg 单串自含 error/usage/fix 全部文案
+function die(msg, code = 2) {
+  console.error(msg);
+  process.exit(code);
 }
 
 const argv = process.argv.slice(2);
 const target = path.resolve(argv.includes("--target") ? argv[argv.indexOf("--target") + 1] : process.cwd());
 if (!fs.existsSync(path.join(target, "src", "runtime", "core.ts"))) {
   die(
-    `not an Atelier app (missing src/runtime at ${target})`,
-    "run inside the app dir, or pass --target <appDir> (vendor sync only applies to scaffolded apps)",
+    `error: not an Atelier app (missing src/runtime at ${target})\nfix: run inside the app dir, or pass --target <appDir> (vendor sync only applies to scaffolded apps)`,
+    1,
   );
 }
 

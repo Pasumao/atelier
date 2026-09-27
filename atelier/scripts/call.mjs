@@ -51,9 +51,9 @@ for (let i = 0; i < argv.length; i++) {
 const endpoint = positional[0];
 const jsonArg = positional[1];
 
-function die(msg, code = 2, fix) {
+// die 签名全仓大一统（建议书 A5）：die(msg, code = 2)——fix 文案以 "\nfix: " 并入 msg（原第三参废止）
+function die(msg, code = 2) {
   console.error(msg);
-  if (fix) console.error(`fix: ${fix}`);
   process.exit(code);
 }
 
@@ -64,7 +64,7 @@ if (!endpoint || endpoint.startsWith("--")) {
 }
 // 端点是注册表名（点分命名空间，如 app.ping），不是 URL 路径——带分隔符/空白即用法错误
 if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(endpoint)) {
-  die(`error: 非法端点名 "${endpoint}"（端点是注册表名，形态如 app.ping——不是 URL 路径）`, 2, "用 endpoint.list（MCP）或 dev 面 /__atelier/registry 查已注册端点名");
+  die(`error: 非法端点名 "${endpoint}"（端点是注册表名，形态如 app.ping——不是 URL 路径）\nfix: 用 endpoint.list（MCP）或 dev 面 /__atelier/registry 查已注册端点名`, 2);
 }
 let input;
 if (jsonArg === undefined) {
@@ -73,7 +73,7 @@ if (jsonArg === undefined) {
   try {
     input = JSON.parse(jsonArg);
   } catch {
-    die(`error: JSON 实参不是合法 JSON：${jsonArg.slice(0, 120)}`, 2, `发送契约输入，例如 '{"id": 1}'；体缺省即 {}`);
+    die(`error: JSON 实参不是合法 JSON：${jsonArg.slice(0, 120)}\nfix: 发送契约输入，例如 '{"id": 1}'；体缺省即 {}`, 2);
   }
 }
 if (input === null || typeof input !== "object" || Array.isArray(input)) {
@@ -112,12 +112,11 @@ try {
 } catch (e) {
   const cause = e?.cause?.code ?? e?.name ?? "Error";
   if (e?.name === "TimeoutError" || cause === "AbortError") {
-    die(`ATR-403: server 面无响应（${url} 超过 ${timeoutMs}ms）`, 1, "确认 server 面存活（慢端点？）——或用 --timeout <ms> 放宽时限");
+    die(`ATR-403: server 面无响应（${url} 超过 ${timeoutMs}ms）\nfix: 确认 server 面存活（慢端点？）——或用 --timeout <ms> 放宽时限`, 1);
   }
   die(
-    `ATR-403: server 面不可达（${url} —— ${cause}）`,
+    `ATR-403: server 面不可达（${url} —— ${cause}）\nfix: 应用目录下启动 dev 面：cd ${root} && pnpm dev（server 面随 dev 托管在 127.0.0.1:${port}）；产物部署形态则启动 build 产物入口（node dist/server.mjs）`,
     1,
-    `应用目录下启动 dev 面：cd ${root} && pnpm dev（server 面随 dev 托管在 127.0.0.1:${port}）；产物部署形态则启动 build 产物入口（node dist/server.mjs）`,
   );
 }
 
@@ -138,5 +137,5 @@ if (!res.ok) {
 try {
   console.log(JSON.stringify(JSON.parse(text), null, 2));
 } catch {
-  die(`ATR-320 形态：端点 2xx 但响应体不是合法 JSON（${text.slice(0, 120)}）`, 1, "检查端点 handler 返回值——端点面约定 JSON 响应");
+  die(`ATR-320 形态：端点 2xx 但响应体不是合法 JSON（${text.slice(0, 120)}）\nfix: 检查端点 handler 返回值——端点面约定 JSON 响应`, 1);
 }

@@ -285,7 +285,9 @@ switch (cmd) {
     break;
   case "test": {
     if (!fs.existsSync(path.join(process.cwd(), "package.json"))) {
-      die('error: no package.json here', 'fix: run inside an Atelier app dir');
+      // P1-9：die 第二参是 exit code，fix 文案须并入 msg（原两参误用会 process.exit(字符串) 抛
+      // ERR_INVALID_ARG_TYPE——dev 命令同款已修，test 漏网；建议书 A5 顺带全仓统一 die 签名）
+      die("error: no package.json here\nfix: run inside an Atelier app dir", 2);
     }
     const r = spawnSync("pnpm", ["test"], { stdio: "inherit", shell: true });
     process.exit(r.status ?? 1);
