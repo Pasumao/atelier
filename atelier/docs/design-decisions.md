@@ -309,6 +309,26 @@
 > 三处同步。门禁：580 绿+8 skip（546 基线 +16A）/ check-skills 56-0。诚实边界：修饰符应用语义
 > 归真 DOM（dom-shim 用 spy 假事件验证）；编译路径无预检=组件级错误边界（bind 同款粒度边界）。
 
+> **落地注记（2026-09-27 m10 批，radio group v1.2——v1 显式不做清单次枚销账，三分支并行 `m10-bind-group-runtime`/`m10-bind-group-codegen`/`m10-browser-gate` 合并链至 main）**：
+> `bind:group={sig}` radio group 双向绑定——解析器零改动实证（`bind:group` 落既有
+> `{name:"bind:group", value:expr, dynamic:true}` 契约载体，名字文法无需扩）。**契约**：目标 =
+> 单个可写 `$state`（沿用 ATR-305/ATR-324）；tag 矩阵 × input + type 细化面 × 静态 `type="radio"`
+>（缺省/动态/其他 type 保守拒绝，bind:checked 同款边界）；**组身份 = 静态 `value` 属性**（缺失/
+> 动态/空串 → 新错误码 **ATR-327**，precheckBinds 预检级 dev 卡整替换 / prod record 照常渲染，
+> 三处同步）；**组语义** = 绑定同一信号的全体 bind:group 元素——上行 change 回写选中项身份键，
+> 信号回写经响应式图驱动每个成员的下行 effect 重判 checked ⇒ 组内互斥（写 X ⇒ 键≠X 全部取消），
+> 不依赖原生 name 分组（不同 name 绑同一信号仍互斥）；身份键在 effect 内读取（$effect 首跑入
+> 微任务队列，程序体同步完毕后静态 attr 已落，与 attr 发射序解耦——type 细化面同款顺序论证）。
+> **ATR-325 升级为槽位语义**：checked 槽（bind:checked / bind:group 共占）与 value 槽（bind:value），
+> 同元素同槽第二次订阅 → ATR-325（同名重复文案逐字不变；跨名同槽点名两个 attr）——bind:value 与
+> bind:checked 不同槽合法共存不变。单点 `bindGroup(el, name, expr, scope, tag)`（bindTwoWay 五参
+> 同款，dispose 随 F-5 析构）+ `__compiledRT` 增员 + codegen emitAttrs 专支路发射 `rt.bindGroup`
+> 全参形态（m9 on: 整名发射纪律沿用）+ 运行时 belt 面（编译路径无预检：effect 首跑空身份键一次性
+> record ATR-327，effect 上下文不可抛=诚实边界）。v1.2 显式不做：checkbox group（数组集合语义）、
+> 动态 type/value、组内重复身份键校验（跨元素面；语义确定性保留：checked = (sig.value === 自身键)）。
+> 门禁：605 绿+8 skip（580 基线 +16A +5B +4C）/ check-skills 56-0 / api-diff PASS 纯加法 +
+> bindGroup 基线刷新 / scratch init 复验 38/38。
+
 ## 决策 26：schema 编译期提取 v1（决策 6 完整版承诺兑现，F 线）
 - **定论**：dump.mjs 扫描器扩 `(props: {...})` 类型注解提取——落点为**自包含零依赖扫描器**
   `compiler/extract-schema.mjs`（花括号配对复用 matchBrace 技法；「纯文本扫描禁 TS 解析器」纪律不破；

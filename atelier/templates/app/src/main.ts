@@ -18,7 +18,7 @@ import {
 import { HelloCard } from "./components/HelloCard.atr.ts";
 import { ContractProbe } from "./components/ContractProbe.atr.ts"; // P1-9 契约路径演示
 import { LiveNotes } from "./components/LiveNotes.atr.ts"; // FS-7 live 直通 + §4.5 乐观对账演示
-import { FormBinding } from "./components/FormBinding.atr.ts"; // 决策 25 bind: v1 双向绑定演示
+import { FormBinding } from "./components/FormBinding.atr.ts"; // 决策 25 bind: 双向绑定演示（v1.2 含 bind:group radio group）
 import { SchemaProbe } from "./components/SchemaProbe.atr.ts"; // 决策 26 注解即 schema 核对物（无手写 schema）
 
 initTokens(config as { tokens: Record<string, Record<string, string>> });
@@ -44,7 +44,7 @@ liveSection.id = "live-demo";
 app.appendChild(liveSection);
 mountComponent(LiveNotes, { title: "Live Notes — live 直通 + 乐观对账" }, liveSection, registry, validate);
 
-// 决策 25 bind: v1 演示：bind:value × input + bind:checked × checkbox，单 attr 双向（runtime 单点 bindTwoWay）
+// 决策 25 bind: 演示：bind:value × input + bind:checked × checkbox + bind:group × radio group，单 attr 双向（runtime 单点 bindTwoWay/bindGroup）
 const formSection = document.createElement("section");
 formSection.id = "form-demo";
 app.appendChild(formSection);

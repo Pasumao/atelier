@@ -16,7 +16,7 @@
  */
 import "./dom-shim.ts";
 import { describe, expect, it } from "vitest";
-import { $state } from "../runtime/core.ts";
+import { $derived, $state } from "../runtime/core.ts";
 import {
   mountComponent,
   parseTemplate,

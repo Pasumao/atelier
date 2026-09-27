@@ -1,4 +1,4 @@
-# FormBinding — bind: v1 双向绑定演示组件（.atr.md 共置约定）
+# FormBinding — bind: 双向绑定演示组件（.atr.md 共置约定；v1.2 含 bind:group radio group）
 
 > 与 `FormBinding.atr.ts` / `FormBinding.atr.spec.ts` 三元共置。
 > 决策 25：把属性级指令 v1（`bind:value` / `bind:checked` 双向绑定）落成 starter 示例——
@@ -15,7 +15,8 @@ checkbox 勾选即翻转 `enabled` 信号，插值行实时展示两信号——
   `bind:checked` × input[type=checkbox|radio]（change 事件）。越面组合 → ATR-324。
 - **写目标必须是可写 `$state`**：`$derived` → ATR-305（渲染期前置拦截出错误卡）、
   非信号 / 语法不合法 / 元素-attr 组合不在支持面 → ATR-324、同元素同 attr 重复 bind: → ATR-325。
-- **v1 显式不做**：同名 radio group 多值绑定、事件修饰族（.prevent/.stop，候选后置）、非表单元素双向。
+- **v1.2 显式不做**：checkbox group（数组集合语义）、动态 type/value、非表单元素双向。
+  （radio group 已由 bind:group v1.2 落地；事件修饰族 .prevent/.stop 已由 m9 批落地。）
 - 无回环：程序化 `el.value=` 赋值不触发 input/change 事件（DOM 规范）→ 信号写 DOM 不会倒灌回信号。
 - 样式只用 token 工具类 + recipe 层（`.ppanel`/`.btn`），无裸颜色、无 scoped style。
 
@@ -32,7 +33,8 @@ checkbox 勾选即翻转 `enabled` 信号，插值行实时展示两信号——
 
 ## 状态（诚实标注）
 
-- 【设计内已知红】行为面用例（初始同步 + 双向 roundtrip）随本批交付时点为红——runtime 单点
-  bindTwoWay 在 bind 批 A 分支（`bind-m9-runtime`）落地，红因统一为 `bindTwoWay 支撑未落地`
-  一类；静态面当场绿。
-- 【实测】模板解析（dump 冒烟）通过：`bind:` 产物形态与决策 25 契约载体一致。
+- 【已转绿】行为面用例（初始同步 + 双向 roundtrip）在 bind 批时点为设计内红（runtime 单点 bindTwoWay
+  当时在 bind-m9-runtime 分支），随合并链转绿；历史红检指认格式溯 git。
+- 【v1.2 增量（m10 批）】radio group 段（bind:group × plan 信号 ×3 radio）+ spec 静态/行为用例同步；
+  红检证据溯 m10 分支提交（bind-group.test.ts 16 红全灭）。
+- 【实测】模板解析（dump 冒烟）通过：bind: 产物形态与决策 25 契约载体一致。

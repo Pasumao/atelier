@@ -1,5 +1,5 @@
 /**
- * FormBinding.atr.spec.ts — 决策 25 bind: v1 双向绑定的机检。
+ * FormBinding.atr.spec.ts — 决策 25 bind: 双向绑定的机检（v1.2：含 bind:group radio group，m10 批）。
  * 手法同 LiveNotes.atr.spec.ts：模板侧无 dom-shim vendor（框架 tests/ 资产不进应用模板）——
  * 本文件内联同款最小 DOM 语义（追加 value/checked/type 三个表单面属性），在 mountComponent
  * 真实渲染路径上驱动事件（不绕过解释器直测信号；信号读面 = 插值行与控件属性）。
@@ -19,7 +19,6 @@ import { describe, it, expect } from "vitest";
  * 因此组件与 runtime 桶出口走顶层 await 动态 import（shim 已就位后再加载）。 ---- */
 type AnyNode = any;
 
-const KNOWN_RED = "已知红：bindTwoWay 支撑未落地（bind 批 A 分支，设计内先红后绿），非本用例缺陷";
 
 class MText {
   type = "text" as const;
@@ -169,23 +168,26 @@ const flush = async (): Promise<void> => {
   }
 };
 
-/** 挂载一个全新 FormBinding 实例（模板默认态：name="Ada"、enabled=true） */
-function mountForm(): { container: AnyNode; text: AnyNode; check: AnyNode; reset: AnyNode } {
+/** 挂载一个全新 FormBinding 实例（模板默认态：name="Ada"、enabled=true、plan="pro"） */
+function mountForm(): { container: AnyNode; text: AnyNode; check: AnyNode; radios: AnyNode[]; reset: AnyNode } {
   const container = makeContainer();
   doc.documentElement.appendChild(container);
   rt.mountComponent(FormBinding, { title: "Form Binding" }, container, rt.registry, (schema, data) =>
     rt.validateFlat(schema as never, data),
   );
   const inputs = findByTag(container, "input");
-  return { container, text: inputs[0], check: inputs[1], reset: findByTag(container, "button")[0] };
+  const radios = inputs.filter((i: AnyNode) => i.getAttribute("type") === "radio");
+  return { container, text: inputs[0], check: inputs[1], radios, reset: findByTag(container, "button")[0] };
 }
 
-describe("FormBinding — bind: v1 静态面（当场绿）", () => {
-  it("渲染产物含文本 input 与 type=checkbox 两个目标元素", () => {
-    const { container, check } = mountForm();
+describe("FormBinding — bind: 静态面", () => {
+  it("渲染产物含文本 input / checkbox / 三个 radio（radio group）目标元素", () => {
+    const { container, check, radios } = mountForm();
     const inputs = findByTag(container, "input");
-    expect(inputs.length).toBe(2);
+    expect(inputs.length).toBe(5);
     expect(check.getAttribute("type")).toBe("checkbox");
+    expect(radios.length).toBe(3);
+    expect(radios.map((r: AnyNode) => r.getAttribute("value"))).toEqual(["basic", "pro", "enterprise"]);
   });
 
   it("解析器零改动：bind: 产物即契约载体（决策 25——{name:'bind:x', value:expr, dynamic:true}）", () => {
@@ -198,12 +200,18 @@ describe("FormBinding — bind: v1 静态面（当场绿）", () => {
     const el2 = ast2[0] as { attrs: { name: string; value: string; dynamic: boolean }[] };
     expect(el2.attrs).toContainEqual({ name: "bind:checked", value: "enabled", dynamic: true });
     expect(el2.attrs).toContainEqual({ name: "type", value: "checkbox", dynamic: false });
+
+    const ast3 = rt.parseTemplate(`<input type="radio" value="pro" bind:group={plan}>`);
+    const el3 = ast3[0] as { attrs: { name: string; value: string; dynamic: boolean }[] };
+    expect(el3.attrs).toContainEqual({ name: "bind:group", value: "plan", dynamic: true });
+    expect(el3.attrs).toContainEqual({ name: "value", value: "pro", dynamic: false });
   });
 
-  it("插值展示两信号初值（信号读面不受 bind: 支路影响）", () => {
+  it("插值展示三信号初值（信号读面不受 bind: 支路影响）", () => {
     const { container } = mountForm();
     expect(container.textContent).toContain("name: Ada");
     expect(container.textContent).toContain("enabled: on");
+    expect(container.textContent).toContain("plan: pro");
   });
 
   it("契约面：缺 reqProps title → ATR-201（flat schema 单源纪律不变）", () => {
@@ -214,12 +222,12 @@ describe("FormBinding — bind: v1 静态面（当场绿）", () => {
   });
 });
 
-describe("FormBinding — bind: v1 行为面（已知红：bind 批 A 分支 bindTwoWay 未落地）", () => {
+describe("FormBinding — bind: 行为面（v1.2 含 bind:group）", () => {
   it("初始同步：挂载后控件值 = 信号初值（bind:value → value / bind:checked → checked）", async () => {
     const { text, check } = mountForm();
     await flush();
-    expect(text.value, KNOWN_RED + "（el.value 写点缺失）").toBe("Ada");
-    expect(check.checked, KNOWN_RED + "（el.checked 写点缺失）").toBe(true);
+    expect(text.value).toBe("Ada");
+    expect(check.checked).toBe(true);
   });
 
   it("双向 roundtrip（value）：input 事件回写信号 → 插值行更新；信号写入回传控件（reset 驱动）", async () => {
@@ -229,11 +237,11 @@ describe("FormBinding — bind: v1 行为面（已知红：bind 批 A 分支 bin
     text.value = "Grace";
     text.dispatchEvent({ type: "input", target: text });
     await flush();
-    expect(container.textContent, KNOWN_RED + "（事件回写腿缺失）").toContain("name: Grace");
+    expect(container.textContent).toContain("name: Grace");
     // 信号 → DOM：reset 处理器写 name.value，控件值随之回位（attr effect 腿）
     reset.dispatchEvent({ type: "click" });
     await flush();
-    expect(text.value, KNOWN_RED + "（attr effect 写控件腿缺失）").toBe("Ada");
+    expect(text.value).toBe("Ada");
     expect(container.textContent).toContain("name: Ada");
   });
 
@@ -244,11 +252,37 @@ describe("FormBinding — bind: v1 行为面（已知红：bind 批 A 分支 bin
     check.checked = false;
     check.dispatchEvent({ type: "change", target: check });
     await flush();
-    expect(container.textContent, KNOWN_RED + "（事件回写腿缺失）").toContain("enabled: off");
+    expect(container.textContent).toContain("enabled: off");
     // 信号 → DOM：reset 处理器写 enabled.value，checked 随之回位
     reset.dispatchEvent({ type: "click" });
     await flush();
-    expect(check.checked, KNOWN_RED + "（attr effect 写控件腿缺失）").toBe(true);
+    expect(check.checked).toBe(true);
     expect(container.textContent).toContain("enabled: on");
+  });
+
+  it("radio group 初始同步：plan=\"pro\" → 仅 value=pro 的 radio checked（v1.2）", async () => {
+    const { radios } = mountForm();
+    await flush();
+    const checked = radios.filter((r: AnyNode) => r.checked);
+    expect(checked.length, "组内恰一项选中").toBe(1);
+    expect(checked[0].getAttribute("value")).toBe("pro");
+  });
+
+  it("radio group roundtrip：change 回写信号 → 插值行更新；信号外写 → 组互斥重判 + reset 回位（v1.2）", async () => {
+    const { container, radios, reset } = mountForm();
+    await flush();
+    const byVal = (v: string): AnyNode => radios.find((r: AnyNode) => r.getAttribute("value") === v);
+    // DOM → 信号：点击 basic（change 事件 = bind:group × radio 的回写事件口）
+    byVal("basic").checked = true;
+    byVal("basic").dispatchEvent({ type: "change", target: byVal("basic") });
+    await flush();
+    expect(container.textContent).toContain("plan: basic");
+    expect(byVal("pro").checked, "组内互斥：原选中项随信号被取消").toBe(false);
+    // 信号 → DOM：reset 处理器写 plan.value，组内 checked 重判回位
+    reset.dispatchEvent({ type: "click" });
+    await flush();
+    expect(container.textContent).toContain("plan: pro");
+    expect(byVal("basic").checked).toBe(false);
+    expect(byVal("pro").checked).toBe(true);
   });
 });

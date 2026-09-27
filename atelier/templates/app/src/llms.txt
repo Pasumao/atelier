@@ -37,7 +37,7 @@ export const Greeting2 = component((props: { name: string }) => {
   显式手写 schema 仍优先（并存手写胜，删除手写件避免漂移）；注解缺省 → 跳过不校验；
   超出映射面（泛型/交叉/工具类型/非字面量联合/嵌套对象/any/unknown）→ ATR-102（fix 指路手写
   schema）；vendored 应用经 `atelier sync` 获得提取器（缺失时 dev 注入诚实降级）
-- 模板 DSL：{expr}、{#if}/{:else}/{/if}、{#each arr as item}/{/each}、on:click={fn}、bind:value={sig}/bind:checked={sig}（双向，目标须可写 $state：$derived→ATR-305、目标非法/组合越面→ATR-324、重复绑定→ATR-325；v1 不做 radio group 与 .prevent/.stop）、<StyleBlock scoped>
+- 模板 DSL：{expr}、{#if}/{:else}/{/if}、{#each arr as item}/{/each}、on:click={fn}（.prevent/.stop 修饰符：on:click.prevent={fn}，ATR-326 白名单外拒绝）、bind:value={sig}/bind:checked={sig}/bind:group={sig}（双向，目标须可写 $state：$derived→ATR-305、目标非法/组合越面→ATR-324、同槽重复/冲突→ATR-325、radio 缺 value 身份键→ATR-327；bind:group × radio，组身份=静态 value 属性）、<StyleBlock scoped>
 - 样式：只允许 var(--token) 或 utility 类，引用不存在 token 报 ATR-204
 - 错误：{code, message, context, fix}
 
