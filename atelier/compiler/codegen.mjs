@@ -137,6 +137,15 @@ function emitAttrs(attrs, SV, el, tag, out, uid, st) {
       // 与解释器 renderNode element 分支 on: 支路同位同构；无修饰符行为逐字节不变。
       // collect 论证：监听器内事件期 evalExpr 读 handler 表达式 ⇒ 静态清单收 events 桶不变。
       out.push(`  rt.bindEvent(${el}, ${esc(a.name)}, ${esc(a.value)}, ${SV});`);
+    } else if (a.name === "bind:group") {
+      // 决策 25 v1.2（m10 批）radio group 双向绑定：与解释器 renderNode element 分支同位同构——
+      // 同一单点 rt.bindGroup(el, name, expr, scope, tag)（bindTwoWay 五参同款），组语义/身份键/
+      // ATR-327/槽位守卫全部收在 runtime 单点内。m9 on: 整名发射教训沿用：attr 全名进发射，
+      // 不 slice（bind:group 无修饰符形态，整名纪律不破）。
+      // collect 论证与 bind: 同款：bindGroup 下行 effect 订阅目标信号 ⇒ 运行时追踪集必含 bind
+      // 目标 ⇒ 超集不变式（F-2 依赖图）⇒ 与 dynamic 支路同桶收集（reactive）。
+      collect(st, "reactive", a.value);
+      out.push(`  rt.bindGroup(${el}, ${esc(a.name)}, ${esc(a.value)}, ${SV}, ${esc(tag)});`);
     } else if (a.name.startsWith("bind:")) {
       // 决策 25 双向绑定（bind:value/bind:checked）：与解释器 renderNode element 分支同位
       //（先于 dynamic 单向支路）同构——同一单点 rt.bindTwoWay(el, name, expr, scope, tag)，
