@@ -446,24 +446,25 @@ describe("dev-review-data · 迁移 journal（down 历史）消费与降级（�
 /* ---------------- D. 页面与插件接线 ---------------- */
 
 describe("dev-review-pages · 页面关键标记（可断言的 HTML/JS）", () => {
-  it("endpointsPageHtml：端点表 + try-it + schema 展示标记齐全", async () => {
+  it("endpointsPageHtml：端点表 + try-it + schema 展示标记齐全（token 不内嵌——P1-12）", async () => {
     const { endpointsPageHtml } = await import("../dev/dev-review-pages.mjs");
-    const html = endpointsPageHtml("tok-123");
+    const html = endpointsPageHtml();
     expect(html).toContain("/__atelier/server-status");
     expect(html).toContain("endpoint-table");
     expect(html).toContain("try-input");
     expect(html).toContain("schema-detail"); // 契约/schema 展示挂点
-    expect(html).toContain("tok-123");
+    expect(html).not.toContain("tok-123"); // P1-12 ②：页面不再内嵌 token（fetch 靠同源 cookie）
     expect(html).toContain("POST"); // try-it 走 POST（query/command 同走 POST——契约校验要求 JSON 体）
   });
 
-  it("reviewExtScript：迁移时间轴 / checkpoint 对齐 / 统一时间轴 / review-data 消费", async () => {
+  it("reviewExtScript：迁移时间轴 / checkpoint 对齐 / 统一时间轴 / review-data 消费（token 不内嵌）", async () => {
     const { reviewExtScript } = await import("../dev/dev-review-pages.mjs");
-    const js = reviewExtScript("tok-123");
+    const js = reviewExtScript();
     expect(js).toContain("/__atelier/review-data");
     expect(js).toContain("migration-timeline");
     expect(js).toContain("unified-timeline");
     expect(js).toContain("checkpoint");
+    expect(js).not.toContain("tok-123"); // P1-12 ②：脚本不再内嵌 token
   });
 });
 

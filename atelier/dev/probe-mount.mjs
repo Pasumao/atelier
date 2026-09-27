@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pickFreePort } from "./dev-screenshot.mjs"; // P1-12 ③ 同族：固定 CDP 端口可被抢占/扫描，随机化拉齐
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -20,7 +21,7 @@ function findBrowser() {
   throw new Error("msedge.exe not found");
 }
 
-const debugPort = 9347;
+const debugPort = await pickFreePort(); // P1-12 ③：每次随机端口（原固定 9347 同属无鉴权 CDP 面）
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-probe-"));
 const exe = findBrowser();
 const child = spawn(exe, [

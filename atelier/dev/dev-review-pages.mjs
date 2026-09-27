@@ -3,10 +3,12 @@
  *
  * 框架自有模块（framework-owned）；init/sync 时随 dev 面五件 vendor 进应用 scripts/
  * （init/sync 的 DEV_FILES 白名单——两处名单同步加行），由 atelier-dev-plugin.mjs 引入：
- *   - endpointsPageHtml(token)  → GET /__atelier/endpoints（D-F16：端点表 + try-it + schema 展示）
- *   - reviewExtScript(token)    → GET /__atelier/review-ext.js（review 页扩展：迁移时间轴 ×
+ *   - endpointsPageHtml()       → GET /__atelier/endpoints（D-F16：端点表 + try-it + schema 展示）
+ *   - reviewExtScript()         → GET /__atelier/review-ext.js（review 页扩展：迁移时间轴 ×
  *                                 checkpoint 对齐 / 端点行为 diff / 统一时间轴——数据来自
  *                                 /__atelier/review-data，注入既有 review 页不重写它）
+ * 鉴权（P1-12）：页面不再内嵌 token——同源 fetch/脚本标签自动携带一次性 HttpOnly cookie，
+ * 由 dev 面 token 门放行；页面自身在 /__atelier/* 门内出焉。
  *
  * 纯 dev 面 vanilla HTML/JS（对齐既有 review UI 风格），零新增依赖、零构建步骤。
  * 数据面契约：/__atelier/server-status（server/introspect.ts 产出 + dev 父进程补充）与
@@ -23,7 +25,7 @@ const ESC_SNIPPET = `function esc(s){const d=document.createElement("div");d.tex
  *   （契约校验要求 JSON 体；GET 通道只保留给 /live SSE），任务书里"query=GET"的简写不成立；
  * - server 面未就绪 → 页头横幅如实呈现 note，不渲染假表。
  */
-export function endpointsPageHtml(token) {
+export function endpointsPageHtml() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Atelier Endpoints（D-F16）</title><style>
 body{font:14px/1.5 system-ui,sans-serif;margin:24px;color:#1a1a2e;background:#fafafa}
 h1{font-size:18px} h2{font-size:15px;margin:18px 0 8px}
@@ -59,8 +61,6 @@ details>summary{cursor:pointer}
 <div id="try-output" class="muted">响应或 ATR 结构化错误会出现在这里</div>
 </div>
 <script>
-const TOKEN = ${JSON.stringify(token)};
-const H = { "x-atelier-token": TOKEN };
 ${ESC_SNIPPET}
 let STATUS = null;
 function schemaCell(ep){
@@ -151,7 +151,8 @@ document.getElementById("try-send").onclick = async function(){
 };
 async function load(){
   try {
-    const r = await fetch("/__atelier/server-status", { headers: H });
+    // P1-12：无 token 头——同源 fetch 自动携带一次性 HttpOnly cookie，token 门经 cookie 放行
+    const r = await fetch("/__atelier/server-status");
     STATUS = await r.json();
   } catch (e) { STATUS = { ok: false, note: String(e) }; }
   render();
@@ -166,11 +167,9 @@ setInterval(load, 5000);
  * 追加三个 section（§11.2 迁移时间轴×checkpoint 对齐 / 端点行为 diff；§11.3 统一时间轴）。
  * 数据全部来自 /__atelier/review-data（token 门内），不引入第二数据面。
  */
-export function reviewExtScript(token) {
+export function reviewExtScript() {
   return `/* review 扩展（FS-M6 §11.2/§11.3）——由 atelier-dev-plugin 注入 /__atelier/review 页。 */
 (function(){
-const TOKEN = ${JSON.stringify(token)};
-const H = { "x-atelier-token": TOKEN };
 ${ESC_SNIPPET}
 const ROOT = document.createElement("div");
 ROOT.id = "server-review";
@@ -250,7 +249,8 @@ function renderTimeline() {
 function render() { renderMigrations(); renderCheckpoints(); renderDiff(); renderTimeline(); }
 async function load(anchorId) {
   try {
-    const r = await fetch("/__atelier/review-data" + (anchorId ? "?anchor=" + encodeURIComponent(anchorId) : ""), { headers: H });
+    // P1-12：无 token 头——同源 fetch 自动携带一次性 HttpOnly cookie
+    const r = await fetch("/__atelier/review-data" + (anchorId ? "?anchor=" + encodeURIComponent(anchorId) : ""));
     DATA = await r.json();
   } catch (e) { DATA = { ok: false, migrations: { ok: false, note: String(e) }, checkpoints: { ok: false }, timeline: [] }; }
   render();
