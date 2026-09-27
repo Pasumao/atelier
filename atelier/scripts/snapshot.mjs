@@ -179,7 +179,9 @@ if (isMain) {
       // verdict ladder: byte-equal → MATCH；bytes differ but pixels within threshold → PIXMATCH
       // （字体抗锯齿/亚像素抖动不是回归）；否则 MISMATCH
       const verdict = same ? "MATCH" : ratio !== null && !j.pixelDiff.dimsDiffer && ratio <= threshold ? "PIXMATCH" : "MISMATCH";
-      writeReceipt({ result: verdict, baselineSha: baseSha, currentSha: curSha, sourceFp: sourceFingerprint(), pixelRatio: ratio, threshold });
+      // m11 收口：check 路径 receipt 同款 variant 标记（save/--update 已有）——check 是唯一能产出
+      // MATCH/PIXMATCH 的写入者，漏标则 checkpoint 快路径的 full 变体排除对真实写入形状失效
+      writeReceipt({ result: verdict, baselineSha: baseSha, currentSha: curSha, sourceFp: sourceFingerprint(), pixelRatio: ratio, threshold, ...(FULL ? { variant: "full" } : {}) });
       console.log(`current  → ${path.relative(process.cwd(), CURR)}`);
       console.log(`baseline → ${path.relative(process.cwd(), BASE)}`);
       if (verdict === "MATCH") {

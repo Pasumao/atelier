@@ -201,11 +201,14 @@ async function snapshotGate(repo, skip) {
   const curFp = sourceFingerprint();
   // fast path: a fresh MATCH receipt against the SAME baseline AND the SAME sources satisfies the
   // gate without a recapture — a source change since the check forces a live capture (that is the
-  // exact agent loop: edit → checkpoint, which a stale receipt must never wave through)
+  // exact agent loop: edit → checkpoint, which a stale receipt must never wave through).
+  // m11 收口：full 变体 receipt 显式排除（评审 minor ②）——快路径只认默认变体（m11 归档行口径
+  // 「full 检查不替代」）；否则 baseline.png 与 baseline-full.png 字节相同时（不可滚动页）仅靠
+  // baselineSha 不等性隔离不够，full MATCH receipt 会被误食。
   try {
     const rc = JSON.parse(fs.readFileSync(path.join(repo, ".atelier", "snapshot-lastcheck.json"), "utf8"));
     const ageMin = (Date.now() - Date.parse(rc.at)) / 60000;
-    if ((rc.result === "MATCH" || rc.result === "PIXMATCH") && rc.baselineSha === baseSha && rc.sourceFp === curFp && ageMin >= 0 && ageMin < 5) {
+    if (rc.variant !== "full" && (rc.result === "MATCH" || rc.result === "PIXMATCH") && rc.baselineSha === baseSha && rc.sourceFp === curFp && ageMin >= 0 && ageMin < 5) {
       console.log(`[gate] fresh MATCH receipt (${ageMin.toFixed(1)} min old, same baseline & sources) — 未检不锚 satisfied ✔`);
       return;
     }
