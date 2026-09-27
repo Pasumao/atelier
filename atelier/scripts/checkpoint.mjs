@@ -11,8 +11,9 @@
  *                     [--no-gate] skip the 未检不锚 gates (deliberate wip anchors only)
  *                     [--db <file>] migration-head source db (default .atelier/dev.db, FS-M2(m2d) 决策 21-③)
  *                     gate 1 (决策 15 test gate): the package.json test suite must pass — a red suite refuses the anchor
- *                     gate 2 (P2-2 snapshot gate): if .atr/snapshots/baseline.png exists and the dev face answers, the live render
- *                     must MATCH it — MISMATCH refuses the anchor (fix via `atelier snapshot check --update`)
+ *                     gate 2 (P2-2 snapshot gate): if a snapshot baseline exists (per-platform resolveBaseline,
+ *                     legacy flat .atr/snapshots/baseline.png is a read-only fallback) and the dev face answers,
+ *                     the live render must MATCH it — MISMATCH refuses the anchor (fix via `atelier snapshot check --update`)
  *                     gate 3 (P3-4 api-diff gate): if .atelier/api-surface.json exists, unexempted public API breaking drift
  *                     refuses the anchor (re-baseline via `atelier api-diff snapshot`; carve-outs via `--allow`)
  *   list [--json]     show the human-visible timeline (.atelier/checkpoints.jsonl — local-only

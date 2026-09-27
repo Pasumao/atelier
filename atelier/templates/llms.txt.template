@@ -20,7 +20,7 @@
 
 ## Template DSL
 
-`{expr}`（对象/数组字面量 `{{a: x.value}}`、`{a}` 简写）· `{#if}{:else if}{:else}{/if}` · `{#each arr as item, idx [by key]}` · `on:click={handler}` · `bind:value={sig}` / `bind:checked={sig}` / `bind:group={sig}`（表单双向，目标=可写 $state；$derived→ATR-305 / 目标非法或组合越面→ATR-324 / 同槽重复冲突→ATR-325 / radio 缺 value 身份键→ATR-327；bind:group × radio，组身份=静态 value 属性，组内互斥经信号）· `attr={expr}`（含对象字面量）· void 元素 `<br>/<img>/<input>` · `<StyleBlock scoped>` — 解析期显式拒绝未闭合/错位结构（ATR-101）。
+`{expr}`（对象/数组字面量 `{{a: x.value}}`、`{a}` 简写）· `{#if}{:else if}{:else}{/if}` · `{#each arr as item, idx [by key]}` · `on:click={handler}（.prevent/.stop 修饰符：on:click.prevent={handler}，ATR-326 白名单外拒绝）` · `bind:value={sig}` / `bind:checked={sig}` / `bind:group={sig}`（表单双向，目标=可写 $state；$derived→ATR-305 / 目标非法或组合越面→ATR-324 / 同槽重复冲突→ATR-325 / radio 缺 value 身份键→ATR-327；bind:group × radio，组身份=静态 value 属性，组内互斥经信号）· `attr={expr}`（含对象字面量）· void 元素 `<br>/<img>/<input>` · `<StyleBlock scoped>` — 解析期显式拒绝未闭合/错位结构（ATR-101）。
 
 ## Contract (flat schema)
 
