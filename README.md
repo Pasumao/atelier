@@ -137,7 +137,7 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 | `atelier/docs/README.md` | 文档导航（每份一行：定位 + 状态 + 时点） |
 | `atelier/docs/ARCHITECTURE.md` | 系统是什么（五层 + S0 服务层、仓库布局、模块边界） |
 | `atelier/docs/SPEC-Agentic-DX-v0.2.md` | 代理怎么用（硬约定 / 错误导航表 / DoD / 工作循环 / 全站化行为契约；v0.1 留档 superseded） |
-| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-24 + 未决项） |
+| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-28 + 未决项） |
 | `atelier/docs/AI-OPTIMAL-STRUCTURE.md` | 六层 AI 友好结构公理与机检规则集 |
 | `atelier/docs/ROADMAP.md` | 路线计划（方向与里程碑） |
 | `atelier/docs/BACKLOG.md` | 缺口与改进执行队列（唯一源） |
