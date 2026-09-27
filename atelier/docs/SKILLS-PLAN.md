@@ -47,6 +47,6 @@ E 工具名 ⊆ mcp-definitions.json · S Agent Skills 标准符合性 · 话术
 
 ## 5. 与既有文档的关系
 
-- `docs/SPEC-Agentic-DX-v0.1.md` → skill 的"正确性权威"（DoD/错误格式/工作循环）
+- `docs/SPEC-Agentic-DX-v0.2.md` → skill 的"正确性权威"（DoD/错误格式/工作循环）
 - `docs/ARCHITECTURE.md` §8 → 命令/工具名唯一源；`design-decisions.md` 决策 7 → 分发依据（源码即库）
 - 实测对照（首遍正确率）→ `benchmarks/m3/`（RUNBOOK 逐臂操作卡）

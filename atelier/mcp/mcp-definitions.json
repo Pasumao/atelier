@@ -5,7 +5,7 @@
   "purpose": "Single source for Atelier built-in MCP tool surface (names/faces/params). Skills and future MCP server must stay consistent with this file (enforced by scripts/check-skills.mjs).",
   "syncWith": [
    "atelier/docs/ARCHITECTURE.md#6-mcp-tool-list",
-   "atelier/docs/SPEC-Agentic-DX-v0.1.md",
+   "atelier/docs/SPEC-Agentic-DX-v0.2.md",
    "atelier/docs/design-decisions.md decision 7/12/15"
   ],
   "schemaRules": "Flat schema only: type / reqProps / optProps / enum / items — no $ref, no oneOf, no generics (H1/decision 6)",

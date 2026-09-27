@@ -16,5 +16,5 @@ Atelier 框架的全部实现都在本目录内，自足、零第三方依赖（
 | `docs/` | 框架规格文档；入口地图见仓库根 README「文档地图」 |
 
 - 总览、Quick start、性能基线：仓库根 [README.md](../README.md)
-- 系统架构：`docs/ARCHITECTURE.md`；代理行为契约：`docs/SPEC-Agentic-DX-v0.1.md`
+- 系统架构：`docs/ARCHITECTURE.md`；代理行为契约：`docs/SPEC-Agentic-DX-v0.2.md`
 - 改动纪律：runtime 只改 `runtime/`；改 MCP 工具/命令/错误码需三处同步（CLI HELP / `mcp/mcp-definitions.json` / 对应 skill），改完跑 `node atelier/scripts/check-skills.mjs`（exit code 可接 CI）
