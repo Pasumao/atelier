@@ -194,7 +194,15 @@ async function navigateAndSettle(cdp, { url, settleMs, readyPollMs = 250 }) {
   await sleep(settleMs); // let microtask renders / fonts settle
 }
 
-async function captureOnSession(cdp, { url, settleMs, compareBase64 = null, threshold = 0.12, readyPollMs = 250 }) {
+async function captureOnSession(cdp, { url, settleMs, compareBase64 = null, threshold = 0.12, readyPollMs = 250, fullPage = false }) {
+  // fullPage（m11 批 C 快照门全页变体）：Page.getLayoutMetrics 取整页滚动尺寸 →
+  // captureBeyondViewport + clip 拍下视口外内容。视口捕获路径零变化（默认变体逐字不破）。
+  const shotParams = async () => {
+    if (!fullPage) return { format: "png" };
+    const m = await cdp.send("Page.getLayoutMetrics", {}, 8000);
+    const size = m.cssContentSize ?? m.contentSize;
+    return { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 } };
+  };
   await navigateAndSettle(cdp, { url, settleMs, readyPollMs });
 
   // 捕获 + 单次重试：captureScreenshot 偶发瞬态挂起（合成器），重试即成功；
@@ -208,10 +216,10 @@ async function captureOnSession(cdp, { url, settleMs, compareBase64 = null, thre
   };
   const shot = await (async () => {
     try {
-      return await cdp.send("Page.captureScreenshot", { format: "png" }, 15000);
+      return await cdp.send("Page.captureScreenshot", await shotParams(), 15000);
     } catch {
       if (!(await mountOk())) throw new Error("app wiped before capture (vite reload race)");
-      return await cdp.send("Page.captureScreenshot", { format: "png" }, 15000);
+      return await cdp.send("Page.captureScreenshot", await shotParams(), 15000);
     }
   })();
   let pixelDiff = null;
@@ -254,10 +262,10 @@ async function captureOnSession(cdp, { url, settleMs, compareBase64 = null, thre
 /** Transient capture: 每拍一只无头实例（兼容 API；独立捕获/排查场景用）。
  *  Optional compareBase64 (previous PNG): computes a per-pixel mismatchRatio in the same
  *  session via canvas evaluate (P1-8) — zero npm dependencies. */
-export async function capturePage({ url, settleMs = 1200, compareBase64 = null, threshold = 0.12 }) {
+export async function capturePage({ url, settleMs = 1200, compareBase64 = null, threshold = 0.12, fullPage = false }) {
   const session = await openTransientBrowser();
   try {
-    return await captureOnSession(session.cdp, { url, settleMs, compareBase64, threshold });
+    return await captureOnSession(session.cdp, { url, settleMs, compareBase64, threshold, fullPage });
   } finally {
     session.close(); // ws close + browser kill + delayed profile cleanup
   }
@@ -366,14 +374,14 @@ export async function closePersistentBrowser() {
  *  warm 拍摄省掉浏览器冷启动：settle 与就绪轮询都用更紧的节奏（语义不变，只是不等已成定局的事）。
  *  Optional compareBase64 (previous PNG): computes a per-pixel mismatchRatio in the same
  *  session via canvas evaluate (P1-8) — zero npm dependencies. */
-export async function capturePagePersistent({ url, settleMs = 120, compareBase64 = null, threshold = 0.12, readyPollMs = 50 }) {
+export async function capturePagePersistent({ url, settleMs = 120, compareBase64 = null, threshold = 0.12, readyPollMs = 50, fullPage = false }) {
   let lastErr = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const session = await getPersistentSession();
     try {
       // 复用前快速活性探针（2s 上限）：死会话上的正式命令要等满超时，探针先把最坏情况短路
       await session.cdp.send("Runtime.evaluate", { expression: "1", returnByValue: true }, 2000);
-      return await captureOnSession(session.cdp, { url, settleMs, compareBase64, threshold, readyPollMs });
+      return await captureOnSession(session.cdp, { url, settleMs, compareBase64, threshold, readyPollMs, fullPage });
     } catch (e) {
       lastErr = e;
       await destroyPersistentSession();

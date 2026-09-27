@@ -436,14 +436,25 @@ export function atelierDevPlugin() {
           // snapshot=1 → 页面进入确定性渲染（动画冻结、流式文本一次性落定），见 index.html
           // compare=1 → P1-8 像素级对比：与 .atr/snapshots/baseline.png 同实例 canvas evaluate
           const wantsCompare = rawUrl.includes("compare=1");
+          const wantsFull = rawUrl.includes("full=1"); // m11 批 C：全页捕获变体（快照门首屏盲区销账）
           const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?snapshot=1`;
           try {
             let compareBase64 = null;
             let threshold = 0.12;
             if (wantsCompare) {
               try {
-                const basePath = path.join(ROOT, ".atr", "snapshots", "baseline.png");
-                if (fs.existsSync(basePath)) {
+                // compare 基线平台感知（m11 批 C 顺路修复 m10 遗留不一致：此前写死平铺
+                // baseline.png——per-platform 布局武装后像素档对新基线悄悄失明）。
+                // full 变体无 legacy 回退（baseline-full.png 是新变体，不存在即纯捕获）。
+                const platform = process.platform;
+                const baselineCandidates = wantsFull
+                  ? [path.join(ROOT, ".atr", "snapshots", platform, "baseline-full.png")]
+                  : [
+                      path.join(ROOT, ".atr", "snapshots", platform, "baseline.png"),
+                      path.join(ROOT, ".atr", "snapshots", "baseline.png"), // 旧布局只读回退（绝不自动迁移）
+                    ];
+                const basePath = baselineCandidates.find((p) => fs.existsSync(p));
+                if (basePath) {
                   compareBase64 = fs.readFileSync(basePath).toString("base64");
                   const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, "atelier.config.json"), "utf-8"));
                   threshold = Number(cfg?.snapshot?.mismatchThreshold ?? 0.12);
@@ -456,7 +467,7 @@ export function atelierDevPlugin() {
             let lastErr = null;
             for (let attempt = 1; attempt <= 2; attempt++) {
               try {
-                screenshotInflight ??= capturePage({ url: appUrl, compareBase64, threshold }).finally(() => { screenshotInflight = null; });
+                screenshotInflight ??= capturePage({ url: appUrl, compareBase64, threshold, fullPage: wantsFull }).finally(() => { screenshotInflight = null; });
                 const r = await screenshotInflight;
                 imageBase64 = r.imageBase64;
                 pixelDiff = r.pixelDiff;

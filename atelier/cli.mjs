@@ -51,7 +51,7 @@ QUALITY GATES
                                                                          (+ contract/token gates as compiler lands)
   atelier lint                                                     STUB  soft-constraint ruleset (v0.2)
   atelier test                                                     MINI* forwards to the project's test runner
-  atelier snapshot save | check [--update]                         MINI* visual regression via the dev face
+  atelier snapshot save | check [--update] [--full]                 MINI* visual regression via the dev face (--full = 整页变体, m11)
                                                                          (byte+pixel tiers; never auto-accepts)
   atelier api-diff snapshot | check [--root <dir>] [--json]        MINI  public API surface snapshot + drift gate
                                             [--strict] [--allow <f>] [--budget <0..1>]  (removed/changed = breaking, exit 1)
@@ -280,7 +280,7 @@ switch (cmd) {
     break;
   case "api-diff":
     // P3-4: 公共 API 面 snapshot + 漂移门禁（breaking 未豁免 = exit 1）
-    if (!sub) die("usage: atelier api-diff snapshot | check [--root <dir>] [--json] [--strict] [--allow <file>]", 2);
+    if (!sub) die("usage: atelier api-diff snapshot | check [--root <dir>] [--json] [--strict] [--allow <file>] [--budget <0..1>]", 2);
     runScript("api-diff.mjs", [sub, ...rest]);
     break;
   case "test": {
