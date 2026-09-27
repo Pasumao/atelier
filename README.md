@@ -5,6 +5,10 @@
 >
 > 系统是什么 → `atelier/docs/ARCHITECTURE.md`；代理怎么用 → `atelier/docs/SPEC-Agentic-DX-v0.2.md`；完整文档地图见文末。
 
+![version](https://img.shields.io/badge/version-1.0.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)
+
+**v1.0.0**（2026-09-27，首个正式版本）· 变更史见 [CHANGELOG.md](CHANGELOG.md)（Keep a Changelog + 语义化版本，兼容性执行器 = `atelier api-diff`，见决策 28）。1.0 = release-ready：npm publish 等发布日外部动作见 [`atelier/docs/RELEASE-CHECKLIST.md`](atelier/docs/RELEASE-CHECKLIST.md)。
+
 ## Why：AX（Agentic Experience）是新的第一公民
 
 主流框架在 2026 年把 agent 基建当**外挂**补上（AGENTS.md 生成器、MCP 检视插件、agent 检测 dev server）。Atelier 的路径不同：把 agent 当**第一类使用者**，从框架第一行开始内建它需要的东西——机器可读契约、可检视状态、可回滚、机检门禁。对应的新词汇：**AX**（Agentic Experience，相对 UX）、**agentic engineering**（相对 frontend engineering）。框架本体就是 agent 最佳实践的框架化实现，而不是另一份文档。
@@ -50,7 +54,7 @@ S0 服务层      atelier/server —— defineQuery/defineCommand 读写二分 �
 
 ## 获取与运行
 
-> 本项目尚未发布 npm，目前需 clone 仓库使用。前置要求：Node.js ≥ 22（实测 Node 24）与 pnpm。
+> 框架版本 1.0.0（release-ready）；**尚未发布 npm**（发布日外部动作，见 RELEASE-CHECKLIST），目前需 clone 仓库使用。前置要求：Node.js ≥ 22（实测 Node 24）与 pnpm。
 
 ```bash
 git clone https://github.com/Pasumao/atelier.git
@@ -73,7 +77,7 @@ node <atelier仓库路径>/atelier/mcp/server.mjs   # MCP 工具面（ATELIER_PR
 以下四点是 Atelier 与现有框架的实质差异，每条附实测与复现命令：
 
 **① 扁平 schema 一份三用** —— 同一个 `{reqProps, optProps}` 扁平形态同时充当组件契约（运行时校验 + token 校验，错误带错误码与 fix 行动指令）、MCP 工具参数（`mcp-definitions.json` 单源生成 tools/list）、注册表白名单渲染校验。无 $ref/oneOf，代理不猜。
-实测：框架 <!--@num:tests-->615<!--@/--> 用例 vitest 通过（另有 8 例实验台用例按环境跳过）；<!--@num:tools-->36<!--@/--> 工具单源接线，一致性校验全绿。
+实测：框架 <!--@num:tests-->618<!--@/--> 用例 vitest 通过（另有 8 例实验台用例按环境跳过）；<!--@num:tools-->36<!--@/--> 工具单源接线，一致性校验全绿。
 复现：`node atelier/scripts/check-skills.mjs` · `atelier/pnpm test`。
 
 **② 事务状态层 + 双轨回滚** —— 应用状态：命名合并 checkpoint（同名栈顶幂等，即轮级回滚）+ 增量事件日志（journal）+ 依赖图查询（`store.graph()` 与 journal 已接进 MCP，代理可直接问"现在哪些状态依赖什么"）；源码：git 源码锚，锚定前强制过三道门禁（测试绿 + 截图快照无漂移 + API 面无破坏性变更）。危险操作走 `agent.confirm` 确认闸，拒绝时返回结构化错误而非静默失败。
@@ -90,7 +94,7 @@ node <atelier仓库路径>/atelier/mcp/server.mjs   # MCP 工具面（ATELIER_PR
 
 AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@num:tools-->36<!--@/--> 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按面分组按需启用）· W3C Design Tokens（DTCG）标准互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`）。
 
-## 性能基线（`atelier bench` 实测 2026-09-27 / Windows / Node 24 · 1.0 发布前复测口径）
+## 性能基线（`atelier bench` 实测 2026-09-27 / Windows / Node 24 · 1.0.0 复测口径）
 
 | 指标 | 目标 | 实测 | 判定 |
 |---|---|---|---|
@@ -108,12 +112,20 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 - **北极星指标**（可证伪）：加难任务层上的 agent 首遍正确率（≥ +15pt 或绝对值 ≥ 60%）。
 - **执行队列**：`atelier/docs/BACKLOG.md`。
 
-## 当前状态与已知边界
+## Known Limitations（已知限制，1.0.0 时点）
 
-- **未发布 npm**：需 clone 仓库使用；无第三方生产用户。
-- **全站化推进中**：FS-M1 已落地（`atelier/server` 端点运行时 + Standard Schema 互操作口 + SQLite 薄宿主适配，决策 17-23）；生成器 / 迁移 / MCP 全栈工具族未落地，见 `BACKLOG.md` FS 线。
+面向使用者的诚实清单——每条一句限制 + 影响 + 出路。内部缺口与候选池台账见 `BACKLOG.md`；这里只列使用者可感知项。
+
+- **未发布 npm**：框架 1.0.0 = release-ready，安装仍需 clone 仓库（`atelier init` 产物自包含、不依赖框架仓库驻留）。影响：没有 `npm create atelier` 一键脚手架。出路：按上文 clone + init 三步；`create-atelier` 脚手架列发布日动作（RELEASE-CHECKLIST）。
+- **平台覆盖以 Windows 实证为主**：常规测试门禁与视觉快照基线在 win32 实武装；linux/darwin 的快照基线未武装（快照门在这些平台如实 vacuous，不假红）。影响：非 Windows 用户的视觉回归门禁需先在本地 `atelier snapshot save` 捕获基线。出路：per-platform 布局已就绪，各平台本地武装即启用。
+- **Bun 路径实测过但无 CI 常规覆盖**：SQLite 薄宿主适配经真实 Bun 1.4.2 全语义面冒烟 + 全栈落库/持久化验证；但冒烟脚本需 bun 宿主手动跑（`scripts/bun-adapter-smoke.mjs`），未进常规测试门禁。影响：bun 回归依赖手动冒烟，报错文案匹配归一可能随 bun 升级失效（失效=差异重新可见，非静默）。出路：`atelier build --target=bun` 产物冒烟自证兜底。
+- **真实 CI 未首跑**：CI 矩阵已接线（linux/windows × node 22/24），但仓库未 push 远端，视觉冒烟作业保留 continue-on-error。影响：CI 门禁承诺（测试/结构/API 面）尚未在第三方环境兑现。出路：push 远端 + 首跑后摘除 continue-on-error（RELEASE-CHECKLIST 发布日动作）。
+- **Windows 进程收尾语义**：`atelier dev` 托管的 server 子进程在 Windows 上 kill = 即终止，优雅关停兜底窗口形同保障。影响：热重启瞬间可能有极小概率的端口/句柄残留。出路：监督器 SIGTERM 1.5s 兜底 + 未就绪 503 自愈，重启即恢复。
+- **command journal 内存环形**：命令审计 journal 为有界环形（默认 500 条）、进程重启清零；迁移 journal 持久（成败条目入账）但随数据库文件存亡。影响：跨重启的端点行为 diff 降级为 audit 源；删除库文件即丢失迁移史。出路：审计面 audit.jsonl 持久；迁移史以 checkpoint 台账为锚。
+- **server 面 prod 激活为行为级**：服务面无打包器，prod 语义靠旗关断（调试面隐身/校验跳过），代码仍在产物内；构建期 DCE 只覆盖浏览器面。影响：server 产物体积不是最小。出路：单容器整目录部署语义（`atelier build`），体积优化非 1.0 目标。
+- **vendored 应用按 init 时点冻结**：应用获得的是 init 时刻的框架拷贝；新能力（MCP HTTP 直连、全页快照等）需 `atelier sync` 拉齐。影响：未 sync 的旧应用 MCP 直连 503（诚实指路 stdio）。出路：`node atelier/cli.mjs sync --target <dir>` 幂等拉齐，应用源码不受影响。
 - **正确率主张克制**：三臂对照实验在简单层与加难层（Wave-7 正式波 45 run）均全平——绝对口径 100% 达标、相对区分力为零；「技能包优势」主张悬置待干扰面/混合实验出数，我们不引用任何"首遍正确率优势"数字，请引用者同样克制。
-- **性能数字为单机实测**（2026-09-27 / Windows / Node 24，1.0 发布前复测；上轮 2026-09-06），会随修复移动。
+- **性能数字为单机实测**（2026-09-27 / Windows / Node 24，1.0.0 复测口径），会随修复移动；FAIL 不粉饰、不豁免。
 - **未实现即明说**：CLI 命令按实现程度标注（完整 / 最小 / 未实现），未实现的命令返回 exit 4 并指路规格文档，永不伪造成功。
 - 所有"未确认"结论明确标注，不写成事实。
 
@@ -121,6 +133,7 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 
 | 文档 | 回答的问题 |
 |---|---|
+| `CHANGELOG.md` | 版本变更史（Keep a Changelog + 语义化版本；1.0.0 起对外） |
 | `atelier/docs/README.md` | 文档导航（每份一行：定位 + 状态 + 时点） |
 | `atelier/docs/ARCHITECTURE.md` | 系统是什么（五层 + S0 服务层、仓库布局、模块边界） |
 | `atelier/docs/SPEC-Agentic-DX-v0.2.md` | 代理怎么用（硬约定 / 错误导航表 / DoD / 工作循环 / 全站化行为契约；v0.1 留档 superseded） |

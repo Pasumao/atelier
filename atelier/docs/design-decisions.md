@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-27**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批）；未决项 2 条见文末。
+> 已决 **0-28**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -427,6 +427,17 @@
 > `BUILD_PROD`/`dynProd`（shorthand 标识符列表，无 `||` 形态——prod-flags 形态机检「恰好 N 处」钉不
 > 受扰）。产物发射经 `rt.*` 属性访问拿旗，双旗短路语义与解释器同款；真实 vite build 折叠归构建管线
 > （build-gate 模式），单测钉守卫形态与运行时行为。门禁：553 绿+8 skip（本支段）。
+
+## 决策 28：1.0 版本化与语义化版本承诺（m12 发布工程批）
+- **定论**：`atelier/package.json` version **0.2.0 → 1.0.0**，1.0.0（2026-09-27）为**首个稳定版**——此后版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)：**major = 破坏性变更 / minor = 向后兼容的新增 / patch = 向后兼容的修复**。0.x 期间无对外发布点，CHANGELOG 首条由 `BACKLOG.md` 归档行（git 锚点可溯）提炼，落点 = 仓库根 `CHANGELOG.md`（Keep a Changelog 风格，与 README 同层）。
+- **兼容性执行器 = `atelier api-diff`**（P3-4 既有门禁升格为版本承诺的执行面）：
+  - breaking（removed/changed）出现时，**必须**升 minor（弃用容忍期口径下）或 major，且 `--allow` 豁免**留痕**（豁免文件入 checkpoint 台账）——不许静默破坏；
+  - 新增默认 **additive**（minor 预期内）；`--strict` 供**发布前终检**（连新增也红，发布窗口用，日常开发不开）；
+  - `--budget` 值漂移预算维持既有三态语义（token 值漂移的量化容忍，m11 批已判定机制完整）。
+- **发布形态**：`"private": true` **保持**——本环境不真发布 npm（无账号），1.0 = release-ready；npm publish 时点 = ROADMAP §5 D-3 发布日决策（外部账号/生态窗口），**非本批代拍**。发布工件 = `atelier/docs/RELEASE-CHECKLIST.md` 两段式（①本地可验项 12 道 / ②发布日外部动作 9 项，逐项标注本仓未验证原因）。版本降级防护 = `tests/release-form.test.ts` 形态钉（version 断言 / CHANGELOG 存在 / private 保持），package.json 字段面是 api-diff 门禁覆盖外的形态位。
+- **版本引用面纪律**：框架版本单一源 = `atelier/package.json`；`mcp/mcp-definitions.json` `$meta.version`（MCP serverInfo 真实消费方）、CLI 横幅、dev 面 registry meta 随发布同步。文档自身的版本号（SPEC v0.2 / ARCHITECTURE v0.2 等）与代码内部语义标签（core.ts "v0.2 订阅模型"）**不属**框架发布版本，不随动——历史记录不改写。
+- 取舍：不引入 changesets/release-please 等发布编排工具（单人仓 + BACKLOG 归档行已是变更史单一源，工具链重复）；不设 LTS 分支（1.0 前无外部用户，支持负担承诺见 D-3 后果栏）。
+- 时间：2026-09-27（m12 批，统筹者单分支串行；release-ready 口径的 PM 拍板见 BACKLOG 归档行）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
