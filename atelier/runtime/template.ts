@@ -351,6 +351,33 @@ function stringify(v: unknown): string {
   return String(v);
 }
 
+/* ---- P1-2：HTML 布尔属性存在性语义 ----------------------------------------
+ * 真浏览器中布尔属性（disabled/checked/hidden/…）存在即真、与值无关——setAttribute(name,
+ * "false") 同样生效。修复前动态属性一律 setAttribute(name, stringify(v))，false → "false"
+ * → 属性落在 ⇒ disabled={canSubmit} 在真假两态下元素都被禁用（语义反转；红检见
+ * tests/bool-attrs.test.ts）。修法：已知布尔属性取值 false → removeAttribute（null/undefined
+ * 既有语义不变）；dev 态收到字符串化 "false"/"0" 等可疑值给 ATR-328 警示（存在即真照常
+ * 生效，不静默）。诚实边界：非布尔属性字符串行为逐字不变（data-x={false} 仍落 "false"）；
+ * 布尔属性 true 仍落 "true"（存在即真，与空串形态等价）；空串不警示（disabled={c ? "" : null}
+ * 是合法的存在性写法）。测试配套：dom-shim 升级 hasAttribute + 布尔属性反射（同清单复刻）。
+ */
+const BOOLEAN_ATTRS = new Set([
+  "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "default",
+  "defer", "disabled", "formnovalidate", "hidden", "inert", "ismap", "itemscope", "loop",
+  "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "readonly",
+  "required", "reversed", "selected",
+]);
+
+/** ATR-328 四段式：已知布尔属性收到字符串化假值——存在即真 ⇒ 十有八九语义反转。 */
+function atrBoolAttrSuspicious(name: string, v: unknown): AtrError {
+  return {
+    code: "ATR-328",
+    message: `布尔属性 ${name} 收到字符串化假值 "${stringify(v)}"（HTML 布尔属性存在即真，属性落在即生效）`,
+    context: { attr: name },
+    fix: `改传布尔值：${name}={false} 渲染为属性不存在；字符串 "false"/"0" 不会取消属性——请改为布尔表达式（如 ${name}={!!cond}）`,
+  };
+}
+
 /** 表达式 effect 绑定：求值（track 依赖）→ 变化时执行 write；求值失败渲染 ATR 错误卡而非抛穿白屏。
  * F-5：返回 dispose 并登记进当前受控重建的 cleanup 集（分支切换/行移除时随之析构，
  * 不再对已脱离节点写入——泄漏修复红检见 tests/f5-kernel.test.ts 红检①）。
@@ -450,6 +477,16 @@ function bindProp(expr: string, scope: Record<string, unknown>, target: Record<s
       sig.value = evalExpr(expr, scope);
     }),
   );
+  // P1-4：prop 信号随受控重建注销——$state 无条件入 store._signals 且自身无注销途径。
+  // 挂载窗口内创建的信号由 __creationSink 收进实例、disposeInstance 统一注销；但 {#if}/{#each}
+  // 分支重建发生在 mount 窗口之外（flush 微任务里的 effect 重跑），__creationSink 收不到 ⇒
+  // 每次分支切换重建的 prop 信号永久滞留全局集合（红检见 tests/f5-kernel.test.ts P1-4 组：
+  // 反复切换 _signals 只涨不降，dev 桥遍历成本随之抬高）。挂进当前受控重建的 cleanup 集，
+  // 换支/行移除时随之注销。顶层挂载期 teardownStack 为空 → no-op（该情形由实例注销路径
+  // 负责，两路不重复不遗漏——Set.delete 幂等）。
+  captureCleanup(() => {
+    store._signals.delete(sig);
+  });
 }
 
 /* ---- F-2 二期 prod 剥离（决策 6「dev 强制 / prod 剥离」）× 决策 27 构建期 DCE ----------
@@ -759,9 +796,12 @@ function bindTwoWay(
  * effect 重判 checked ⇒ 组内互斥（写 X ⇒ 键≠X 的成员全部取消）；不依赖原生 name 分组（同 name
  * 的原生互斥是 DOM 加成，不依赖也不禁止；不同 name 绑同一信号仍互斥）。
  * 身份键 = 静态 value 属性：缺失/动态 value={}/空串 → ATR-327（预检级——precheckBinds 全量
- * attrs 视野；运行时 belt 面 effect 首跑一次性 record，不抛——effect 上下文不可抛，编译路径
- * 无预检的兜底面，诚实边界）。身份键在 effect 内读取：$effect 首跑入微任务队列，程序体同步
- * 执行完毕后所有静态 attr 已落，与 attr 发射顺序无关（type 细化面同款顺序解耦论证）。
+ * attrs 视野；运行时 belt 面一次性 record，不抛——effect 上下文不可抛，编译路径无预检的兜底
+ * 面，诚实边界）。P1-3 时序修正：$effect 首跑是同步的（batched 只作用于重跑），bindGroup 又在
+ * attrs 循环内被调用——bind:group 写在 value 之前时首跑读 getAttribute("value") 得 null，记假
+ * ATR-327 且 checked 恒 false，初始选中随书写顺序漂移（旧注释"首跑入微任务队列"前提证伪）。
+ * 现身份键推迟到微任务时点定版读取（mount 全同步完成 ⇒ 首个微任务时点全部静态 attr 已落），
+ * 下行 effect 亦延至该时点创建：首跑即读到定版键，与 attr 发射顺序解耦（详见 bindGroup 内注）。
  * v1 显式不做：checkbox group（数组集合语义）、动态 type/value、组内重复身份键校验
  * （跨元素面；语义确定性保留：checked = (sig.value === 自身键)，重复键会同查）。
  */
@@ -799,19 +839,38 @@ function bindGroup(
   const sig = scope[expr.trim()] as Signal;
   const io = el as unknown as { checked: boolean };
   let keyComplained = false; // 一次性旗标：空身份键的 belt 记录不随信号变化刷屏
-  // 正向下行：信号 → 组内选中重判。身份键 effect 内读（首跑已过程序体，静态 attr 已落）；
-  // 程序化 checked= 不触发 change 事件（DOM 规范）= 无回环（bindTwoWay 同款论证）。
-  const disposeEffect = $effect(() => {
-    const key = el.getAttribute("value") ?? "";
-    if (!key) {
-      if (!keyComplained) {
-        keyComplained = true;
-        recordRuntimeError(atrBindGroupMissingKey(name, expr));
-      }
-      io.checked = false; // 空身份键永不匹配——绑定仍成立但不选中（belt 已记录，不静默）
-      return;
+  // P1-3：$effect 首跑是同步的（batched 只作用于重跑）而 bindGroup 在 attrs 循环内被调用——
+  // bind:group 写在 value 之前时首跑读 getAttribute("value") 得 null ⇒ 假 ATR-327 + checked
+  // 恒 false，初始选中随 attr 书写顺序漂移（红检见 tests/bind-group.test.ts P1-3 组）。
+  // 修法：身份键推迟到「attrs 全部落定后」读取——mount 全同步完成 ⇒ 首个微任务时点全部静态
+  // attr 已落；下行 effect 延至该时点创建，首跑即读到定版身份键，与发射顺序解耦。间隙无丢失：
+  // 微任务前的信号写入会被首跑整读（首跑读当前值）。
+  // __effectSink 归属保持：sink 按调用时点捕获（同步调用期 = mount 窗口内），微任务里建
+  // effect 时瞬时回挂——effect dispose 仍归入 mount 实例（disposeInstance/HMR 语义不变）；
+  // 嵌套在受控重建（{#if}/{#each} 重渲）内时 sink 为外层现场值，captureCleanup 主管析构。
+  const effectSinkAtCall = __effectSink.fn;
+  let disposed = false;
+  let disposeEffect: (() => void) | null = null;
+  queueMicrotask(() => {
+    if (disposed) return;
+    const key = el.getAttribute("value") ?? ""; // 身份键定版读取（此时全部静态 attr 已落）
+    const prevSink = __effectSink.fn;
+    __effectSink.fn = effectSinkAtCall;
+    try {
+      disposeEffect = $effect(() => {
+        if (!key) {
+          if (!keyComplained) {
+            keyComplained = true;
+            recordRuntimeError(atrBindGroupMissingKey(name, expr));
+          }
+          io.checked = false; // 空身份键永不匹配——绑定仍成立但不选中（belt 已记录，不静默）
+          return;
+        }
+        io.checked = sig.value === key;
+      });
+    } finally {
+      __effectSink.fn = prevSink;
     }
-    io.checked = sig.value === key;
   });
   // 反向回写：radio → change（radio 组选择事件面，bind:checked 同款）。
   const handler = () => {
@@ -823,7 +882,8 @@ function bindGroup(
   };
   el.addEventListener("change", handler);
   const dispose = () => {
-    disposeEffect();
+    disposed = true;
+    disposeEffect?.();
     // dom-shim 未实现 removeEventListener——可选调用兼容微 shim 宿主，真 DOM 全量退订（bindTwoWay 同款口径）。
     (el as { removeEventListener?: (type: string, fn: () => void) => void }).removeEventListener?.("change", handler);
   };
@@ -1293,9 +1353,29 @@ function renderNode(
           continue;
         }
         if (a.dynamic) {
+          // P1-2：布尔属性存在性语义——attr 名在循环外定死（写回调闭包捕获，非 this 敏感面）
+          const attrName = a.name;
+          const isBoolAttr = BOOLEAN_ATTRS.has(attrName.toLowerCase());
+          let suspiciousComplained = false; // 一次性旗标：可疑值警示不随重跑刷屏（bind:group keyComplained 同款）
           bindExpr(a.value, scope, (v) => {
-            if (v == null) el.removeAttribute(a.name);
-            else el.setAttribute(a.name, stringify(v));
+            if (v == null) {
+              el.removeAttribute(attrName);
+              return;
+            }
+            if (isBoolAttr) {
+              if (v === false) {
+                el.removeAttribute(attrName); // 存在即真——false 必须摘除，不能落 "false"
+                return;
+              }
+              if (!(BUILD_PROD || dynProd()) && !suspiciousComplained) {
+                const s = stringify(v);
+                if (v !== true && (s === "false" || s === "0")) {
+                  suspiciousComplained = true;
+                  recordRuntimeError(atrBoolAttrSuspicious(attrName, v));
+                }
+              }
+            }
+            el.setAttribute(attrName, stringify(v));
           });
         } else {
           el.setAttribute(a.name, a.value);

@@ -4,7 +4,10 @@
  * 覆盖的语义面（golden 对拍依赖这些行为为真）：
  *   · appendChild 的「移动」语义（keyed reconcile 重排 / 组件 root 从 wrapper 搬出）
  *   · DocumentFragment appendChild 后清空（fragment 子节点搬入父级）
- *   · className / classList / setAttribute / removeAttribute（保序）
+ *   · className / classList / setAttribute / removeAttribute / hasAttribute / getAttribute（保序 + 存在性语义）
+ *   · HTML 布尔属性的属性反射（P1-2 配套）：el.disabled / el.checked 等 ⇔ hasAttribute——
+ *     真浏览器「属性存在即真」；纯 [name, value] 字符串表 + 纯 JS 属性字段罩不住这一族语义，
+ *     disabled={false} 落 "false" 字符串的语义反转在旧 shim 下原理上不可见（建议书 4.1 P1-2）
  *   · addEventListener / dispatchEvent、firstChild / removeChild / remove
  *   · textContent 赋值（元素=替换子节点；文本=改 data）
  */
@@ -91,6 +94,9 @@ class MElement {
     const i = this.attrs.findIndex(([k]) => k === name);
     if (i >= 0) this.attrs.splice(i, 1);
   }
+  hasAttribute(name: string): boolean {
+    return this.attrs.some(([k]) => k === name);
+  }
   getAttribute(name: string): string | null {
     return this.attrs.find(([k]) => k === name)?.[1] ?? null;
   }
@@ -129,6 +135,30 @@ class MElement {
     for (const fn of this.listeners.get(e.type) ?? []) fn(e);
     return true;
   }
+}
+
+/** HTML 布尔属性清单（存在即真）——与 runtime/template.ts 的 BOOLEAN_ATTRS 保持同一集合。
+ * 复刻而非 import：dom-shim 必须先于 runtime 模板模块求值（window 探测时序），反向 import
+ * 会把 runtime 模块体提前到 window 置位之前。改清单时两处同步（测试面复刻，MUST stay in sync）。 */
+const BOOLEAN_ATTRS = [
+  "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "default",
+  "defer", "disabled", "formnovalidate", "hidden", "inert", "ismap", "itemscope", "loop",
+  "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "readonly",
+  "required", "reversed", "selected",
+] as const;
+for (const attr of BOOLEAN_ATTRS) {
+  Object.defineProperty(MElement.prototype, attr, {
+    /** 真 DOM 语义：IDL 属性反射内容属性的存在性——el.disabled ⇔ hasAttribute("disabled") */
+    get() {
+      return this.hasAttribute(attr);
+    },
+    set(v: unknown) {
+      if (v) this.setAttribute(attr, "");
+      else this.removeAttribute(attr);
+    },
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 const doc = {
