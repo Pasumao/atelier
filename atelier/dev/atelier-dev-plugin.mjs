@@ -29,11 +29,16 @@
  *                                          这里只接线）
  * transform：.atr.ts 注入 HMR 边界（P0-5）+ props 注解 schema 提取注册（决策 26，prepend
  *           registerExtractedSchemas——提取器 compiler/extract-schema.mjs，vendor 名单内）
- * 安全：/__atelier/* 一律校验 token（页面经 transformIndexHtml 注入；工具从 .atelier/dev-token 读取）。
+ * 安全：/__atelier/* 一律校验 token——三通道：x-atelier-token 头 / token 查询参数（工具链 curl·MCP
+ *       直连保留）/ 一次性 cookie（浏览器首访 ?token= → HttpOnly+SameSite=Strict cookie + 302 清洗
+ *       URL，token 不再内嵌 HTML——P1-12）；token 落盘 .atelier/dev-token 即 0600。另设 Origin/Host
+ *       白名单闸（伪造来源页驱动的浏览器请求在此拦断）与 JSON 体路由 content-type 收紧（封 no-cors
+ *       text/plain 伪装 JSON 体跨站写）。
  * 审计：非 GET 的 /__atelier/* 与命令回执均追加 .atelier/audit.jsonl。
  */
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { capturePagePersistent as capturePage, captureA11yPersistent } from "./dev-screenshot.mjs";
 import { createServerSupervisor, resolveServerConfig } from "./dev-server-host.mjs";
 /* FS-M6 尾件批（D-F16/§11.2/§11.3）：路由逻辑在独立模块——本文件只做接线注册 */
@@ -51,6 +56,59 @@ function classifyAgent(ua) {
   return "unknown";
 }
 
+/* ---- P1-12 ①：dev 面 Origin/Host 白名单 + JSON content-type 原语（导出=单元红检可达；闭包内只能整链黑盒）----
+ * 威胁模型一句话：dev-token 是 dev 面唯一信任锚，而浏览器对跨站 no-cors 请求仍会打到 /__atelier/*——
+ * 无来源闸时，token 门挡不住「伪造来源页驱动浏览器直接跨站写」这一族 CSRF（P1-12）。 */
+export const DEV_COOKIE = "atelier_dev_token";
+
+/** 自身授权方 → 允许 Origin 列表（127.0.0.1/localhost/[::1] × 显式配置 host；通配 host 不是「自身 host」）。
+ *  http/https 双 scheme 都认：scheme 由部署形态决定，来源判定的实质是 host:port。 */
+export function originAllowlist(port, extraHosts = []) {
+  const authorities = new Set(["127.0.0.1", "localhost", "[::1]"]);
+  for (const h of Array.isArray(extraHosts) ? extraHosts : [extraHosts]) {
+    if (typeof h === "string" && !["0.0.0.0", "::", "*"].includes(h)) authorities.add(h);
+  }
+  const origins = [];
+  for (const a of authorities) for (const scheme of ["http", "https"]) origins.push(`${scheme}://${a}:${port}`);
+  return origins;
+}
+
+/** Origin 是否放行：白名单命中，或与 Host 头同授权方（浏览器设置的 Host = 实际连接的授权方——
+ *  覆盖自定义 host/局域网 IP 访问；跨站伪造时 Origin 与 Host 必然失配）。Origin: null / 乱值一律拒。 */
+export function originAllowed(origin, allowlist, hostHeader = null) {
+  let u;
+  try { u = new URL(String(origin)); } catch { return false; }
+  if (hostHeader && u.host === String(hostHeader).toLowerCase()) return true;
+  return allowlist.includes(u.origin);
+}
+
+/** JSON 体路由 content-type 收紧：仅 application/json（可带参数）受理——封 no-cors text/plain 伪装。 */
+export function isJsonContentType(ct) {
+  return /^application\/json\s*(?:;|$)/i.test(String(ct ?? "").trim());
+}
+
+/** token 比较：先哈希到定长再做 timing-safe 对比（不泄长度；通道覆盖 header/查询参数/cookie）。 */
+function tokenEq(a, b) {
+  const h = (s) => createHash("sha256").update(String(s ?? ""), "utf8").digest();
+  return timingSafeEqual(h(a), h(b));
+}
+
+/** 浏览器导航判别：Sec-Fetch-Mode 优先（现代浏览器导航全带），缺省回退 Accept: text/html。
+ *  工具链 fetch/EventSource 不属导航——token→cookie 一次性交换只应发生在页面导航上。 */
+function isNavigation(req) {
+  const sfm = String(req.headers["sec-fetch-mode"] ?? "");
+  if (sfm) return sfm === "navigate";
+  return String(req.headers.accept ?? "").includes("text/html");
+}
+
+function cookieValue(header, name) {
+  for (const part of String(header ?? "").split(";")) {
+    const i = part.indexOf("=");
+    if (i >= 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return "";
+}
+
 export function atelierDevPlugin() {
   const require = createRequire(import.meta.url);
   const fs = require("node:fs");
@@ -60,7 +118,10 @@ export function atelierDevPlugin() {
 
   const TOKEN = crypto.randomUUID();
   fs.mkdirSync(path.join(ROOT, ".atelier"), { recursive: true });
-  fs.writeFileSync(path.join(ROOT, ".atelier", "dev-token"), TOKEN, "utf8");
+  // P1-12 ②：dev-token 是 dev 面唯一信任锚，落盘即 0600（写时 mode + chmod 兜底）。
+  // 平台语义：POSIX 完整；win32 的 chmod 只映射 read-only 位（0o600 含写位 → 可写文件），尽力而为。
+  fs.writeFileSync(path.join(ROOT, ".atelier", "dev-token"), TOKEN, { encoding: "utf8", mode: 0o600 });
+  try { fs.chmodSync(path.join(ROOT, ".atelier", "dev-token"), 0o600); } catch { /* 平台不支持时写时 mode 已尽力 */ }
   const AUDIT_FILE = path.join(ROOT, ".atelier", "audit.jsonl");
   const audit = (kind, detail) => {
     try {
@@ -162,10 +223,10 @@ export function atelierDevPlugin() {
     // （真 dev 冒烟实证：普通序拿到的已是 SchemaProbe2(props) 脱注解形态，提取恒空）。
     // pre 对非 .atr.ts 零影响（早退分支），HMR 尾巴 append 到原始源后经 esbuild 语义不变。
     enforce: "pre",
-    transformIndexHtml(html) {
-      // 页面注入一次性 dev token（EventSource 无法带自定义 header，走 query）
-      return html.replace(/<head[^>]*>/i, (m) => `${m}\n<script>window.__ATELIER_TOKEN__=${JSON.stringify(TOKEN)};</script>`);
-    },
+    // P1-12 ②：transformIndexHtml 的 window.__ATELIER_TOKEN__ 注入已移除——token 不再进 HTML。
+    // 浏览器侧走一次性通道（首访 ?token= → HttpOnly cookie + 302 清洗，见 configureServer 顶部），
+    // 页面侧 fetch/EventSource 靠同源自动携带的 cookie 过 token 门；runtime 的 devFetch/bridge
+    // 读不到 __ATELIER_TOKEN__ 时发送空头，由 cookie 通道放行。
     async transform(code, id) {
       // P0-5 HMR：给组件模块注入 HMR 边界。accept 回调在新模块求值（组件已重注册）后
       // 触发 runtime 的保值重挂载——替代整页 reload，$state 不再清零。
@@ -256,17 +317,71 @@ export function atelierDevPlugin() {
         }
       };
 
+      /* ---------- P1-12 ①② 闸位预置 ----------
+       * selfOrigins：Origin 白名单（自身授权方集合）；cookieName 带端口后缀——cookie 不隔离端口，
+       * 同机并行多只 dev server 各持各的 token，同名 cookie 会互相踩。 */
+      const selfPort = server.config.server.port ?? 5173;
+      const selfOrigins = originAllowlist(selfPort, server.config.server.host);
+      const cookieName = `${DEV_COOKIE}-${selfPort}`;
+      // JSON 体路由统一收紧：content-type 一旦存在必须 application/json——封 no-cors text/plain
+      // 族 simple-type 伪装写（P1-12）。缺失 = 非浏览器工具链（curl/MCP 直连不带头）放行：浏览器
+      // 带体 POST 必有 content-type；浏览器写的主闸是 Origin 门（sendBeacon 连伪造的
+      // application/json 也会携 Origin），此门是第二道。
+      const rejectNonJson = (req, res) => {
+        const ct = req.headers["content-type"];
+        if (ct == null || isJsonContentType(ct)) return true;
+        res.statusCode = 415;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ ok: false, error: "ATR-415: dev face JSON routes accept application/json only", fix: "send Content-Type: application/json（no-cors text/plain 伪装写通道已封——P1-12）" }));
+        return false;
+      };
+      console.log(
+        `[atelier] dev bridge：浏览器首访 http://127.0.0.1:${selfPort}/?token=${TOKEN} 建立会话（P1-12：token 已不内嵌页面；` +
+        `工具链照旧读 .atelier/dev-token 走 x-atelier-token 头）`,
+      );
+
       server.middlewares.use(async (req, res, next) => {
         const rawUrl = req.url ?? "";
+
+        /* ---------- P1-12 ② token 一次性通道 ----------
+         * 带有效 token 的页面导航 → Set-Cookie(HttpOnly+SameSite=Strict) + 302 清洗 URL。此后页面
+         * 不再内嵌 token，API 鉴权走同源自动携带的 cookie。只认导航请求（isNavigation）：工具链
+         * GET ?token= 与 EventSource 通道零影响；token 即凭证——通道本身不构成新攻击面。 */
+        const u = new URL(rawUrl, "http://x");
+        const qToken = u.searchParams.get("token");
+        if (req.method === "GET" && qToken != null && tokenEq(qToken, TOKEN) && isNavigation(req)) {
+          audit("token-exchange", { path: u.pathname, agent: classifyAgent(req.headers["user-agent"]) });
+          u.searchParams.delete("token");
+          res.statusCode = 302;
+          res.setHeader("Location", `${u.pathname}${u.search}`);
+          res.setHeader("Set-Cookie", `${cookieName}=${TOKEN}; Path=/; HttpOnly; SameSite=Strict`);
+          res.setHeader("Cache-Control", "no-store");
+          res.end();
+          return;
+        }
+
         if (!rawUrl.startsWith("/__atelier/")) return next();
 
-        // token gate（决策 9/12）：全部代理面路由统一校验
+        /* ---------- P1-12 ① Origin/Host 闸 ----------
+         * Origin 头存在且不属于自身授权方（127.0.0.1/localhost/[::1]/配置 host）也不与 Host 头同源
+         * → 403：跨站页面驱动的浏览器请求（含 no-cors 写）在此拦断。无 Origin 的非浏览器客户端
+         * （curl/MCP HTTP 直连）不受影响——token 仍是其凭证。 */
+        if (req.headers.origin != null && !originAllowed(req.headers.origin, selfOrigins, req.headers.host)) {
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.end(JSON.stringify({ ok: false, error: "ATR-403-dev: cross-origin request to the dev face is rejected", fix: "从应用自身 origin（127.0.0.1/localhost）打开 dev 面；工具链以无 Origin 通道携 x-atelier-token 调用" }));
+          return;
+        }
+
+        // token gate（决策 9/12 + P1-12）：三通道——header / 查询参数（非浏览器客户端保留）/ 一次性 cookie（浏览器）
         const hasToken =
-          req.headers["x-atelier-token"] === TOKEN || rawUrl.includes(`token=${TOKEN}`);
+          tokenEq(req.headers["x-atelier-token"], TOKEN) ||
+          tokenEq(qToken, TOKEN) ||
+          tokenEq(cookieValue(req.headers.cookie, cookieName), TOKEN);
         if (!hasToken) {
           res.statusCode = 401;
           res.setHeader("Content-Type", "application/json; charset=utf-8");
-          res.end(JSON.stringify({ ok: false, error: "ATR-402: invalid or missing X-Atelier-Token", fix: `read ${ROOT}\\.atelier\\dev-token and send header x-atelier-token` }));
+          res.end(JSON.stringify({ ok: false, error: "ATR-402: invalid or missing X-Atelier-Token", fix: `tools: read ${ROOT}\\.atelier\\dev-token and send header x-atelier-token; browsers: open the page once with ?token=<token>` }));
           return;
         }
 
@@ -284,6 +399,7 @@ export function atelierDevPlugin() {
          * 拷贝按同样的相对路径直连可用；旧应用未 sync（缺 mcp/ 族）时诚实降级指路补齐 vendor /
          * stdio 通道，绝不静默。 */
         if (url === "/__atelier/mcp") {
+          if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           let out;
           try {
@@ -356,7 +472,7 @@ export function atelierDevPlugin() {
         }
         if (url === "/__atelier/endpoints") {
           res.setHeader("Content-Type", "text/html; charset=utf-8");
-          res.end(endpointsPageHtml(TOKEN));
+          res.end(endpointsPageHtml()); // P1-12：页面不再内嵌 token——fetch 靠同源 cookie
           return;
         }
         if (url === "/__atelier/review-data") {
@@ -374,9 +490,9 @@ export function atelierDevPlugin() {
           return;
         }
         if (url === "/__atelier/review-ext.js") {
-          // review 页 <script src> 注入件（token 经 query——EventSource/脚本标签无自定义头，同页面既有约定）
+          // review 页 <script src> 注入件（P1-12：不再带 token 查询——脚本请求同源自动携 cookie）
           res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-          res.end(reviewExtScript(TOKEN));
+          res.end(reviewExtScript());
           return;
         }
         if (url === "/__atelier/registry") {
@@ -438,6 +554,9 @@ export function atelierDevPlugin() {
           const wantsCompare = rawUrl.includes("compare=1");
           const wantsFull = rawUrl.includes("full=1"); // m11 批 C：全页捕获变体（快照门首屏盲区销账）
           const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?snapshot=1`;
+          // P1-12：无头实例与真人浏览器同权——经 token 一次性通道换得 cookie 后再捕获（页面已不再
+          // 内嵌 token）；navUrl 只用于导航，token 不进响应/审计（capturedFrom 仍报清洗后的 appUrl）
+          const navUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?token=${TOKEN}&snapshot=1`;
           try {
             let compareBase64 = null;
             let threshold = 0.12;
@@ -467,7 +586,7 @@ export function atelierDevPlugin() {
             let lastErr = null;
             for (let attempt = 1; attempt <= 2; attempt++) {
               try {
-                screenshotInflight ??= capturePage({ url: appUrl, compareBase64, threshold, fullPage: wantsFull }).finally(() => { screenshotInflight = null; });
+                screenshotInflight ??= capturePage({ url: navUrl, compareBase64, threshold, fullPage: wantsFull }).finally(() => { screenshotInflight = null; });
                 const r = await screenshotInflight;
                 imageBase64 = r.imageBase64;
                 pixelDiff = r.pixelDiff;
@@ -491,8 +610,9 @@ export function atelierDevPlugin() {
         /* ---------- P2-2③ a11y 快照（无障碍树文本化；agent 检视语义优先于像素）---------- */
         if (url === "/__atelier/a11y") {
           const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/`;
+          const navUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?token=${TOKEN}`; // P1-12：先换 cookie 再捕获
           try {
-            a11yInflight ??= captureA11yPersistent({ url: appUrl }).finally(() => { a11yInflight = null; });
+            a11yInflight ??= captureA11yPersistent({ url: navUrl }).finally(() => { a11yInflight = null; });
             const r = await a11yInflight;
             audit("a11y", { nodes: r.nodeCount });
             res.end(JSON.stringify({ ok: true, a11y: r.a11y, nodeCount: r.nodeCount, capturedFrom: appUrl, at: Date.now() }));
@@ -506,6 +626,7 @@ export function atelierDevPlugin() {
         /* ---------- review UI（P2-5 spec L5 最小版）---------- */
         if (url === "/__atelier/feedback") {
           // 与 MCP feedback.read 同一约定：specs/feedback.jsonl 每行 {at,verdict,target,note}
+          if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           let parsed = {};
           try { parsed = JSON.parse(body || "{}"); } catch { /* falls through */ }
@@ -573,12 +694,10 @@ li{margin:2px 0}.muted{color:#777}.ok{color:#2e7d32}.bad{color:#c62828}
 <div class="row"><div class="col card"><div class="muted">baseline</div><img id="baseline" alt="baseline"/></div>
 <div class="col card"><div class="muted">current</div><img id="current" alt="current"/></div></div>
 <script>
-const TOKEN = ${JSON.stringify(TOKEN)};
-const H = { "x-atelier-token": TOKEN };
 const $ = (id) => document.getElementById(id);
 function esc(s){const d=document.createElement("div");d.textContent=String(s??"");return d.innerHTML;}
 async function loadState(){
-  try{ const j = await (await fetch("/__atelier/state-snapshot",{headers:H})).json();
+  try{ const j = await (await fetch("/__atelier/state-snapshot")).json();
     const tl = Array.isArray(j.timeline) ? j.timeline : [];
     $("timeline").innerHTML = tl.length ? tl.map(c=>'<li><code>'+esc(c.id)+'</code> '+esc(c.name)+' <span class="muted">'+esc(new Date(c.at).toLocaleString())+'</span></li>').join("") : "<li>(empty — store.commit 会出现在这里)</li>";
     $("meta").textContent = "signals="+(j.signalCount??0)+" · checkpoints="+(j.checkpointCount??0)+" · "+(j.href??"");
@@ -587,13 +706,13 @@ async function loadState(){
 function bust(){ return "?t="+Date.now(); }
 function loadImages(){ $("baseline").src = "/__atelier/snapshot-image?name=baseline"+bust(); $("current").src = "/__atelier/snapshot-image?name=current"+bust(); }
 async function loadHistory(){
-  try{ const j = await (await fetch("/__atelier/feedback-history",{headers:H})).json();
+  try{ const j = await (await fetch("/__atelier/feedback-history")).json();
     $("history").innerHTML = (j.rows??[]).length ? j.rows.map(r=>'<li>'+esc(r.at)+' <b class="'+(r.verdict==="approve"?"ok":"bad")+'">'+esc(r.verdict)+'</b> '+esc(r.target)+(r.note?' — '+esc(r.note):'')+'</li>').join("") : "<li>(none)</li>";
   }catch(e){ $("history").innerHTML = "<li>(unreadable)</li>"; }
 }
 async function send(verdict){
   $("msg").textContent = "…writing";
-  const r = await fetch("/__atelier/feedback",{method:"POST",headers:{...H,"content-type":"application/json"},
+  const r = await fetch("/__atelier/feedback",{method:"POST",headers:{"content-type":"application/json"},
     body: JSON.stringify({ verdict, target: "snapshot:"+location.search, note: $("note").value })});
   const j = await r.json();
   $("msg").innerHTML = j.ok ? '<span class="ok">written → '+esc(j.path)+'</span>' : '<span class="bad">'+esc(j.error)+'</span>';
@@ -604,14 +723,14 @@ $("disapprove").onclick = () => send("disapprove");
 $("reload").onclick = loadImages;
 $("fresh").onclick = async () => {
   $("msg").textContent = "capturing…";
-  try{ const j = await (await fetch("/__atelier/screenshot",{headers:H})).json();
+  try{ const j = await (await fetch("/__atelier/screenshot")).json();
     if(j.ok){ $("current").src = "data:image/png;base64,"+j.imageBase64; $("msg").textContent = "fresh capture ok（落盘请用 snapshot.diff / atelier snapshot）"; }
     else $("msg").textContent = j.error ?? "capture failed";
   }catch(e){ $("msg").textContent = String(e); }
 };
 loadState(); loadImages(); loadHistory();
 </script>
-<script src="/__atelier/review-ext.js?token=${TOKEN}"></script>
+<script src="/__atelier/review-ext.js"></script>
 </body></html>`);
           return;
         }
@@ -627,6 +746,7 @@ loadState(); loadImages(); loadHistory();
 
         /* ---------- bridge: up-push / downlink ---------- */
         if (url === "/__atelier/bridge/state") {
+          if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           try {
             latestBridgeState = JSON.parse(body);
@@ -651,6 +771,7 @@ loadState(); loadImages(); loadHistory();
           return;
         }
         if (url === "/__atelier/bridge/enqueue") {
+          if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           let op = "", args;
           try {
@@ -670,6 +791,7 @@ loadState(); loadImages(); loadHistory();
           return;
         }
         if (url === "/__atelier/bridge/ack") {
+          if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           try {
             const j = JSON.parse(body);

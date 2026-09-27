@@ -5,7 +5,13 @@
  *  - 瞬态（capturePage）：每拍瞬态无头实例 spawn → 捕获 → kill。兼容 API，独立捕获不串扰。
  *  - 常驻（capturePagePersistent，P0-6）：模块级持有一只常驻无头实例，截图复用同一 tab
  *    重新导航捕获，省掉每拍浏览器冷启动；任何失败（崩溃/挂起/断连）→ 销毁重建，只重试一次。
- *    dev 进程退出时同步 kill（不留孤儿浏览器）。
+ *    dev 进程退出时同步 kill（不留孤儿浏览器）；空闲超时即杀（P1-12，收紧 CDP 暴露窗）。
+ *
+ * CDP 暴露面（P1-12 ③）：CDP 端口无任何鉴权——能连上即全权控制浏览器。评估过
+ * --remote-debugging-pipe：本文件的 CDP 客户端经 HTTP /json 端点发现 target + WebSocket
+ * attach（MiniCdp），改 pipe 需要 Target.attachToTarget(flatten) 会话层重写，回归风险大于收益，
+ * 故取 fallback 束：显式绑回环 + 每次随机端口 + 一次性 profile + 瞬态用后即杀/常驻空闲即杀。
+ * 残余风险：本机其他用户/进程在实例存活窗口内仍可扫到端口接入（win32 无 per-user 网络隔离）。
  *
  * 捕获序列（两模式共用）：
  *   Page.navigate(appUrl) → wait loadEventFired → poll "#app > *"（框架挂载，非仅 DOM ready）
@@ -18,8 +24,24 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createServer } from "node:net";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** P1-12 ③：向 OS 要一个当前空闲的回环端口（net 探测后释放）。随机端口关掉「固定 9345 被抢占
+ *  接错实例」与「扫描即达」两扇门。探测与浏览器真正 bind 之间有窄竞态窗口——waitEndpoint 会如实
+ *  失败暴露，不做隐藏重试。 */
+export async function pickFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
 
 function findBrowser() {
   const candidates = [
@@ -92,15 +114,19 @@ class MiniCdp {
 }
 
 /** Spawn a headless browser and attach a CDP session (no navigation).
- *  Transient 模式的底座，也是常驻实例的出生路径——spawn/attach 序列只写这一份。 */
-export async function openTransientBrowser({ debugPort = 9345 } = {}) {
+ *  Transient 模式的底座，也是常驻实例的出生路径——spawn/attach 序列只写这一份。
+ *  P1-12 ③：debugPort 缺省 = 每次随机空闲端口（显式传参/env ATELIER_SHOT_PORT 可覆盖）；
+ *  --remote-debugging-address=127.0.0.1 是显式化（Chromium 缺省即回环，写明意图防漂移）。 */
+export async function openTransientBrowser({ debugPort } = {}) {
   const exe = findBrowser();
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-shot-"));
+  const port = Number(debugPort) || (await pickFreePort());
   const child = spawn(
     exe,
     [
       "--headless=new",
-      `--remote-debugging-port=${debugPort}`,
+      `--remote-debugging-port=${port}`,
+      "--remote-debugging-address=127.0.0.1",
       `--user-data-dir=${userData}`,
       "--no-first-run",
       "--disable-gpu",
@@ -122,9 +148,9 @@ export async function openTransientBrowser({ debugPort = 9345 } = {}) {
     }, 1500);
   };
   try {
-    await waitEndpoint(`http://127.0.0.1:${debugPort}/json/version`, 10000);
+    await waitEndpoint(`http://127.0.0.1:${port}/json/version`, 10000);
     // attach on a fresh tab BEFORE navigating so no lifecycle event is missed
-    const tabRes = await fetch(`http://127.0.0.1:${debugPort}/json/new?url=about:blank`, {
+    const tabRes = await fetch(`http://127.0.0.1:${port}/json/new?url=about:blank`, {
       method: "PUT",
       signal: AbortSignal.timeout(5000),
     });
@@ -309,6 +335,7 @@ export async function captureA11yPersistent({ url, readyPollMs = 50 }) {
   let lastErr = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const session = await getPersistentSession();
+    touchPersistentIdle(session); // P1-12 ③：每拍触摸空闲看门狗
     try {
       await session.cdp.send("Runtime.evaluate", { expression: "1", returnByValue: true }, 2000);
       return await a11yOnSession(session.cdp, { url, readyPollMs });
@@ -326,7 +353,24 @@ let persistentSession = null; // { child, close, cdp, dead }
 let persistentStarting = null;
 let exitHookInstalled = false;
 
-const persistentPort = () => Number(process.env.ATELIER_SHOT_PORT ?? 9345);
+const persistentPort = () => (process.env.ATELIER_SHOT_PORT ? Number(process.env.ATELIER_SHOT_PORT) : undefined); // 缺省 = 每次随机（P1-12 ③）
+// P1-12 ③：常驻实例空闲即杀（默认 10min；warm 复用收益保留在空闲窗内）。0 = 禁用（显式逃生口）。
+// env 非数字值按缺省处理（NaN 落进 setTimeout 会即刻触发——绝不允许「配置错误变成立即杀」）。
+const PERSISTENT_IDLE_MS = (() => {
+  const n = Number(process.env.ATELIER_SHOT_IDLE_MS);
+  return Number.isFinite(n) ? Math.max(0, n) : 600000;
+})();
+let persistentIdleTimer = null;
+
+/** 空闲看门狗：每拍触摸归零；到点即杀常驻实例（CDP 无鉴权面——实例少活一分钟，窗口就窄一分钟） */
+function touchPersistentIdle(session) {
+  if (!PERSISTENT_IDLE_MS) return;
+  clearTimeout(persistentIdleTimer);
+  persistentIdleTimer = setTimeout(() => {
+    if (persistentSession === session) void destroyPersistentSession();
+  }, PERSISTENT_IDLE_MS);
+  persistentIdleTimer.unref?.(); // 不拖住 dev 进程退出
+}
 
 function registerExitCleanup() {
   if (exitHookInstalled) return;
@@ -347,6 +391,7 @@ async function getPersistentSession() {
     s.cdp.ws.addEventListener("close", () => { s.dead = true; });
     persistentSession = s;
     registerExitCleanup();
+    touchPersistentIdle(s);
     return s;
   })();
   persistentStarting = starting;
@@ -358,6 +403,8 @@ async function getPersistentSession() {
 }
 
 async function destroyPersistentSession() {
+  clearTimeout(persistentIdleTimer);
+  persistentIdleTimer = null;
   const s = persistentSession;
   persistentSession = null;
   if (!s) return;
@@ -378,6 +425,7 @@ export async function capturePagePersistent({ url, settleMs = 120, compareBase64
   let lastErr = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const session = await getPersistentSession();
+    touchPersistentIdle(session); // P1-12 ③：每拍触摸空闲看门狗
     try {
       // 复用前快速活性探针（2s 上限）：死会话上的正式命令要等满超时，探针先把最坏情况短路
       await session.cdp.send("Runtime.evaluate", { expression: "1", returnByValue: true }, 2000);
