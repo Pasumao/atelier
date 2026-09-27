@@ -60,7 +60,11 @@ jobs:
           cd "$RUNNER_TEMP/smoke-app"
           pnpm install
           pnpm test
-  # Dev-face visual smoke (environment-sensitive; continue-on-error smoke, not a gate)
+  # Dev-face visual smoke (environment-sensitive; continue-on-error smoke, not a gate).
+  # m10 批 C: the snapshot gate is now FORMAL locally (scripts/snapshot-smoke.mjs — per-platform
+  # baselines armed per platform; the framework repo's win32 baseline is committed at
+  # .atr/snapshots/win32/baseline.png). Removing continue-on-error here is pending the first
+  # real CI run on a remote (this repo has none yet) — never claimed verified before that.
   snapshot-smoke:
     name: snapshot smoke · ${{ matrix.os }}
     strategy:

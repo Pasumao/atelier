@@ -35,6 +35,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import url from "node:url";
 import { spawnSync } from "node:child_process";
+// m10 批 C：快照门基线路径消费 snapshot.mjs 单源导出（per-platform + legacy 回退，
+// 替换原先双文件重复的路径构造——语义阶梯不变：无基线→vacuous / 不可达→vacuous / MISMATCH→拒锚）
+import { currentPathFor, resolveBaseline } from "./snapshot.mjs";
 
 const STORE_DIR = ".atelier";
 const STORE_FILE = path.join(STORE_DIR, "checkpoints.jsonl");
@@ -166,9 +169,11 @@ function testGate(repo, skip) {
 async function snapshotGate(repo, skip) {
   if (skip) { console.log("[gate] snapshot gate skipped (--no-gate)"); return; }
   if (process.env.ATELIER_SNAPSHOT_GATE === "off") { console.log("[gate] snapshot gate off (ATELIER_SNAPSHOT_GATE=off)"); return; }
-  const snapDir = path.join(repo, ".atr", "snapshots");
-  const base = path.join(snapDir, "baseline.png");
-  if (!fs.existsSync(base)) { console.log("[gate] no snapshot baseline — gate vacuous (run 'atelier snapshot save' to arm it)"); return; }
+  // m10 批 C：per-platform 基线解析（snapshot.mjs 单源；旧布局只读回退——语义阶梯不变）
+  const resolved = resolveBaseline(repo, process.platform);
+  if (resolved.missing) { console.log("[gate] no snapshot baseline — gate vacuous (run 'atelier snapshot save' to arm it)"); return; }
+  const snapDir = path.dirname(resolved.path);
+  const base = resolved.path;
   const sha256File = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
   const baseSha = sha256File(base);
   // source fingerprint — MUST stay in sync with scripts/snapshot.mjs sourceFingerprint()
@@ -222,8 +227,8 @@ async function snapshotGate(repo, skip) {
   if (!r.ok) { console.log(`[gate] dev face HTTP ${r.status} — snapshot gate vacuous this anchor`); return; }
   const j = await r.json().catch(() => null);
   if (!j?.ok || !j.imageBase64) { console.log("[gate] screenshot payload missing — snapshot gate vacuous this anchor"); return; }
-  const curPath = path.join(snapDir, "current.png");
-  fs.mkdirSync(snapDir, { recursive: true });
+  const curPath = currentPathFor(repo);
+  fs.mkdirSync(path.dirname(curPath), { recursive: true });
   fs.writeFileSync(curPath, Buffer.from(j.imageBase64, "base64"));
   const same = baseSha === sha256File(curPath);
   // refresh the receipt: the gate just performed a full check, so record it (same schema as snapshot.mjs)
