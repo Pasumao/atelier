@@ -170,4 +170,38 @@ export const logs = table("logs", {
     expect(stdout).toContain("- 写入 src/server/db/migrations/001_chats.up.sql");
     expect(stdout).toContain("done：");
   });
+
+  it("红检 P1-8：表名 _1（下划线开头）→ ATR-343 硬错，绝不产出 export type 1Row 非法 TS", () => {
+    const root = makeFixtureRoot(`import { table } from "../../vendor/atelier/server/db.ts";
+export const weird = table("_1", {
+  id: { type: "integer", primaryKey: true },
+});
+`);
+    let err: GenDbError | null = null;
+    try {
+      genDb(root);
+    } catch (e) {
+      err = e as GenDbError;
+    }
+    expect(err, `下划线开头的表名必须生成器侧拒绝（toPascal("_1") = "1" → export type 1Row 编译不过）`).toBeTruthy();
+    expect(err!.code).toBe("ATR-343");
+    expect(err!.message).toContain("_1");
+    expect(err!.fix).toContain("字母开头");
+    expect(fs.existsSync(path.join(root, "src", "generated", "db", "tables.ts"))).toBe(false); // 破产物未落盘
+  });
+
+  it("回归：字母开头的表名带下划线/数字（t_1）照常生成（口径不过紧）", () => {
+    const root = makeFixtureRoot(`import { table } from "../../vendor/atelier/server/db.ts";
+export const logs = table("t_1", {
+  id: { type: "integer", primaryKey: true },
+  note: { type: "text" },
+});
+`);
+    genDb(root);
+    const text = read(root, "src/generated/db/tables.ts");
+    expect(text).toContain("export type T1Row = {");
+    expect(text).toContain("export const t_1Table: TableDef = logs;");
+    const crud = read(root, "src/generated/db/crud.ts");
+    expect(crud).toContain("export function t1GetByPk(");
+  });
 });

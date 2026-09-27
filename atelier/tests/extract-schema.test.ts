@@ -243,6 +243,49 @@ describe("extractPropsSchemas 恶劣输入（扫描器守卫钉桩）", () => {
   });
 });
 
+describe("extractPropsSchemas 注解体闭合后的尾检查（P1-7：交叉/联合绝不静默截断）", () => {
+  it("顶层交叉类型：首对象之外的 & {…} 残留 → ATR-102，绝不静默产出缺字段 schema", async () => {
+    const { extractPropsSchemas } = await mod();
+    let err: (Error & { code?: string; fix?: string }) | null = null;
+    try {
+      extractPropsSchemas(compSrc("Crossed", "(props: { title: string } & { extra: number })"));
+    } catch (e) {
+      err = e as Error & { code?: string; fix?: string };
+    }
+    expect(err, "交叉类型首成员之外的残留必须显式拒绝（修复前静默截断为只含 title 的错 schema 流入 AST/dev 面/编译产物）").toBeTruthy();
+    expect(err!.code).toBe("ATR-102");
+    expect(err!.message).toContain("Crossed");
+    expect(err!.message).toContain("& { extra: number }");
+    expect(err!.fix).toContain("手写 schema");
+  });
+
+  it("顶层联合类型：| {…} 残留 → ATR-102（同缺口同口径）", async () => {
+    const { extractPropsSchemas } = await mod();
+    let err: (Error & { code?: string }) | null = null;
+    try {
+      extractPropsSchemas(compSrc("Unioned", "(props: { a: string } | { b: number })"));
+    } catch (e) {
+      err = e as Error & { code?: string };
+    }
+    expect(err, "联合类型首成员之外的残留必须显式拒绝").toBeTruthy();
+    expect(err!.code).toBe("ATR-102");
+    expect(err!.message).toContain("Unioned");
+    expect(err!.message).toContain("| { b: number }");
+  });
+
+  it("回归：单对象注解（含多行、参数列表紧随闭合）不受尾检查影响", async () => {
+    const { extractPropsSchemas } = await mod();
+    const single = extractPropsSchemas(compSrc("Ok", "(props: { title: string })"));
+    expect(single[0].schema).toEqual({ type: "object", reqProps: { title: { type: "string" } } });
+    const multiline = extractPropsSchemas(compSrc("OkMulti", "(props: {\n  title: string;\n  count?: number;\n})"));
+    expect(multiline[0].schema).toEqual({
+      type: "object",
+      reqProps: { title: { type: "string" } },
+      optProps: { count: { type: "number" } },
+    });
+  });
+});
+
 describe("dump.mjs 接线（CLI 子进程冒烟，决策 26 产物字段）", () => {
   const buildApp = () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atr-schema-"));

@@ -20,6 +20,9 @@
  * - 超出映射面（泛型/交叉/工具类型/含非字面量成员的联合/嵌套对象/any/unknown/模板字面量类型等）
  *   → ATR-102 四段式显式拒绝：message 含组件名+属性名+原文类型，fix 指路手写 schema
  *   （「复杂类型手写 schema 不变」）。
+ * - 注解体闭合后参数列表必须立即闭合（下一非空白字符 = `)`）：首对象之外的交叉/联合残留
+ *   （`{ a: string } & { b: number }` 形态）= ATR-102（P1-7：尾残留静默截断缺口的收口——
+ *   此前 matchBraceAt 只配对首个 `{`，残留被静默丢弃成缺字段错 schema）。
  * - 注解缺省或首参名非 props → 静默跳过 + warn（向后兼容，非错误；既有组件零破坏）。
  * - v1 已知边界（诚实不误映射）：codeMask 不解析正则字面量（正则文本里的引号/花括号按 code
  *   处理——正则里嵌 "(props: {" 属病理输入）；注解内注释文本照切不剥离——含注释的类型文本无法
@@ -285,7 +288,8 @@ function mapType(typeText, compName, propName) {
 /* ---------- 主入口：.atr.ts 全文 → 每组件 {name, schema, warn?}。
  * decl regex 遗留命中但落在注释/字符串里（codeMask 判非代码区）→ schema:null + warn 跳过；
  * 真实 decl 在 [decl.offset, 下一 decl.offset) 的 code 区找首个 ( props : { 签名 →
- * matchBraceAt 取注解体 → 逐属性切分 → 类型映射；`prop: T` 入 reqProps、`prop?: T` 入 optProps
+ * matchBraceAt 取注解体（体闭合后尾残留 = ATR-102，见头注 P1-7）→ 逐属性切分 → 类型映射；
+ * `prop: T` 入 reqProps、`prop?: T` 入 optProps
  * （optProps 空时省略，对齐 FlatSchema）。无签名 / 注解花括号未闭合 → schema:null + warn（跳过）；
  * 任一属性无法映射 → throw ATR-102（dump 路径 die，四段式上 stderr）。 ---------- */
 export function extractPropsSchemas(src) {
@@ -316,6 +320,16 @@ export function extractPropsSchemas(src) {
     if (close < 0) {
       out.push({ name: decl.name, schema: null, warn: `${decl.name}: (props: {...}) 注解花括号未闭合——跳过 schema 提取` });
       continue;
+    }
+    // P1-7 尾检查：注解体闭合后参数列表必须立即闭合（下一非空白字符 = `)`）。首对象之外的
+    // 交叉/联合残留（如 `{ title: string } & { extra: number }`）此前被静默丢弃 → 缺字段错 schema
+    // 流入 AST/dev 面/编译产物；现显式 ATR-102（超出映射面 → 显式拒绝，绝不静默产出错 schema）。
+    let tail = close + 1;
+    while (tail < src.length && /\s/.test(src[tail])) tail++;
+    if (tail < src.length && src[tail] !== ")") {
+      const tailEnd = src.indexOf(")", tail);
+      const residue = (tailEnd >= 0 ? src.slice(close + 1, tailEnd) : src.slice(close + 1, close + 81)).trim();
+      throw atr102(decl.name, null, residue);
     }
     const reqProps = {};
     const optProps = {};

@@ -22,6 +22,10 @@
  *     --root  应用目录（缺省 cwd）；输出诚实清单（写了哪些文件）
  * 纯 API：import { genDb, parseSchema, GenDbError } from "<repo>/atelier/gen/gen-db.mjs"
  *
+ * 命名校验（P1-8，ATR-343）：表名入口校验（字母开头的 [A-Za-z0-9_]）+ toPascal/toCamel 派生
+ * 标识符合法性兜底——坏名字（如 `_1`）此前一路产出 `export type 1Row` 编译不过的非法 TS，
+ * 现生成器侧四段式 die（message + fix），破产物绝不落盘。
+ *
  * 红线（决策 19）：产物 SQL 全参数化、零值拼接——值一律 ? 绑定；UPDATE 的 SET 列名来自
  * 生成时允许清单（contract 定义，非运行时输入）。产物不做查询构造器/关系 API/懒加载（§5.2 克制声明）。
  */
@@ -31,18 +35,22 @@ import url from "node:url";
 import { createTableSql, dropTableSql, table as defineTable } from "../server/db.ts";
 
 const COLUMN_TYPES = new Set(["integer", "text", "real", "blob"]);
-const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// P1-8（ATR-343）：字母开头——下划线/数字开头的表名（`_1` 通过旧宽松 IDENT_RE）经 toPascal
+// 派生出 `1` → `export type 1Row` 编译不过的非法 TS；生成器侧入口即拒（运行时 db.ts 的
+// table() 校验口径不在本文件收口内，那里不渲染 TS 标识符）。
+const IDENT_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 export class GenDbError extends Error {
-  constructor(message, fix) {
+  constructor(message, fix, code) {
     super(message);
     this.name = "GenDbError";
     this.fix = fix;
+    if (code) this.code = code;
   }
 }
 
-function die(message, fix) {
-  throw new GenDbError(message, fix);
+function die(message, fix, code) {
+  throw new GenDbError(message, fix, code);
 }
 
 /* ---------- 状态感知扫描基元（注释/字符串不参与结构；与 dump.mjs 同方法论） ---------- */
@@ -222,7 +230,7 @@ export function parseSchema(src, sourceName = "schema.ts") {
     }
     const name = parseStringLiteral(args[0], `表 ${constName} 的名称`);
     if (!IDENT_RE.test(name)) {
-      die(`表名非法：${name}（只允许字母/下划线开头的 [A-Za-z0-9_]）`, "表名进 DDL 标识符白名单（决策 19 参数化红线的前提）");
+      die(`表名非法：${name}（只允许字母开头的 [A-Za-z0-9_]——下划线/数字开头派生不出合法 TS 类型名，如 toPascal("_1") = "1" → export type 1Row）`, "改成字母开头的表名，如 chats、notes（表名进 DDL 标识符白名单——决策 19 参数化红线的前提）", "ATR-343");
     }
     const columns = {};
     for (const { key, valueText } of parseObjectEntries(args[1], `表 ${name} 的列定义`)) {
@@ -267,11 +275,16 @@ export function parseSchema(src, sourceName = "schema.ts") {
 /* ---------- 命名与路径 ---------- */
 
 function toPascal(name) {
-  return name
+  const p = name
     .split(/[^A-Za-z0-9]+/)
     .filter(Boolean)
     .map((s) => s[0].toUpperCase() + s.slice(1))
     .join("");
+  if (!/^[A-Za-z][A-Za-z0-9]*$/.test(p)) {
+    // P1-8 派生标识符兜底（入口校验后的第二道闸）：派生不出合法 TS 类型名 → ATR-343，绝不产出编译不过的产物
+    die(`表 ${name} 派生不出合法 TS 类型名（toPascal → 「${p}」）`, "改表名为字母开头（如 chats → ChatsRow）——派生标识符合法性是产物可编译的前提", "ATR-343");
+  }
+  return p;
 }
 
 function toCamel(name) {

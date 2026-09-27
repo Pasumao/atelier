@@ -402,3 +402,61 @@ export const authBroken = defineCommand("auth.broken", {
     expect(clients.map((c) => `${c.endpoint}=${c.ident}`).sort()).toEqual(["auth.login=authLogin", "auth.logout=authLogout", "auth.me=authMe"]);
   });
 });
+
+/* ---------- 端点名与派生标识符校验（P1-8：坏名字绝不流入产物，生成器侧诊断而非生成文件里报错） ---------- */
+
+/** 四段式断言：code / message（含坏值）/ fix（给合法示例）三段齐 */
+function expectAtr342(err: (Error & { code?: string; fix?: string }) | null, what: string): void {
+  expect(err, what).toBeTruthy();
+  expect(err!.code).toBe("ATR-342");
+  expect(err!.fix).toContain("chat.ask");
+}
+
+describe("端点名与派生标识符校验（P1-8：坏名字产出编译不过的生成物）", () => {
+  it("端点名含双引号 → ATR-342 清晰诊断退出，而非产出破碎 api.ts", () => {
+    const src = `export const x = defineQuery("we\\"ird", { handler: () => ({ ok: true }) });`;
+    let err: (Error & { code?: string; fix?: string }) | null = null;
+    try {
+      scanEndpointSource(src);
+    } catch (e) {
+      err = e as Error & { code?: string; fix?: string };
+    }
+    expectAtr342(err, `生成器侧必须诊断（修复前 name = we"ird 静默流入 name: "we"ird" 破碎整份 api.ts）`);
+    expect(err!.message).toContain('we\\"ird'); // message 对坏值 JSON.stringify 安全转义后呈现
+  });
+
+  it("端点名含换行（真实换行进入名字面量）→ ATR-342", () => {
+    const src = 'export const x = defineQuery("bad\nname", { handler: () => ({ ok: true }) });';
+    let err: (Error & { code?: string; fix?: string }) | null = null;
+    try {
+      scanEndpointSource(src);
+    } catch (e) {
+      err = e as Error & { code?: string; fix?: string };
+    }
+    expectAtr342(err, "名字面量里的真实换行同样非法（URL 路径与生成码字符串字面量双破碎）");
+    expect(err!.message).toContain("bad\\nname"); // message 对坏值 JSON.stringify 安全转义后呈现
+  });
+
+  it("入口合法但 camelCase 化撞 JS 保留字（delete）→ ATR-342，而非产出 export const delete", () => {
+    const root = makeRoot();
+    writeFixtureFile(root, "src/server/endpoints/x.ts", `export const d = defineQuery("delete", { handler: () => ({ ok: true }) });\n`);
+    let err: (Error & { code?: string; fix?: string }) | null = null;
+    try {
+      generateApi(root);
+    } catch (e) {
+      err = e as Error & { code?: string; fix?: string };
+    }
+    expectAtr342(err, "派生标识符 delete 是 JS 保留字——export const delete 编译不过，必须派生侧拦截");
+    expect(err!.message).toContain("delete");
+    expect(fs.existsSync(path.join(root, "src", "generated", "api.ts"))).toBe(false); // 破产物未落盘
+  });
+
+  it("合法名回归：字母开头 [A-Za-z0-9_.-]（含 -/_）照常扫描与渲染（口径不过紧）", () => {
+    const root = makeRoot();
+    writeFixtureFile(root, "src/server/endpoints/x.ts", `export const x = defineQuery("app_two-x.ping", { handler: () => ({ ok: true }) });\n`);
+    expect(scanEndpoints(root).map((e) => e.name)).toEqual(["app_two-x.ping"]);
+    const { content } = generateApi(root);
+    expect(content).toContain(`name: "app_two-x.ping" as const,`);
+    expect(content).toContain(`export const appTwoXPing = Object.freeze({`);
+  });
+});
