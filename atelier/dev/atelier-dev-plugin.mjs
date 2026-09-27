@@ -381,7 +381,7 @@ export function atelierDevPlugin() {
         }
         if (url === "/__atelier/registry") {
           const manifest = JSON.parse(fs.readFileSync(`${ROOT}/src/manifest.json`, "utf-8"));
-          res.end(JSON.stringify({ ok: true, meta: { atelier: "v0.2", server: "dev" }, ...manifest }));
+          res.end(JSON.stringify({ ok: true, meta: { atelier: "v1.0", server: "dev" }, ...manifest }));
           return;
         }
         if (url === "/__atelier/tokens") {

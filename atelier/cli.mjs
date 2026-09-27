@@ -15,7 +15,7 @@ import { spawn, spawnSync } from "node:child_process";
 const PKG = path.resolve(path.dirname(url.fileURLToPath(import.meta.url))); // atelier/
 const script = (f) => path.join(PKG, "scripts", f);
 
-const HELP = `atelier v0.2 (script form — spec surface: atelier/docs/ARCHITECTURE.md §8)
+const HELP = `atelier v1.0 (script form — spec surface: atelier/docs/ARCHITECTURE.md §8)
 
 PROJECT
   atelier init --target <dir> --name <Name> [--no-ai]              FULL  scaffold a self-contained
@@ -30,7 +30,7 @@ PROJECT
                                                                          （装配/serve 单源）+ 冒烟自证；
                                                                          edge = 不做清单显式拒绝
   atelier package | e2e                                            STUB  spec'd, lands with compiler /
-                                                                         @atelier/review packages (v0.2+)
+                                                                         @atelier/review packages (post-1.0)
   atelier sync [--target <dir>]                                    FULL  re-vendor runtime + dev face + mcp
                                                                          family into an existing app (拉齐到框架当前时点)
   atelier tokens export|import --in <f> --out <f>                  FULL  W3C DTCG 设计令牌互导
@@ -49,7 +49,7 @@ AGENT SURFACE
 QUALITY GATES
   atelier check                                                    MINI  hard gate: structural contradictions
                                                                          (+ contract/token gates as compiler lands)
-  atelier lint                                                     STUB  soft-constraint ruleset (v0.2)
+  atelier lint                                                     STUB  soft-constraint ruleset (post-1.0)
   atelier test                                                     MINI* forwards to the project's test runner
   atelier snapshot save | check [--update] [--full]                 MINI* visual regression via the dev face (--full = 整页变体, m11)
                                                                          (byte+pixel tiers; never auto-accepts)
