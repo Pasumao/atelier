@@ -16,6 +16,10 @@
  *                 otherwise → MISMATCH → print BOTH paths for mandatory review + exit 1.
  *                 Never auto-promotes: only explicit `--update` promotes after human review.
  *   check --update compare-then-promote (intended for intentional changes reviewed by humans)
+ *   save|check --full   全页捕获变体（m11 批 C：首屏盲区销账）——CDP captureBeyondViewport 拍
+ *                 整页滚动高度，基线文件名独立（baseline-full.png / current-full.png），与 m10
+ *                 视口基线互不相扰；receipt 加 variant:"full"（纯加法，checkpoint 消费只读
+ *                 result/sha 字段不受扰）。
  *
  * Per-platform resolution is exported here as pure functions and consumed by
  * scripts/checkpoint.mjs's snapshot gate (single source — the old duplicated path
@@ -51,9 +55,20 @@ export function baselinePathFor(root = process.cwd(), platform = process.platfor
   return path.join(snapshotsDir(root, platform), "baseline.png");
 }
 
+/** Per-platform FULL-PAGE baseline path（m11 批 C：快照门首屏盲区销账——full 变体用独立
+ * 文件名，绝不与 m10 视口基线 baseline.png 相互迁移/覆盖；默认变体行为逐字不变）。 */
+export function baselineFullPathFor(root = process.cwd(), platform = process.platform) {
+  return path.join(snapshotsDir(root, platform), "baseline-full.png");
+}
+
 /** Per-platform current-capture path. */
 export function currentPathFor(root = process.cwd(), platform = process.platform) {
   return path.join(snapshotsDir(root, platform), "current.png");
+}
+
+/** Per-platform current FULL-PAGE capture path（同上，full 变体独立文件名）。 */
+export function currentFullPathFor(root = process.cwd(), platform = process.platform) {
+  return path.join(snapshotsDir(root, platform), "current-full.png");
 }
 
 /** Legacy flat baseline (pre-m10 layout) — read-only fallback, never auto-migrated. */
@@ -134,24 +149,27 @@ const [, , cmd, ...flags] = process.argv;
 const isMain = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 if (isMain) {
   try {
+    const FULL = flags.includes("--full"); // m11 批 C：全页捕获变体（独立基线文件名，dev 面走 full=1）
     if (cmd === "save") {
-      const BASE = baselinePathFor();
-      await captureTo(BASE);
-      writeReceipt({ result: "SAVED", baselineSha: sha256(BASE), sourceFp: sourceFingerprint() });
-      console.log(`baseline saved → ${path.relative(process.cwd(), BASE)} (${Math.round(fs.statSync(BASE).size / 1024)} KB)`);
+      const BASE = FULL ? baselineFullPathFor() : baselinePathFor();
+      await captureTo(BASE, FULL ? "?full=1" : "");
+      writeReceipt({ result: "SAVED", baselineSha: sha256(BASE), sourceFp: sourceFingerprint(), ...(FULL ? { variant: "full" } : {}) });
+      console.log(`baseline${FULL ? "-full (整页)" : ""} saved → ${path.relative(process.cwd(), BASE)} (${Math.round(fs.statSync(BASE).size / 1024)} KB)`);
       console.log('remember: the baseline is git-managed truth — commit it with the change it validates.');
     } else if (cmd === "check" || cmd === undefined) {
-      const CURR = currentPathFor();
-      const j = await captureTo(CURR, "?compare=1"); // P1-8: 同实例像素级对比
-      const resolved = resolveBaseline();
-      if (resolved.missing) {
-        console.error(`error: no baseline at ${path.relative(process.cwd(), resolved.path)}`);
-        console.error("fix: run 'atelier snapshot save' once the page looks right, then treat it as the regression floor.");
+      const CURR = FULL ? currentFullPathFor() : currentPathFor();
+      const j = await captureTo(CURR, FULL ? "?compare=1&full=1" : "?compare=1"); // P1-8: 同实例像素级对比
+      const BASE = FULL ? baselineFullPathFor() : resolveBaseline().path;
+      if (!fs.existsSync(BASE)) {
+        console.error(`error: no baseline at ${path.relative(process.cwd(), BASE)}`);
+        console.error(`fix: run 'atelier snapshot save${FULL ? " --full" : ""}' once the page looks right, then treat it as the regression floor.`);
         process.exit(1);
       }
-      const BASE = resolved.path;
-      if (resolved.legacy) {
-        console.log("note: legacy flat baseline (.atr/snapshots/baseline.png) detected — re-run 'snapshot save' to arm the per-platform layout (win32/linux/darwin). Read-only fallback; never auto-migrated.");
+      if (!FULL) {
+        const resolved = resolveBaseline();
+        if (resolved.legacy) {
+          console.log("note: legacy flat baseline (.atr/snapshots/baseline.png) detected — re-run 'snapshot save' to arm the per-platform layout (win32/linux/darwin). Read-only fallback; never auto-migrated.");
+        }
       }
       const baseSha = sha256(BASE);
       const curSha = sha256(CURR);
@@ -175,15 +193,15 @@ if (isMain) {
         console.error("fix: REVIEW both images side by side; if the change is intended, run 'atelier snapshot check --update' to promote. Never auto-promote to silence red.");
         if (flags.includes("--update")) {
           // --update 晋升到 per-platform 新布局路径（旧布局文件保持只读——绝不自动迁移/删除）
-          const target = baselinePathFor();
+          const target = FULL ? baselineFullPathFor() : baselinePathFor();
           fs.mkdirSync(path.dirname(target), { recursive: true });
           fs.copyFileSync(CURR, target);
-          writeReceipt({ result: "SAVED", baselineSha: sha256(target), sourceFp: sourceFingerprint() });
+          writeReceipt({ result: "SAVED", baselineSha: sha256(target), sourceFp: sourceFingerprint(), ...(FULL ? { variant: "full" } : {}) });
           console.log("promoted (--update): current → baseline. Commit both together with the change rationale.");
         } else process.exit(1);
       }
     } else {
-      console.error("usage: snapshot save | check [--update]");
+      console.error("usage: snapshot save | check [--update] [--full]");
       process.exit(2);
     }
   } catch (e) {

@@ -68,6 +68,21 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 
 ### 候选池（锐评衍生 + 既有候选，按需触发，未排期）
 
+- ~~快照门首屏盲区（视口外不可见）~~ → **已落地（2026-09-27，m11 批 C）**：snapshot
+  save|check 增 `--full` 全页捕获变体——dev 捕获链补 `captureBeyondViewport`+clip（Page.getLayoutMetrics
+  整页滚动尺寸），基线文件名独立（`<platform>/baseline-full.png`/`current-full.png`）与 m10 视口基线
+  互不相扰（绝不迁移/覆盖）；receipt 加 `variant:"full"` 纯加法（checkpoint 消费字段不受扰）。
+  顺路修复实读发现的 m10 遗留不一致：dev 面 compare 基线原写死平铺 `.atr/snapshots/baseline.png`，
+  per-platform 布局武装后像素档对新基线悄悄失明——改平台感知（per-platform 优先/旧布局只读回退）。
+  活体验证：超视口页（1241×3000）save→篡改即 MISMATCH→--update 晋升→MATCH 全链；既有应用需
+  `atelier sync` 拉齐 vendored dev 面后可用（init 时点 vendor 语义）。诚实边界：linux/darwin 基线
+  仍待各平台本地武装（挂账既有）；gate 消费面（checkpoint 未检不锚）只认默认变体不变。
+- ~~api-diff token 值漂移预算（P3-4 剩余候选）~~ → **已落地既有（2026-09-27 m11 批 C 实读判定，
+  非本批新做）**：`--budget <0..1>` 旗标 + valueBudgetExceeded 门禁判定 + judge value-budget violation
+  早在 P3-4（09-06）随 valueDrift 交付，vitest 三态覆盖（超限红/未超绿/budget 0 冻结，
+  `tests/api-diff.test.ts`）。本批实读判定该候选名实错位——机制已完整，无可实现残余；CLI HELP 行
+  漏标 `--budget` 已顺手同步。默认预算是否上墙（框架仓自身门禁默认冻结值漂移）= 政策面新决策，
+  不属候选实现面，1.0 后如需再议。
 - ~~struct check 检出力补强~~ → **已落地（2026-09-06）**：新增 `FACT_TOKEN_REFS`（*.atr.ts style 块
   var(--token) 对账 config 单源；未解析引用 = ERROR——构建期镜像运行时 ATR-204，"不假红"不破；
   红检/绿检双实证）。名实对齐：六层现在有真实代码级 ERROR 检查三种（幽灵组件/manifest 解析/token 对账）。
