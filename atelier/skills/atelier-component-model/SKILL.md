@@ -43,12 +43,13 @@ export const ChatMessage = component(function ChatMessage(props: { text: string;
 - Mutate via `.value =`; read in templates via `{sig.value}` — subscription is automatic
 - `$derived` is read-only (write → ATR-305). Derive, don't cache by hand.
 
-## bind: two-way binding (v1, decision 25)
+## bind: two-way binding (v1.2, decision 25)
 
-- `bind:value={sig}` / `bind:checked={sig}` — one attr, two directions: signal → control (attr effect) + control → signal (event write-back). Runtime funnels both into the single `bindTwoWay` point.
-- Target must be a **single writable `$state`** declared in the component: `$derived` → ATR-305 (read-only), non-signal / illegal target / element-attr pair outside the surface → ATR-324, duplicate `bind:` on same element+attr → ATR-325
-- Support surface (v1): `bind:value` × input(text-like) / textarea (`input` event) + select (`change` event); `bind:checked` × input[type=checkbox|radio] (`change` event). Outside it, use one-way `attr={expr}` + an explicit `on:` handler
-- v1 explicitly NOT supported: same-name radio group (multi-value binding), two-way on non-form elements
+- `bind:value={sig}` / `bind:checked={sig}` / `bind:group={sig}` — one attr, two directions: signal → control (attr effect) + control → signal (event write-back). Runtime funnels the first two into the single `bindTwoWay` point, the radio group into `bindGroup`.
+- Target must be a **single writable `$state`** declared in the component: `$derived` → ATR-305 (read-only), non-signal / illegal target / element-attr pair outside the surface → ATR-324, duplicate or slot-conflicting `bind:` on the same element → ATR-325 (v1.2 slot semantics: `bind:checked` and `bind:group` share the checked slot — never combine them on one element)
+- Support surface (v1.2): `bind:value` × input(text-like) / textarea (`input` event) + select (`change` event); `bind:checked` × input[type=checkbox|radio] (`change` event); `bind:group` × input[type=radio] (`change` event). Outside it, use one-way `attr={expr}` + an explicit `on:` handler
+- Radio group (v1.2): give every radio in the group a static non-empty `value` attr and bind the same signal — `<input type=radio value=basic bind:group={plan}>`. Selecting one writes its `value` key into the signal; the signal drives `checked` across every bound radio (mutual exclusion via the signal, native `name` grouping not required). Missing / dynamic / empty `value` → **ATR-327**
+- Still explicitly NOT supported (v1.2): checkbox group (array/set semantics), dynamic `type={}` / `value={}` on bind targets, two-way on non-form elements
 - No feedback loop: programmatic `el.value=` does not fire input/change (DOM spec) — signal → control writes never bounce back; see `templates/app/src/components/FormBinding.atr.ts` for the copy-friendly example
 
 ## Event modifiers on `on:` (v1, decision 25 follow-up)
