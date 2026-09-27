@@ -2,7 +2,7 @@
  * Atelier prototype — 类 HTML 模板解释器（决策 1/8 雏形）。
  * 支持子集：{expr} 文本插值（含对象/数组字面量 {{a: x.value}} 与 {a} 简写，F-4 第二期）
  *         / {#if}{:else if}{:else}{/if} / {#each arr as item, idx [by key]}
- *         / 动态属性 attr={expr} / on:click={handler} 事件（.prevent/.stop 修饰 v1，决策 25 后置候选 ATR-326） / bind:value·bind:checked 双向绑定（决策 25，ATR-324/325 渲染期校验）
+ *         / 动态属性 attr={expr} / on:click={handler} 事件（.prevent/.stop 修饰 v1，决策 25 后置候选 ATR-326） / bind:value·bind:checked 双向绑定 + bind:group radio group（决策 25 v1.2，ATR-324/325/327 渲染期校验）
  *         / HTML void 元素（<br>/<img>/<input>… 无闭合）
  *         / <style scoped>（token 校验）/ 子组件 <ModelCard ... />（大写标签）。
  * 解析期显式拒绝（ATR-101）：未闭合的 {#if}/{#each}/元素标签、错位与游离闭合标签——不静默吞掉
@@ -501,17 +501,48 @@ function recordRuntimeError(e: unknown): void {
  * 无回环论证（决策 25）：程序化 el.value=/el.checked= 不触发 input/change 事件（DOM 规范）→
  * effect 下行与用户上行天然单向（tests/bind-directive.test.ts 钉死）。
  */
-/** 已订守卫（ATR-325）：键=元素、值=已订 bind: attr 名集合；同键第二次 bind 不建立第二份订阅。
- * WeakMap 不阻止元素回收；同元素 bind:value 与 bind:checked 属不同键，合法共存。 */
-const bindSubscriptions = new WeakMap<object, Set<string>>();
+/** 已订守卫（ATR-325，v1.2 升级为槽位语义）：键=元素、值=绑定槽→attr 名映射；同槽第二次 bind
+ * 不建立第二份订阅。槽 = checked 槽（bind:checked / bind:group 共占——都驱动 checked，双写互斥
+ * 属性即序依赖错误）与 value 槽（bind:value）。WeakMap 不阻止元素回收；同元素 bind:value 与
+ * bind:checked 属不同槽，合法共存（既有语义保持）。 */
+const bindSlots = new WeakMap<object, Map<string, string>>();
+
+function slotOfBind(name: string): string {
+  return name === "bind:value" ? "value" : "checked";
+}
 
 function atrBindDuplicate(name: string): AtrError {
   return {
     code: "ATR-325",
     message: `bind: 重复绑定：同元素的 ${name} 已订阅`,
     context: { attr: name },
-    fix: `移除重复的 ${name}——同元素 bind:value 与 bind:checked 属不同键可共存；同键只订阅一次`,
+    fix: `移除重复的 ${name}——同元素 bind:value 与 bind:checked 属不同槽可共存；同槽只订阅一次`,
   };
+}
+
+/** 跨名同槽（v1.2）：bind:group 与 bind:checked 同元素同抢 checked 槽——点名的两个 attr。 */
+function atrBindSlotConflict(prev: string, name: string): AtrError {
+  return {
+    code: "ATR-325",
+    message: `bind: 重复绑定：同元素的 ${prev} 与 ${name} 同占 checked 槽（双写 checked）`,
+    context: { attr: name },
+    fix: `移除其一——${prev} 与 ${name} 都驱动 checked：组选择（radio）用 bind:group，单开关（checkbox）用 bind:checked`,
+  };
+}
+
+/** 槽位认领（precheckBinds 与 bindTwoWay/bindGroup 双路径同源，判定一致）：同槽第二次认领返回
+ * ATR-325（同名重复维持既有文案；跨名同槽点名两个 attr）。 */
+function claimBindSlot(el: object, name: string): AtrError | null {
+  let slots = bindSlots.get(el);
+  if (!slots) {
+    slots = new Map();
+    bindSlots.set(el, slots);
+  }
+  const slot = slotOfBind(name);
+  const prev = slots.get(slot);
+  if (prev !== undefined) return prev === name ? atrBindDuplicate(name) : atrBindSlotConflict(prev, name);
+  slots.set(slot, name);
+  return null;
 }
 
 /** bind: 核心校验（参数可判定面，预检与 bindTwoWay 共用 = 双路径同源）：
@@ -551,7 +582,7 @@ function checkBindCore(
       fix: "bind: 目标须为可写 $state 信号——$derived 只读不能作双向回写目标；改绑上游 $state，或经事件处理器写上游信号",
     };
   }
-  const matrixFix = "v1 支持面：bind:value × input（文本类）/textarea/select；bind:checked × input[type=checkbox|radio]";
+  const matrixFix = "v1 支持面：bind:value × input（文本类）/textarea/select；bind:checked × input[type=checkbox|radio]；bind:group × input[type=radio]（组身份 = value 属性）";
   if (name === "bind:value") {
     if (tagLc !== "input" && tagLc !== "textarea" && tagLc !== "select") {
       return {
@@ -570,12 +601,23 @@ function checkBindCore(
         fix: matrixFix,
       };
     }
+  } else if (name === "bind:group") {
+    // 决策 25 v1.2：radio group。tag 级矩阵只关 input；radio 细化归 checkBindTypeRefinement
+    //（与 bind:checked 同款边界——bindTwoWay/bindGroup 无 attrs 视野，避免 attr 源序误拒）。
+    if (tagLc !== "input") {
+      return {
+        code: "ATR-324",
+        message: `bind: 组合不在 v1 支持面：${name} 于 <${tagLc}>`,
+        context: { attr: name, expr: target },
+        fix: matrixFix,
+      };
+    }
   } else {
     return {
       code: "ATR-324",
       message: `bind: 未知属性指令：${name}`,
       context: { attr: name },
-      fix: "v1 仅支持 bind:value 与 bind:checked；元素事件用 on: 前缀（如 on:click）",
+      fix: "v1 支持 bind:value、bind:checked 与 bind:group；元素事件用 on: 前缀（如 on:click）",
     };
   }
   return null;
@@ -587,7 +629,7 @@ function checkBindCore(
  * 均按未知保守拒绝——checked 绑上去必错，宁拒不漏。 */
 function checkBindTypeRefinement(name: string, tagLc: string, inputType: string | null): AtrError | null {
   if (tagLc !== "input") return null; // 细化面只关 input；tag 级矩阵由 checkBindCore 把关
-  const matrixFix = "v1 支持面：bind:value × input（文本类）/textarea/select；bind:checked × input[type=checkbox|radio]";
+  const matrixFix = "v1 支持面：bind:value × input（文本类）/textarea/select；bind:checked × input[type=checkbox|radio]；bind:group × input[type=radio]（组身份 = value 属性）";
   const isCheckboxLike = inputType === "checkbox" || inputType === "radio";
   if (name === "bind:value" && isCheckboxLike) {
     return {
@@ -605,18 +647,29 @@ function checkBindTypeRefinement(name: string, tagLc: string, inputType: string 
       fix: matrixFix,
     };
   }
+  if (name === "bind:group" && inputType !== "radio") {
+    // v1.2：radio group——type 缺省（缺省即 text）/动态 type={}/其他 type 均按未知保守拒绝（bind:checked 同款宁拒不漏）
+    return {
+      code: "ATR-324",
+      message: `bind: 组合不在 v1 支持面：bind:group 于 <input>${inputType === null ? "（缺静态 type）" : `[type=${inputType}]`}（radio group 用 type=radio）`,
+      context: { attr: name },
+      fix: matrixFix,
+    };
+  }
   return null;
 }
 
 /** bind: attrs 预检（决策 25 步骤 1-4，解释器 createElement 之前跑）：逐条 bind: 校验
- * （checkBindCore + type 细化面）+ 同元素同名去重（ATR-325 记后到者）。返回失败清单
+ * （checkBindCore + type 细化面）+ 同元素同槽去重（ATR-325 记后到者——v1.2 槽位语义：
+ * checked 槽 bind:checked/bind:group 共占，跨名同槽即冲突）。bind:group 另查 value 身份键
+ * 静态面（ATR-327，仅预检有全量 attrs 视野：缺/动态/空串均拒）。返回失败清单
  * （保 attr 引用供 prod 跳过失败项）；dev 下调用方任取首条渲染错误卡。 */
 function precheckBinds(
   node: { tag: string; attrs: Attr[] },
   scope: Record<string, unknown>,
 ): Array<{ attr: Attr; error: AtrError }> {
   const fails: Array<{ attr: Attr; error: AtrError }> = [];
-  const seen = new Set<string>();
+  const claimed = new Map<string, string>();
   const tagLc = node.tag.toLowerCase();
   // type 解析：仅认静态 type attr；动态 type={} v1 不追（按未知保守处理，见细化面注释）
   const typeAttr = node.attrs.find((x) => x.name.toLowerCase() === "type" && !x.dynamic);
@@ -624,11 +677,18 @@ function precheckBinds(
   for (const a of node.attrs) {
     if (!a.name.startsWith("bind:")) continue;
     let error: AtrError | null;
-    if (seen.has(a.name)) {
-      error = atrBindDuplicate(a.name);
+    const slot = slotOfBind(a.name);
+    const prev = claimed.get(slot);
+    if (prev !== undefined) {
+      error = prev === a.name ? atrBindDuplicate(a.name) : atrBindSlotConflict(prev, a.name);
     } else {
-      seen.add(a.name);
+      claimed.set(slot, a.name);
       error = checkBindCore(a.name, a.value, scope, tagLc) ?? checkBindTypeRefinement(a.name, tagLc, inputType);
+    }
+    if (!error && a.name === "bind:group") {
+      // ATR-327 静态面：身份键 = 静态非空 value 属性（动态 value={} 与空串同拒——组身份不可判定）
+      const valueAttr = node.attrs.find((x) => x.name.toLowerCase() === "value" && !x.dynamic);
+      if (!valueAttr || valueAttr.value.trim() === "") error = atrBindGroupMissingKey(a.name, a.value);
     }
     if (error) fails.push({ attr: a, error });
   }
@@ -655,13 +715,8 @@ function bindTwoWay(
   };
   const err = checkBindCore(name, expr, scope, tag.toLowerCase());
   if (err) return fail(err);
-  let subs = bindSubscriptions.get(el);
-  if (!subs) {
-    subs = new Set();
-    bindSubscriptions.set(el, subs);
-  }
-  if (subs.has(name)) return fail(atrBindDuplicate(name));
-  subs.add(name);
+  const slotErr = claimBindSlot(el, name);
+  if (slotErr) return fail(slotErr);
   const sig = scope[expr.trim()] as Signal;
   const isChecked = name === "bind:checked";
   const io = el as unknown as { value: string; checked: boolean };
@@ -691,6 +746,85 @@ function bindTwoWay(
     // dom-shim（tests/dom-shim.ts）未实现 removeEventListener——可选调用兼容微 shim 宿主，
     // 真 DOM 全量退订；effect 已先行 dispose，脱离节点不再被下行写（响应正确性不受影响）。
     (el as { removeEventListener?: (type: string, fn: () => void) => void }).removeEventListener?.(event, handler);
+  };
+  captureCleanup(dispose);
+  return dispose;
+}
+
+/* ---- 决策 25 v1.2：bind:group——radio group 双向绑定（v1 显式不做清单销账，m10 批） ----
+ * attr 语法：bind:group={sig} 挂在 <input type="radio">；解析器零改动（bind:group 落既有产物
+ * {name:"bind:group", value:expr, dynamic:true} 即契约载体）。组语义：group = 绑定同一目标信号的
+ * 全体 bind:group 元素——上行 change 回写选中项身份键，信号回写经响应式图驱动每个成员的下行
+ * effect 重判 checked ⇒ 组内互斥（写 X ⇒ 键≠X 的成员全部取消）；不依赖原生 name 分组（同 name
+ * 的原生互斥是 DOM 加成，不依赖也不禁止；不同 name 绑同一信号仍互斥）。
+ * 身份键 = 静态 value 属性：缺失/动态 value={}/空串 → ATR-327（预检级——precheckBinds 全量
+ * attrs 视野；运行时 belt 面 effect 首跑一次性 record，不抛——effect 上下文不可抛，编译路径
+ * 无预检的兜底面，诚实边界）。身份键在 effect 内读取：$effect 首跑入微任务队列，程序体同步
+ * 执行完毕后所有静态 attr 已落，与 attr 发射顺序无关（type 细化面同款顺序解耦论证）。
+ * v1 显式不做：checkbox group（数组集合语义）、动态 type/value、组内重复身份键校验
+ * （跨元素面；语义确定性保留：checked = (sig.value === 自身键)，重复键会同查）。
+ */
+/** ATR-327 四段式：bind:group 的 radio 组内身份键缺失。 */
+function atrBindGroupMissingKey(name: string, expr: string): AtrError {
+  return {
+    code: "ATR-327",
+    message: `bind:group：radio 缺 value 属性（组内身份键缺失）：${name}={${expr}}`,
+    context: { attr: name, expr },
+    fix: "为组内每个 radio 补静态 value 属性——bind:group 的组身份 = value 属性值（动态 value={} v1 不支持）",
+  };
+}
+
+/** 决策 25 v1.2 单点：bind:group radio group。签名/生命周期/错误契约与 bindTwoWay 同款
+ * （dispose = $effect dispose + removeEventListener + captureCleanup 随 F-5 析构链；codegen 面
+ * 经 __compiledRT 注入，产物零 import）。错误契约：checkBindCore / 槽位守卫失败 →
+ * recordRuntimeError 后 dev 抛出 / prod 返回 noop dispose（bindTwoWay fail() 同款）——解释器
+ * 路径被 precheckBinds 前置拦截永不触达（校验函数同源，判定一致）。 */
+function bindGroup(
+  el: HTMLElement,
+  name: string,
+  expr: string,
+  scope: Record<string, unknown>,
+  tag: string,
+): () => void {
+  const fail = (err: AtrError): (() => void) => {
+    recordRuntimeError(err);
+    if (!(BUILD_PROD || dynProd())) throw err;
+    return () => {}; // prod：元素照常语义，跳过该 bind: 绑定
+  };
+  const err = checkBindCore(name, expr, scope, tag.toLowerCase());
+  if (err) return fail(err);
+  const slotErr = claimBindSlot(el, name);
+  if (slotErr) return fail(slotErr);
+  const sig = scope[expr.trim()] as Signal;
+  const io = el as unknown as { checked: boolean };
+  let keyComplained = false; // 一次性旗标：空身份键的 belt 记录不随信号变化刷屏
+  // 正向下行：信号 → 组内选中重判。身份键 effect 内读（首跑已过程序体，静态 attr 已落）；
+  // 程序化 checked= 不触发 change 事件（DOM 规范）= 无回环（bindTwoWay 同款论证）。
+  const disposeEffect = $effect(() => {
+    const key = el.getAttribute("value") ?? "";
+    if (!key) {
+      if (!keyComplained) {
+        keyComplained = true;
+        recordRuntimeError(atrBindGroupMissingKey(name, expr));
+      }
+      io.checked = false; // 空身份键永不匹配——绑定仍成立但不选中（belt 已记录，不静默）
+      return;
+    }
+    io.checked = sig.value === key;
+  });
+  // 反向回写：radio → change（radio 组选择事件面，bind:checked 同款）。
+  const handler = () => {
+    try {
+      sig.value = el.getAttribute("value") ?? ""; // 身份键原样回写，类型转换是用户的事
+    } catch (e) {
+      recordRuntimeError(e); // belt-and-braces：渲染期校验正常时不会触发（决策 25 v1.2）
+    }
+  };
+  el.addEventListener("change", handler);
+  const dispose = () => {
+    disposeEffect();
+    // dom-shim 未实现 removeEventListener——可选调用兼容微 shim 宿主，真 DOM 全量退订（bindTwoWay 同款口径）。
+    (el as { removeEventListener?: (type: string, fn: () => void) => void }).removeEventListener?.("change", handler);
   };
   captureCleanup(dispose);
   return dispose;
@@ -1099,7 +1233,11 @@ function renderNode(
         }
         if (a.name.startsWith("bind:")) {
           // 决策 25：双向绑定单点（预检已过 → 校验正常；dispose 内部 captureCleanup 随分支析构）
-          if (!skippedFails.has(a)) bindTwoWay(el, a.name, a.value, scope, node.tag);
+          // 决策 25 v1.2：bind:group（radio group）走 bindGroup 单点，其余（bind:value/bind:checked）走 bindTwoWay
+          if (!skippedFails.has(a)) {
+            if (a.name === "bind:group") bindGroup(el, a.name, a.value, scope, node.tag);
+            else bindTwoWay(el, a.name, a.value, scope, node.tag);
+          }
           continue;
         }
         if (a.dynamic) {
@@ -1325,6 +1463,7 @@ export const __compiledRT = {
   booly,
   bindExpr,
   bindTwoWay, // 决策 25：bind:value/bind:checked 双向绑定单点（codegen emitAttrs 同位支路发射 rt.bindTwoWay，产物零 import 不破）
+  bindGroup, // 决策 25 v1.2：bind:group radio group 单点（codegen emitAttrs 同位支路发射 rt.bindGroup，产物零 import 不破）
   bindEvent, // 决策 25 后置候选（M9 事件修饰 v1）：on:event[.mod…] 单点（codegen emitAttrs on: 支路同位发射 rt.bindEvent，分支 B 收口；产物零 import 不破）
   recordRuntimeError,
   mountComponent,

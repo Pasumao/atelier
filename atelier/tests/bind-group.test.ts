@@ -350,6 +350,7 @@ describe("决策 25 v1.2 bind:group __compiledRT.bindGroup 直调契约（codege
     expect(getLast()?.code, "belt 记录 ATR-327（编译路径无预检的兜底面）").toBe("ATR-327");
     expect(el.checked, "空身份键永不匹配").toBe(false);
 
+    setLast(undefined); // 清掉首跑记录再验「不重复刷屏」
     plan.value = "b";
     await flush();
     plan.value = "a";
