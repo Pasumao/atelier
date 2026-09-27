@@ -7,11 +7,14 @@
  * 契约 = 决策 6 扁平 schema 单源（validateFlat），输入校验失败 → ATR-201；v2 加 output 输出契约
  * （dev 态校验，违规 → ATR-215；prod 剥离但 JSON-safe 检查保留——"对内证伪可剥离、对外设防保留"§3.7）。
  * 错误码（决策 9 四域的 3xx 运行时域）：310 未知端点 / 311 方法不允许 / 312 非法 JSON /
- * 313 端点注册冲突或命名非法 / 314 live/invalidate 键语法非法 / 320 handler 抛错 /
+ * 313 端点注册冲突或命名非法 / 314 live/invalidate 键语法非法 / 315 live×auth 组合不支持（注册期拒绝，P1-5 fail-closed）/
+ * 320 handler 抛错 /
  * 321 live 重算失败（SSE error 事件，不断流——live.ts）/ 322 端点超时；2xx 契约域：215 输出契约违规
  * （开发者错误）/ 216 输出非 JSON-safe；SQLite 宿主面见 sqlite.ts ATR-330。
  * 鉴权域（FS-M2(m2d) 加法，§6.2）：340 会话缺失/读取器未装配（401）/ 341 角色不符（403）——
- * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）。
+ * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）；
+ * live SSE 通道不设 per-subscriber 门禁（引擎共享重算 ctx.auth=null）——live×auth(type≠none) 组合
+ * 在 register() 即以 ATR-315 拒绝（fail-closed，见 register 内注释），声明不可能被静默忽略。
  * 依赖注入（§3.2）：无 DI 容器——db / auth 由 createHandler 装配点一次性显式注入，装配代码明文可见。
  * v2 边界（诚实）：gen auth 产物（会话原语/cookie/端点骨架）归 FS-5 生成器，本模块只做装配层拦截；
  * live 为全量引擎（FS-7，live.ts 协作对象：SSE 失效-重算-推送——单进程内存订阅、重连全量重算，
@@ -98,6 +101,9 @@ export function defineCommand<TInput extends Record<string, unknown> = Record<st
  * 审计 journal 条目（D-F12）：command 入账（成功与失败同源呈现），query 不入账。
  * principal/durMs 对"handler 已执行"的条目恒存在（入账只在分发穿过 handler 之后）；
  * notes/error 仅在非空时携带。
+ * input 经写入单源 journalPush 递归敏感键脱敏（P1-6）：password/secret/token/authorization 等
+ * 词根键（不区分大小写）→ 值替换 "[redacted]"——auth.login 的密码不进内存审计环 +
+ * GET /__atelier/server-status（introspect.ts）+ review 页/MCP 工具整条消费链。
  */
 export type EndpointJournalEntry = {
   ts: string;
@@ -238,6 +244,32 @@ function assertInvalidateKeys(keys: unknown, owner: string): void {
 /** 超时竞速哨兵：Promise.race 输家判定用（区别于 handler 自身抛出的任何错误） */
 const TIMEOUT_BREACH = Symbol("atelier-endpoint-timeout");
 
+/* ---- journal input 敏感键脱敏（P1-6）：写入单源收口（journalPush），POST 分发与 live 引擎条目同源受保护 ----
+ * 键名含下列词根即视为敏感（不区分大小写，子串命中——accessToken/refresh_token 等派生拼写一并覆盖）：
+ * 词根清单按"宁可多脱、不可漏脱"取常用凭据词；新凭据形态出现时在此追加。
+ * 值整体替换为占位串（fail-closed：敏感键下的任意结构不外泄），非敏感键与嵌套结构原样保留（排查可用）。 */
+const SENSITIVE_KEY_RE = /pass(?:word|wd)?|pwd|secret|token|authorization|credential|api[-_]?key|private[-_]?key/i;
+const REDACTED_PLACEHOLDER = "[redacted]";
+
+/** 递归脱敏：不改原对象（handler 仍持有原输入），返回脱敏副本；循环引用防御（正常 JSON 输入不出现） */
+export function redactSensitiveInput(input: unknown, seen: Set<object> = new Set()): unknown {
+  if (input === null || typeof input !== "object") return input;
+  if (seen.has(input)) return REDACTED_PLACEHOLDER;
+  seen.add(input);
+  try {
+    if (Array.isArray(input)) return input.map((v) => redactSensitiveInput(v, seen));
+    const proto = Object.getPrototypeOf(input);
+    if (proto !== Object.prototype && proto !== null) return input; // 非普通对象（Date/Map 等，JSON 输入不会出现）原样保留
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+      out[k] = SENSITIVE_KEY_RE.test(k) ? REDACTED_PLACEHOLDER : redactSensitiveInput(v, seen);
+    }
+    return out;
+  } finally {
+    seen.delete(input);
+  }
+}
+
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]*$/;
 
 export class EndpointRegistry {
@@ -266,6 +298,23 @@ export class EndpointRegistry {
     }
     if (def.emits != null) {
       assertInvalidateKeys(def.emits, `端点 ${def.name} emits`);
+    }
+    // ---- live×鉴权 fail-closed（P1-5，ATR-315）：live SSE 通道与端点级鉴权声明互斥，注册期显式拒绝 ----
+    // GET /live 路由不经过 POST 通道的 readAuth 门禁，且 live 引擎重算 ctx.auth=null（live.ts 诚实边界）：
+    // 若放行组合，端点声明的 auth 会被 SSE 通道静默忽略（未认证客户端直接订阅）。引擎的共享重算模型
+    // （coalesce/single-flight 按 (端点, input) 分组共享结果）与 per-subscriber 鉴权在结构上冲突——
+    // per-auth 重算属设计扩展（见 live.ts 文件头），本处把"不支持"变成看得见的失败（fail-closed）。
+    // auth: { type: "none" } = 显式消警，与 live 组合放行（liveInvalidateKeys 的 live != null 口径一致，
+    // live:false 亦视同声明 live——与 addDefinition/handleLive 现行为一致）。
+    if (def.live != null && def.auth != null && def.auth.type !== "none") {
+      throw new AtrEndpointError(
+        endpointError(
+          "ATR-315",
+          `端点 ${def.name} 同时声明 live 与 auth: { type: "${def.auth.type}" }——live SSE 通道不支持端点级鉴权（共享重算 ctx.auth=null，声明会被静默忽略）`,
+          `三选一：该读面确属免鉴权时显式声明 auth: { type: "none" }；需要鉴权的数据改用普通（非 live）query 端点经 POST 直调（走 readAuth 门禁）；或把失效键交给免鉴权 live 端点、敏感过滤在 handler 内按 ctx.auth 自行做（POST 通道可见 ctx.auth，live 重算不可见）`,
+          [def.name]
+        )
+      );
     }
     // 内部存储收口为非泛型形态（分发按 name 取用，泛型只活在注册调用点的类型检查里）
     this.defs.set(def.name, def as EndpointDef);
@@ -316,7 +365,9 @@ export class EndpointRegistry {
   }
 
   private journalPush(entry: EndpointJournalEntry): void {
-    this.journalBuf.push(entry);
+    // P1-6 脱敏收口：journal 唯一写入口（POST 分发与 live 引擎 host 钩子都经此）——
+    // 在 append 前对 input 做递归敏感键脱敏，server-status/review/MCP 全部消费面同源受保护。
+    this.journalBuf.push({ ...entry, input: redactSensitiveInput(entry.input) });
     while (this.journalBuf.length > this.journalLimit) this.journalBuf.shift();
   }
 

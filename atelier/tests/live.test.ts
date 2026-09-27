@@ -581,6 +581,62 @@ describe("live 引擎：失效-重算-推送（FS-DESIGN §4.1/§4.2）", () => 
     await expectNoFrame(sse);
   });
 
+  it("live×鉴权 fail-closed（P1-5 红检）：live 与 auth.type≠none 组合在 register() 即抛 ATR-315 四段式，不进注册表", () => {
+    const reg = makeReg();
+    const registerBad = () =>
+      reg.register(
+        defineQuery("secret.feed", {
+          auth: { type: "session" },
+          live: { invalidate: ["table:messages"] },
+          handler: () => ({ count: 0, items: [] }),
+        })
+      );
+    let threw: unknown = null;
+    try {
+      registerBad();
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).not.toBeNull(); // 红检核心：注册期必须显式拒绝（此前静默注册 = SSE 旁路鉴权）
+    const atr = (threw as { atr?: { code: string; message: string; context: unknown; fix: string } }).atr;
+    expect(atr?.code).toBe("ATR-315");
+    expect(atr?.message).toContain("secret.feed");
+    expect(atr?.message).toContain("session");
+    expect(atr?.context).toBeDefined(); // 四段式形状
+    expect(atr?.fix).toContain("auth");
+    expect(reg.has("secret.feed")).toBe(false); // fail-closed：不进注册表（也就不进 live 引擎、不可被 GET /live 订阅）
+    expect(reg.liveEngine.subscriberCount()).toBe(0);
+    // role 变体同码拒绝
+    expect(() =>
+      reg.register(defineQuery("admin.feed", { auth: { type: "session", role: "admin" }, live: true, handler: () => 1 }))
+    ).toThrow(/ATR-315/);
+    // command 声明 live 的非法组合不在此列（SSE 仅面向 query——kind 校验在别处，但 live×auth 拒绝对 command 同样生效）
+    expect(() =>
+      reg.register(defineCommand("admin.cmd", { auth: { type: "session" }, live: { invalidate: ["table:x"] }, handler: () => 1 }))
+    ).toThrow(/ATR-315/);
+  });
+
+  it("live×鉴权回归（P1-5）：auth:none / 未声明 auth 的 live 端点照常注册与订阅；带 auth 的非 live 端点 POST 门禁不受影响", async () => {
+    const reg = makeReg();
+    reg.register(defineQuery("feed.none", { auth: { type: "none" }, live: true, handler: () => ({ n: 1 }) }));
+    reg.register(defineQuery("feed.legacy", { live: { invalidate: ["table:messages"] }, handler: () => ({ n: 2 }) })); // LiveNotes/app.notes 形态
+    reg.register(defineCommand("feed.bump", { auth: { type: "session" }, emits: ["table:messages"], handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({ auth: () => null }); // 无有效会话的客户端
+    const sse1 = SseReader.from(await get(handler, liveUrl("feed.none")));
+    await sse1.next();
+    const snap1 = (await withTimeout(sse1.next(), 1000, "auth:none live 首连")) as SseEvent;
+    expect(snap1.event).toBe("data");
+    expect(JSON.parse(snap1.data)).toEqual({ n: 1 });
+    const sse2 = SseReader.from(await get(handler, liveUrl("feed.legacy")));
+    await sse2.next();
+    const snap2 = (await withTimeout(sse2.next(), 1000, "未声明 auth live 首连")) as SseEvent;
+    expect(snap2.event).toBe("data");
+    expect(JSON.parse(snap2.data)).toEqual({ n: 2 });
+    const denied = await post(handler, "feed.bump", {}); // 带 auth 的 command：POST 门禁照常（401 ATR-340）
+    expect(denied.status).toBe(401);
+    expect((await denied.json()).code).toBe("ATR-340");
+  });
+
   it("GET /live 路由（加法不改旧）：非 live 端点/未知端点/非 query 维持 ATR-311；POST 通道与 mount 不受影响", async () => {
     const reg = makeReg();
     reg.register(defineQuery("chat.list", { live: { invalidate: ["table:messages"] }, handler: () => ({ count: 0, items: [] }) }));

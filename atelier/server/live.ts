@@ -29,6 +29,9 @@
  * - 重算 ctx：auth=null（订阅者各自的会话差异不参与共享重算——本地单机形态；带鉴权的 live 面
  *   归 gen auth 装配后再议）、signal 为永不中止信号（timeoutMs 元数据不作用于 live 重算——
  *   分发超时语义归 POST 通道）；
+ * - live×鉴权互斥（P1-5）：共享重算（coalesce/single-flight 按 (端点, input) 分组共享结果）与
+ *   per-subscriber 鉴权结构冲突——registry.register() 对 live×auth(type≠none) 组合以 ATR-315
+ *   注册期拒绝（fail-closed，endpoints.ts），本引擎不做 per-auth 重算（属设计扩展）；
  * - 共享重算组内多个订阅者收到同一次结果（个体推送失败/背压断流只影响自身，不影响组内他人）。
  */
 import { validateFlat, type AtrError } from "../runtime/contract.ts";
