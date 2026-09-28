@@ -26,6 +26,7 @@
 import type { EndpointDef, EndpointRegistry, EndpointSummary } from "./endpoints.ts";
 import { endpointError, isLiveDeclared } from "./endpoints.ts";
 import { MIGRATION_JOURNAL_TAIL_LIMIT, migrateStatus } from "./migrate.ts";
+import type { JobsStats } from "./jobs.ts"; // 仅类型——jobs 段数据经 handle.stats() 窄口取，SQL 单源在 jobs.ts
 import { timingSafeEqual } from "node:crypto";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -51,6 +52,11 @@ export type ServerStatusSnapshot = {
   /** db 读侧快照（未装配/读失败 = null，note 说明） */
   db: { tables: unknown[]; migrations: unknown } | null;
   dbNote: string | null;
+  /**
+   * jobs 段（A1/A4 差距批，§5.6；可选位）：各 status 计数 + 尾部 ~20 条。
+   * 仅 createHandler({ jobs }) 装配后出现；读失败（表损坏等）= 段缺省——零假数据纪律。
+   */
+  jobs?: JobsStats;
 };
 
 /** prod 旗（endpoints.ts 同机制同读法——单点复制而非跨模块开私有口，两处注释互指） */
@@ -159,11 +165,12 @@ function introspectMigrations(db: ReadableDb, migrationsDir: string | null) {
 /**
  * 组装 server-status 快照。opts.db = createHandler 装配的库句柄（未装配 = db 段诚实缺省）；
  * opts.migrationsDir = 迁移目录（缺省 <cwd>/src/server/db/migrations——dev 托管 spawn cwd=应用根，
- * 直跑 main-server.ts 亦同；§5.4 目录约定单源在 scripts/migrate.mjs）。
+ * 直跑 main-server.ts 亦同；§5.4 目录约定单源在 scripts/migrate.mjs）；
+ * opts.jobs = createHandler 装配的 jobs 句柄（A1/A4 差距批；未装配 = jobs 段不出现）。
  */
 export function serverStatusSnapshot(
   registry: EndpointRegistry,
-  opts: { db?: unknown; mount?: string; migrationsDir?: string | null } = {},
+  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; jobs?: { stats(): JobsStats } } = {},
 ): ServerStatusSnapshot {
   // 端点全表 = registry.list() 摘要 + 契约体（get() 公开位逐个补全——不为内省开新的注册表写入口）
   const summaries = new Map(registry.list().map((s) => [s.name, s]));
@@ -194,6 +201,16 @@ export function serverStatusSnapshot(
     dbNote = "server 面未装配 db（createHandler 未传 db）——数据面内省缺省";
   }
 
+  // jobs 段（A1/A4 差距批）：句柄在场才出现；读失败 = 段缺省（零假数据——不编造空队列假象）
+  let jobs: ServerStatusSnapshot["jobs"];
+  if (opts.jobs != null) {
+    try {
+      jobs = opts.jobs.stats();
+    } catch {
+      jobs = undefined; // 表损坏/句柄异常——诚实缺省，CLI/日志侧另有错误面
+    }
+  }
+
   return {
     ok: true,
     server: { startedAt: STARTED_AT, mount: opts.mount ?? "/", node: process.version },
@@ -202,6 +219,7 @@ export function serverStatusSnapshot(
     live: { subscriberCount: registry.liveEngine.subscriberCount(), endpoints: liveNames },
     db,
     dbNote,
+    ...(jobs != null ? { jobs } : {}),
   };
 }
 
@@ -218,7 +236,7 @@ const STARTED_AT = new Date().toISOString();
  */
 export function introspectResponse(
   registry: EndpointRegistry,
-  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; statusToken?: string; req?: Request } = {},
+  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; statusToken?: string; req?: Request; jobs?: { stats(): JobsStats } } = {},
 ): Response | null {
   if (isProd()) return null;
   if (opts.statusToken != null) {

@@ -60,3 +60,25 @@ export {
   type ServerStatusEndpoint,
   type ServerStatusSnapshot,
 } from "./introspect.ts";
+/* A1/A4 差距批追加（§5.6 落地，2026-09-28，只加不改——既有行不动）：极薄队列 + jobs 运行时 + 幂等键 KV */
+export {
+  startJobs,
+  defaultJobBackoffMs,
+  JOBS_TABLE_DDL,
+  JOBS_INDEX_DDL,
+  IDEMPOTENCY_TABLE_DDL,
+  CRON_TYPE_PREFIX,
+  JOBS_LAST_ERROR_MAX,
+  JOBS_DEFAULT_POLL,
+  JOBS_DEFAULT_LOCK_TIMEOUT_MS,
+  type EnqueueInput,
+  type JobInvocation,
+  type JobHandler,
+  type CronEntry,
+  type KvView,
+  type KvStore,
+  type JobsStats,
+  type JobsHandle,
+  type BoundJobs,
+  type StartJobsOptions,
+} from "./jobs.ts";

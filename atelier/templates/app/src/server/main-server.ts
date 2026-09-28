@@ -39,6 +39,21 @@ registry.register(noteList).register(addNote);
  *      build 冒烟 cwd=dist=整目录部署语义，相对 db 路径须自足——m11 批 B 实测）
  *   4. createHandler({ mount, db })                       —— 迁移：node ../../atelier/cli.mjs migrate up
  *   鉴权（gen auth 后）：createHandler({ mount, db, auth: createSessionReader(db) })
+ *
+ * jobs 装配（FS-DESIGN §5.6，2026-09-28 差距批 A1/A4——队列已落地；依赖 db，接线随上面 db 步骤）：
+ *   import { startJobs } from "../vendor/atelier/server/index.ts";
+ *   const jobs = startJobs({
+ *     db,
+ *     handlers: {
+ *       // type 即分发键（可 grep、显式）；未注册 type 走失败退避落账（atelier_jobs.last_error 可查）
+ *       "app.hello": (job) => console.log(`[jobs] app.hello payload=${JSON.stringify(job.payload)} attempt=${job.attempt}`),
+ *       "app.gc": () => console.log("[jobs] app.gc tick（recurring 清理示例：在此做 jobs.prune 等无害例行）"),
+ *     },
+ *     cron: [{ name: "gc", everyMs: 60 * 60_000 }], // recurring 定时：cron:gc 行，完成时刻起算下一轮
+ *   });
+ *   createHandler({ mount, db, jobs })   // ← ctx.jobs（tx 原子投递）/ ctx.kv（幂等去重）随之可用
+ *   端点内投递：await ctx.db.tx(() => { 业务写; ctx.jobs.enqueue({ type: "app.hello", payload }) })
+ *   用法全量见 src/server/jobs/README.md；诚实边界：单机单进程 worker、5 字段 cron 表达式未做。
  */
 export function createAppHandler(): (req: Request) => Promise<Response> {
   const mount = process.env.ATELIER_SERVER_MOUNT ?? "/api";

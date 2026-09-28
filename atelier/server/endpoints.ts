@@ -14,6 +14,8 @@
  * 安全域（A2 收口批）：346 请求体超上限（413，maxBodyBytes 可配）；
  * 344 限流窗口超配额（429，rateLimit 显式装配、缺省不启用）；
  * 345 登录失败锁定（423，gen auth 产物内实现——本模块头表随批登记同一分配面）。
+ * jobs 域（A1/A4 差距批，jobs.ts 单文件实现，§5.6）：350 jobs 投递参数非法（enqueue/cron）/
+ * 351 幂等键 KV 参数非法——调用点同步抛错，经本分发器的 AtrEndpointError 缺省 422 映射承接；
  * 鉴权域（FS-M2(m2d) 加法，§6.2）：340 会话缺失/读取器未装配（401）/ 341 角色不符（403）——
  * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）；
  * live SSE 通道不设 per-subscriber 门禁（引擎共享重算 ctx.auth=null）——live×auth(type≠none) 组合
@@ -27,8 +29,9 @@
 import { createHash } from "node:crypto";
 import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contract.ts";
 import { LiveEngine, type LiveEngineOptions } from "./live.ts";
-import { beginWriteCapture, endWriteCapture, type WriteCapture } from "./sqlite.ts";
+import { beginWriteCapture, endWriteCapture, type SqliteDb, type WriteCapture } from "./sqlite.ts";
 import { INTROSPECT_NAME, introspectResponse } from "./introspect.ts";
+import type { BoundJobs, JobsHandle, KvView } from "./jobs.ts"; // 仅类型——运行时单向依赖 jobs.ts → endpoints.ts，零环
 
 export type EndpointKind = "query" | "command";
 
@@ -61,6 +64,19 @@ export type EndpointContext<TDb = unknown> = {
    * handler 以 ctx.setCookie?.() 调用（防御形态，gen auth 骨架即如此）。
    */
   setCookie?: (serialized: string) => void;
+  /**
+   * jobs 投递口（A1 差距批，§5.6；可选位——仅 createHandler({ jobs }) 装配后存在）。
+   * enqueue 固定经 ctx.db 同连接执行 → `ctx.db.tx(() => { 业务写; ctx.jobs.enqueue(...) })`
+   * 投递与业务写同一事务原子（tx 抛错 job 行一并回滚）；语义全量见 jobs.ts（ATR-350 参数面）。
+   * live 重算 ctx（live.ts）不带本位——共享重算无请求连接，job 化长任务从 command handler 投递。
+   */
+  jobs?: BoundJobs;
+  /**
+   * 幂等键 KV（A4 差距批，§5.6；可选位——仅 createHandler({ jobs }) 装配后存在）：
+   * get/set/setIfAbsent 显式原语，绑定 ctx.db 同连接（与业务写同事务）。**不自动改 command/
+   * idempotent 元数据语义**（§3.6 元数据保持纯声明）——handler 显式 setIfAbsent 去重。
+   */
+  kv?: KvView;
 };
 
 /** live/emits 失效键语法（§4.1）：表级或业务键——读写两侧都显式可查，非法 = ATR-314 */
@@ -502,9 +518,12 @@ export class EndpointRegistry {
    * node-host 桥侧另有读体中途截断的同上限闸（更早、更省内存），本兜底覆盖直挂宿主/进程内调用。
    * A2 硬化5：statusToken = server-status 调试面门禁（缺省不设 = 行为零变化；设置后 GET
    * <mount>/__atelier/server-status 要求 x-atelier-token 头，401 ATR-340——见 introspect.ts）。
+   * A1/A4 差距批：jobs = startJobs 产物句柄（jobs.ts）装配——ctx 增 jobs.enqueue（固定经 db
+   * 同连接执行 → tx 原子投递）与 ctx.kv（幂等键显式原语，绑定 db）；未装配 = 两 ctx 位不存在
+   * （可选位诚实呈现，行为零变化）。
    */
   createHandler(
-    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions } = {}
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; jobs?: JobsHandle } = {}
   ): (req: Request) => Promise<Response> {
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
     const db = opts.db; // 无库应用不传 = undefined（ctx.db 直通，诚实呈现）
@@ -515,6 +534,10 @@ export class EndpointRegistry {
     const rateLimit = opts.rateLimit;
     const rateBuckets = rateLimit != null ? new Map<string, number[]>() : null;
     const rateKeyOf = rateLimit?.keyBy ?? defaultRateLimitKey;
+    // A1/A4 差距批：jobs 句柄 → ctx.jobs/ctx.kv 绑定视图（预构一次——db 随本 handler 定死）
+    const jobsHandle = opts.jobs;
+    const ctxJobs: BoundJobs | undefined = jobsHandle != null ? { enqueue: (job) => jobsHandle.enqueue(job, db as SqliteDb) } : undefined;
+    const ctxKv = jobsHandle != null ? jobsHandle.kv.bound(db as SqliteDb) : undefined;
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     return async (req: Request): Promise<Response> => {
       // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
@@ -552,7 +575,7 @@ export class EndpointRegistry {
       //      A2 硬化5：statusToken 装配项透传——设置后该路由要求 x-atelier-token 头（401 ATR-340），
       //      未设置 = 行为零变化；prod 隐身优先于 token 判定（判定在 introspect 内部）。 ----
       if (req.method === "GET" && name === INTROSPECT_NAME) {
-        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req });
+        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs });
         if (res) return res;
       }
 
@@ -666,6 +689,8 @@ export class EndpointRegistry {
           }
           setCookies.push(serialized);
         },
+        // A1/A4 差距批（可选位——未装配 = undefined，与 setCookie 同款防御形态；无 jobs 面零开销）
+        ...(ctxJobs != null ? { jobs: ctxJobs, kv: ctxKv } : {}),
       };
       const t0 = performance.now();
       const durMs = (): number => Math.round(performance.now() - t0);
