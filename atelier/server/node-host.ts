@@ -30,6 +30,7 @@
  *   （pathname/search 仍正确——handler 依赖 URL 的部分实际只有这两样）。
  */
 import http from "node:http";
+import { createHash } from "node:crypto";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 
 /** 桥选项（最小开面：Request URL 的 authority fallback——缺 Host 头时用） */
@@ -107,16 +108,31 @@ async function dispatch(
       return;
     }
     nodeRes.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+    // A2 硬化4：console 侧恒保留原始错误（dev/prod 都不真丢——SSE 客户端断连等传输噪声也在此可见；
+    // 对外 message 经 foldProdMessage 收敛，见下）
+    console.error("[atelier node-host] 未捕获错误（兜底 500）：", e);
     nodeRes.end(
       JSON.stringify({
         error: {
           code: "ATR-320",
-          message: `node-host 桥内未捕获错误：${(e as Error)?.message ?? String(e)}`,
-          fix: "handler 应返回 Response（含错误响应）；此兜底只接直挂裸 handler 的漏网抛错",
+          message: `node-host 桥内未捕获错误：${foldProdMessage((e as Error)?.message ?? String(e))}`,
+          fix: "handler 应返回 Response（含错误响应）；此兜底只接直挂裸 handler 的漏网抛错；完整原始错误见 server 进程 console（A2 硬化4：日志侧不真丢）",
         },
       })
     );
   }
+}
+
+/**
+ * prod 错误 message 收敛（A2 硬化4，endpoints.ts foldProdMessage 同语义同值单点复制——本桥零
+ * server 依赖不开 import，两处注释互指）：prod 态（__ATELIER_PROD__，与 endpoints isProd 同读法）
+ * 对外 message 收敛为通用文案 + 短指纹（sha256 前 8 位，node:crypto）；dev 态逐字保留。
+ */
+function foldProdMessage(raw: string): string {
+  const prod = (globalThis as { __ATELIER_PROD__?: boolean }).__ATELIER_PROD__ === true;
+  if (!prod) return raw;
+  const fp = createHash("sha256").update(raw, "utf8").digest("hex").slice(0, 8);
+  return `内部错误（prod 已收敛，指纹 ${fp}；server 侧日志保留完整根因，可按指纹检索）`;
 }
 
 /** node:http 请求 → Web 标准 Request（头 rawHeaders 逐条 append 保真；体缓冲读取） */

@@ -339,11 +339,13 @@ describe("硬化4：prod 错误 message 收敛 + 指纹（endpoints ATR-320 / li
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
     try {
       const port = (server.address() as { port: number }).port;
-      const res = await fetch(`http://127.0.0.1:${port}/x`, { method: "POST", body: "{}" });
-      expect(res.status).toBe(500);
-      const err = (await res.json()) as { code: string; error?: { message: string } };
-      expect(JSON.stringify(err)).not.toContain(A2_SECRET); // 红态：500 兜底逐字外泄
-      expect(JSON.stringify(err)).toMatch(/指纹\s[0-9a-f]{8}/);
+      await withProd(true, async () => {
+        const res = await fetch(`http://127.0.0.1:${port}/x`, { method: "POST", body: "{}" });
+        expect(res.status).toBe(500);
+        const err = (await res.json()) as { code: string; error?: { message: string } };
+        expect(JSON.stringify(err)).not.toContain(A2_SECRET); // 红态：500 兜底逐字外泄
+        expect(JSON.stringify(err)).toMatch(/指纹\s[0-9a-f]{8}/);
+      });
       // console 侧保留原始（红态：node-host 兜底当前完全不落 console——原始错误真丢）
       expect(errSpy.mock.calls.some((args) => args.join(" ").includes(A2_SECRET))).toBe(true);
     } finally {

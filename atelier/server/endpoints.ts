@@ -22,6 +22,7 @@
  * 诚实边界随 live.ts 文件头）；注册表与 journal 为单进程内存态（多实例/落盘归后续）；
  * timeout 中止只停止等待，handler 自身须监听 ctx.signal 提前退出。
  */
+import { createHash } from "node:crypto";
 import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contract.ts";
 import { LiveEngine, type LiveEngineOptions } from "./live.ts";
 import { beginWriteCapture, endWriteCapture, type WriteCapture } from "./sqlite.ts";
@@ -167,6 +168,21 @@ export class AtrEndpointError extends Error {
 /** prod 旗（§3.7）：与 runtime/template.ts 的 __ATELIER_PROD__ 同款机制同款读法 */
 function isProd(): boolean {
   return (globalThis as { __ATELIER_PROD__?: boolean }).__ATELIER_PROD__ === true;
+}
+
+/**
+ * prod 错误 message 收敛（A2 硬化4 单源，live.ts ATR-321 同语义引用本函数；node-host.ts 桥因
+ * 零 server 依赖单点复制同款实现，三处注释互指）：未捕获抛错的原始 message 可能携带 SQL 片段/
+ * 路径/栈帧/凭据残片——prod 态不逐字对外，收敛为通用文案 + 短指纹（sha256 前 8 位 hex）。
+ * 同一错误恒得同一指纹：拿指纹到 server 侧日志（journal/console——dev/prod 都保留原始错误，
+ * 收敛只是对外姿态，不真丢根因）检索全量上下文。dev 态（__ATELIER_PROD__ 未置）逐字返回。
+ * 传输零宿主依赖的主张不变（指纹不在传输面）：node:crypto 与 sqlite.ts/migrate.ts 同款宿主面，
+ * Bun 有兼容层（差异锁死单文件纪律）。
+ */
+export function foldProdMessage(raw: string): string {
+  if (!isProd()) return raw;
+  const fp = createHash("sha256").update(raw, "utf8").digest("hex").slice(0, 8);
+  return `内部错误（prod 已收敛，指纹 ${fp}；server 侧日志保留完整根因，可按指纹检索）`;
 }
 
 /**
@@ -629,12 +645,20 @@ export class EndpointRegistry {
           return errorResponse(e.httpStatus ?? 422, e.atr);
         }
         // ---- 未捕获抛错：500 ATR-320（journal 记失败——审计与数据一致，D-F12） ----
-        const err = endpointError(
+        // A2 硬化4：journal 条目保留原始 message（日志侧 dev/prod 都不真丢）；对外 message 经
+        // foldProdMessage——prod 收敛为通用文案 + 指纹，dev 逐字（即 journalErr 与响应原样一致）。
+        const detail = `端点 ${def.name} handler 抛错：${(e as Error)?.message ?? String(e)}`;
+        const journalErr = endpointError(
           "ATR-320",
-          `端点 ${def.name} handler 抛错：${(e as Error)?.message ?? String(e)}`,
+          detail,
           `修复端点 ${def.name} 的 handler 内部错误；失败 command 亦入审计 journal（status=failed + 根因 error），journal() 时间轴可查"代理改了什么、砸了什么"`
         );
-        if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, dur, notes, err));
+        if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, dur, notes, journalErr));
+        const err = endpointError(
+          "ATR-320",
+          `端点 ${def.name} handler 抛错：${foldProdMessage((e as Error)?.message ?? String(e))}`,
+          journalErr.fix
+        );
         return errorResponse(500, err);
       } finally {
         // FS-7 捕获槽兜底：失败路径（抛错/超时/输出面违规的早退）也必须收槽——防槽泄漏与跨分发串写；
