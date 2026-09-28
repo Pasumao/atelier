@@ -38,6 +38,8 @@ import { validateFlat, type AtrError } from "../runtime/contract.ts";
 import {
   checkEndpointOutput,
   endpointError,
+  foldProdMessage,
+  isLiveDeclared,
   type AuthReader,
   type EndpointContext,
   type EndpointDef,
@@ -115,9 +117,10 @@ export class LiveEngine {
     this.backpressureLimit = opts.backpressureLimit ?? 32;
   }
 
-  /** 注册表 register() 时喂入 live query 定义（command 的 live 声明不进引擎——SSE 仅面向 query） */
+  /** 注册表 register() 时喂入 live query 定义（command 的 live 声明不进引擎——SSE 仅面向 query；
+   *  live:false = 显式无 live，同样不进——硬化7 与 endpoints.ts 同一 isLiveDeclared 口径） */
   addDefinition(def: EndpointDef): void {
-    if (def.kind === "query" && def.live != null) this.defs.set(def.name, def);
+    if (def.kind === "query" && isLiveDeclared(def)) this.defs.set(def.name, def);
   }
 
   /** createHandler 装配点（§3.2）调用：db 一次性显式注入（重复装配以最后一次为准——引擎随注册表单例） */
@@ -137,7 +140,7 @@ export class LiveEngine {
    * 由调用方回退 ATR-311。input 经 ?input=<JSON> 携带（§4.4 EventSource 拼接约定），缺省 = {}。
    */
   handleLive(req: Request, def: EndpointDef): Response | null {
-    if (def.kind !== "query" || def.live == null) return null;
+    if (def.kind !== "query" || !isLiveDeclared(def)) return null; // live:false = 显式无 live（硬化7）
 
     let parsed: unknown = {};
     const raw = new URL(req.url).searchParams.get("input");
@@ -351,12 +354,22 @@ export class LiveEngine {
       }
       this.pushEvent(subs, "data", JSON.stringify(result ?? null));
     } catch (e) {
-      const err = endpointError(
+      // A2 硬化4：SSE error 事件（对外）经 foldProdMessage——prod 收敛为通用文案 + 指纹，dev 逐字；
+      // journal 条目（日志侧）保留原始 message——dev/prod 都不真丢根因，可按指纹到 journal 检索。
+      const rawMsg = (e as Error)?.message ?? String(e);
+      const journalErr = endpointError(
         "ATR-321",
-        `live 端点 ${def.name} 重算失败：${(e as Error)?.message ?? String(e)}`,
+        `live 端点 ${def.name} 重算失败：${rawMsg}`,
         `修复 live 端点 ${def.name} 的 handler 内部错误后无需重连——订阅已保持，下一次失效写到达即自动重算；复现：POST /${def.name} 以同 input 直调 handler 看完整根因`
       );
-      this.pushEvent(subs, "error", JSON.stringify(err)); // 不断流：订阅保持（§4.2）
+      this.pushEvent(
+        subs,
+        "error",
+        JSON.stringify({
+          ...journalErr,
+          message: `live 端点 ${def.name} 重算失败：${foldProdMessage(rawMsg)}`,
+        })
+      ); // 不断流：订阅保持（§4.2）
       this.host.journalPush({
         ts: new Date().toISOString(),
         name: def.name,
@@ -366,7 +379,7 @@ export class LiveEngine {
         principal: null,
         durMs: Math.round(performance.now() - t0),
         ...(notes.length > 0 ? { notes: [...notes] } : {}),
-        error: err,
+        error: journalErr,
       });
     } finally {
       for (const s of subs) s.firstRecalcDone = true; // 首算已尝试（含失败）——首连等待循环据此收敛

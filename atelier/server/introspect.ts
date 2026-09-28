@@ -24,7 +24,10 @@
  *   不存在（旧库）= ok:false 诚实降级，绝不假数据。
  */
 import type { EndpointDef, EndpointRegistry, EndpointSummary } from "./endpoints.ts";
+import { endpointError, isLiveDeclared } from "./endpoints.ts";
 import { MIGRATION_JOURNAL_TAIL_LIMIT, migrateStatus } from "./migrate.ts";
+import { timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -53,6 +56,12 @@ export type ServerStatusSnapshot = {
 /** prod 旗（endpoints.ts 同机制同读法——单点复制而非跨模块开私有口，两处注释互指） */
 function isProd(): boolean {
   return (globalThis as { __ATELIER_PROD__?: boolean }).__ATELIER_PROD__ === true;
+}
+
+/** token 比较（A2 硬化5）：先哈希到定长再做 timing-safe 对比（不泄长度；dev 插件 tokenEq 同款）。 */
+function tokenEq(a: string | null | undefined, b: string | null | undefined): boolean {
+  const h = (s: string | null | undefined) => createHash("sha256").update(String(s ?? ""), "utf8").digest();
+  return timingSafeEqual(h(a), h(b));
 }
 
 /** db 句柄最小结构面（SqliteDb 四原语的只读子集——本模块只做纯读） */
@@ -164,7 +173,7 @@ export function serverStatusSnapshot(
   });
   const liveNames = registry.names().filter((name) => {
     const d = registry.get(name) as EndpointDef;
-    return d.kind === "query" && d.live != null;
+    return d.kind === "query" && isLiveDeclared(d); // live:false = 显式无 live（硬化7，与注册/引擎同口径）
   });
 
   let db: ServerStatusSnapshot["db"] = null;
@@ -202,12 +211,34 @@ const STARTED_AT = new Date().toISOString();
 /**
  * 分发器保留路由入口（endpoints.ts createHandler 调用）：命中保留路径返回 Response；
  * prod 旗返回 null（调用方落回既有 ATR 路径——调试面不进生产 API 面）。
+ * A2 硬化5：opts.statusToken（createHandler({ statusToken }) 装配项透传）设置后，本路由要求
+ * x-atelier-token 头（与 dev 面 token 机制同口径；哈希后 timing-safe 比对），不匹配 401 ATR-340
+ * （鉴权域既有码——同是"凭据未过门"的 401，不另开号）。未设置 = 行为零变化。token 判定在
+ * prod 隐身**之后**：prod 旗下照旧落 null → 405，门禁检查不泄露该路由在生产的存在性。
  */
 export function introspectResponse(
   registry: EndpointRegistry,
-  opts: { db?: unknown; mount?: string; migrationsDir?: string | null } = {},
+  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; statusToken?: string; req?: Request } = {},
 ): Response | null {
   if (isProd()) return null;
+  if (opts.statusToken != null) {
+    const provided = opts.req?.headers.get("x-atelier-token");
+    if (!tokenEq(provided, opts.statusToken)) {
+      return new Response(
+        JSON.stringify(
+          endpointError(
+            "ATR-340",
+            `server-status 调试面 token 门禁未通过（${provided == null ? "请求未携带 x-atelier-token 头" : "x-atelier-token 不匹配"}）`,
+            "以 x-atelier-token 头携带装配点声明的 token 重试（dev 托管形态 = 应用 .atelier/dev-token 同值——dev 代理自动携带）；确属可裸奔的内网调试面则移除 createHandler({ statusToken }) 装配项",
+            ["server-status"]
+          ),
+          null,
+          2
+        ),
+        { status: 401, headers: { "content-type": "application/json; charset=utf-8" } }
+      );
+    }
+  }
   const snap = serverStatusSnapshot(registry, opts);
   return new Response(JSON.stringify(snap, null, 2), {
     status: 200,

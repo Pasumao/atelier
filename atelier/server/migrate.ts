@@ -51,6 +51,18 @@ export const MIGRATIONS_TABLE_DDL =
   "CREATE TABLE IF NOT EXISTS atelier_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL, down_verified INTEGER DEFAULT 0)";
 
 /**
+ * 状态表 name 唯一索引（A2 硬化6）：迁移器自身不产生重名行，但手工/脚本误插会破坏 head 判定
+ * （max id）与完整性体检的 name 1:1 假设——唯一索引把"损坏可见"提前到写入时。
+ * 取最小升级方案：**不在 CREATE TABLE 里加 UNIQUE**（既有库拿不到惰性 DDL 升级，还需安全重建），
+ * 而是命名唯一索引 + migrateUp 惰性执行（IF NOT EXISTS 幂等）——新库/旧库最终索引对象一致，
+ * 状态表列形状零变化（struct 守卫/checkpoint 联动/sha256 体检三面消费者零感知）。
+ * 旧库若已有重名行（迁移器从不产生，出现即人工损坏）索引创建失败原样抛出——fail loudly，
+ * 绝不静默带病继续（诚实边界：此时需人工清重后重跑 migrate up）。
+ */
+export const MIGRATIONS_NAME_UK_DDL =
+  "CREATE UNIQUE INDEX IF NOT EXISTS atelier_migrations_name_uk ON atelier_migrations (name)";
+
+/**
  * 迁移 journal DDL（决策 21 台账预留位关闭）：追加式审计史——只 INSERT 不 UPDATE/DELETE。
  * 独立新表而非给 atelier_migrations 加列/行：状态表形状被 struct 守卫、checkpoint 联动
  * （migrationHead = max id）、sha256 体检三面消费，动形状 = 三处联动风险换一个史字段；
@@ -295,6 +307,7 @@ export function migrateStatus(db: SqliteDb, dir: string): MigrateStatus {
  */
 export function migrateUp(db: SqliteDb, dir: string, opts: { to?: string; principal?: string } = {}): MigrationStep[] {
   db.exec(MIGRATIONS_TABLE_DDL);
+  db.exec(MIGRATIONS_NAME_UK_DDL); // A2 硬化6：name 唯一（惰性幂等——既有库首迁自动补索引）
   const files = scanMigrations(dir);
   const fileByName = new Map(files.map((f) => [f.name, f]));
   const principal = journalPrincipal(opts.principal);

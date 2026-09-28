@@ -11,6 +11,9 @@
  * 320 handler 抛错 /
  * 321 live 重算失败（SSE error 事件，不断流——live.ts）/ 322 端点超时；2xx 契约域：215 输出契约违规
  * （开发者错误）/ 216 输出非 JSON-safe；SQLite 宿主面见 sqlite.ts ATR-330。
+ * 安全域（A2 收口批）：346 请求体超上限（413，maxBodyBytes 可配）；
+ * 344 限流窗口超配额（429，rateLimit 显式装配、缺省不启用）；
+ * 345 登录失败锁定（423，gen auth 产物内实现——本模块头表随批登记同一分配面）。
  * 鉴权域（FS-M2(m2d) 加法，§6.2）：340 会话缺失/读取器未装配（401）/ 341 角色不符（403）——
  * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）；
  * live SSE 通道不设 per-subscriber 门禁（引擎共享重算 ctx.auth=null）——live×auth(type≠none) 组合
@@ -21,6 +24,7 @@
  * 诚实边界随 live.ts 文件头）；注册表与 journal 为单进程内存态（多实例/落盘归后续）；
  * timeout 中止只停止等待，handler 自身须监听 ctx.signal 提前退出。
  */
+import { createHash } from "node:crypto";
 import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contract.ts";
 import { LiveEngine, type LiveEngineOptions } from "./live.ts";
 import { beginWriteCapture, endWriteCapture, type WriteCapture } from "./sqlite.ts";
@@ -61,6 +65,16 @@ export type EndpointContext<TDb = unknown> = {
 
 /** live/emits 失效键语法（§4.1）：表级或业务键——读写两侧都显式可查，非法 = ATR-314 */
 const INVALIDATE_KEY_RE = /^(?:table:[A-Za-z0-9_]+|key:.+)$/;
+
+/**
+ * 「声明了 live」的统一判定（A2 安全收口批，硬化7）：true 或 { invalidate } 对象 = 声明 live；
+ * `live: false` = 显式声明**无** live（显式选择优于沉默缺省的同款纪律），不再是「配了 live 对象」。
+ * 四处判定点统一引用本谓词（register ATR-315 / addDefinition 喂入 / createHandler /live 通道 /
+ * introspect live 名单），摘要 list() 的既有口径（liveDeclared）与本谓词语义一致，零行为漂移。
+ */
+export function isLiveDeclared(def: Pick<EndpointDef, "live">): boolean {
+  return def.live === true || (def.live != null && typeof def.live === "object");
+}
 
 export type EndpointDef<TInput = Record<string, unknown>, TOutput = unknown, TDb = unknown> = {
   kind: EndpointKind;
@@ -139,6 +153,68 @@ export function endpointError(code: string, message: string, fix: string, hints?
   return { code, message, context: { component: "atelier-server", hints }, fix };
 }
 
+/**
+ * 限流装配项（A2 功能批，in-memory v1）：显式声明纪律——缺省不启用，零行为变化。
+ * 滑动窗口按 key 计数：窗口内第 max+1 个请求 → 429 + ATR-344 + Retry-After 头。
+ * 诚实边界（随装配点注释重申）：单进程内存态，重启清零；多实例部署需外置限流器（v1 不做）；
+ * 键表软上限（超 1 万键清半）防海量伪造 IP 撑爆内存——宁可瞬时放开不无界吃内存。
+ */
+export type RateLimitOptions = {
+  /** 滑动窗口长度 ms */
+  windowMs: number;
+  /** 窗口内每 key 允许的最大请求数 */
+  max: number;
+  /**
+   * 限流键提取（缺省读 x-atelier-remote-addr 头——node-host 桥从 socket 对端注入并覆盖入站
+   * 同名头（防伪造），无该头的直挂调用落 "unknown" 共享桶；反代链后面的部署应自定义 keyBy
+   * 读可信跳（如自身反代追加的 x-forwarded-for 尾值）。
+   */
+  keyBy?: (req: Request) => string;
+};
+
+/** 限流缺省键：桥注入的 x-atelier-remote-addr → 兜底共享桶（诚实：缺头时所有调用方同桶） */
+function defaultRateLimitKey(req: Request): string {
+  return req.headers.get("x-atelier-remote-addr") ?? "unknown";
+}
+
+/** 限流判定（滑动窗口，纯同步）：true = 放行（时间戳已入桶）；false = 超限（附 Retry-After 秒数） */
+function tickRateLimit(buckets: Map<string, number[]>, opts: RateLimitOptions, key: string, now: number): { ok: true } | { ok: false; retryAfterSec: number } {
+  const cutoff = now - opts.windowMs;
+  let list = buckets.get(key);
+  if (list == null) {
+    list = [];
+    buckets.set(key, list);
+  }
+  while (list.length > 0 && list[0]! <= cutoff) list.shift(); // 滑出窗口的时间戳出列
+  if (list.length >= opts.max) {
+    const retryMs = list[0]! + opts.windowMs - now; // 最早入窗时间戳滑出的时刻 = 桶腾出位子的时刻
+    return { ok: false, retryAfterSec: Math.max(1, Math.ceil(retryMs / 1000)) };
+  }
+  list.push(now);
+  // 键表有界（诚实边界见 RateLimitOptions）：超软上限清一半（Map 插入序 ≈ 最旧键优先）
+  if (buckets.size > 10_000) {
+    for (const k of buckets.keys()) {
+      buckets.delete(k);
+      if (buckets.size <= 5_000) break;
+    }
+  }
+  return { ok: true };
+}
+
+/** 429 ATR-344 响应（Retry-After 头 = 距桶腾出位子的秒数，向上取整最少 1） */
+function rateLimitResponse(retryAfterSec: number): Response {
+  const res = errorResponse(
+    429,
+    endpointError(
+      "ATR-344",
+      "请求过于频繁：限流窗口内已超配额（429）",
+      `等待 Retry-After 指示的秒数后重试；配额与窗口由装配点 createHandler({ rateLimit: { windowMs, max } }) 显式声明（缺省不限流）。诚实边界：单进程内存态，重启清零`
+    )
+  );
+  res.headers.set("retry-after", String(retryAfterSec));
+  return res;
+}
+
 /** 框架内部抛错形态（同 runtime 惯例：message 带码前缀），四段式字段随行可结构化消费。
  *  v2：httpStatus（构造第二参）= 分发层的 HTTP 映射（§3.3），缺省 422——401/403/404/409 等
  *  业务语义由端点自带，HTTP status 只是传输层映射，结构化错误才是 agent 的导航面。 */
@@ -157,6 +233,28 @@ export class AtrEndpointError extends Error {
 function isProd(): boolean {
   return (globalThis as { __ATELIER_PROD__?: boolean }).__ATELIER_PROD__ === true;
 }
+
+/**
+ * prod 错误 message 收敛（A2 硬化4 单源，live.ts ATR-321 同语义引用本函数；node-host.ts 桥因
+ * 零 server 依赖单点复制同款实现，三处注释互指）：未捕获抛错的原始 message 可能携带 SQL 片段/
+ * 路径/栈帧/凭据残片——prod 态不逐字对外，收敛为通用文案 + 短指纹（sha256 前 8 位 hex）。
+ * 同一错误恒得同一指纹：拿指纹到 server 侧日志（journal/console——dev/prod 都保留原始错误，
+ * 收敛只是对外姿态，不真丢根因）检索全量上下文。dev 态（__ATELIER_PROD__ 未置）逐字返回。
+ * 传输零宿主依赖的主张不变（指纹不在传输面）：node:crypto 与 sqlite.ts/migrate.ts 同款宿主面，
+ * Bun 有兼容层（差异锁死单文件纪律）。
+ */
+export function foldProdMessage(raw: string): string {
+  if (!isProd()) return raw;
+  const fp = createHash("sha256").update(raw, "utf8").digest("hex").slice(0, 8);
+  return `内部错误（prod 已收敛，指纹 ${fp}；server 侧日志保留完整根因，可按指纹检索）`;
+}
+
+/**
+ * 请求体上限缺省值（A2 硬化3）：1MiB。node-host.ts 桥侧同值单点复制（不跨模块开私有口——
+ * 与 isProd 的 isProd/introspect 双写同款纪律，两处注释互指），装配点经 createHandler({ maxBodyBytes })
+ * 与 createNodeServer/serve({ maxBodyBytes }) 各自可配；两道闸都设时取小者生效（分发器兜底校验恒在）。
+ */
+export const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
 /**
  * 输出面检查（§2.3/§3.7 单源）：POST 分发器与 live 推送前（live.ts）共用同一校验——两通道零语义差。
@@ -304,9 +402,9 @@ export class EndpointRegistry {
     // 若放行组合，端点声明的 auth 会被 SSE 通道静默忽略（未认证客户端直接订阅）。引擎的共享重算模型
     // （coalesce/single-flight 按 (端点, input) 分组共享结果）与 per-subscriber 鉴权在结构上冲突——
     // per-auth 重算属设计扩展（见 live.ts 文件头），本处把"不支持"变成看得见的失败（fail-closed）。
-    // auth: { type: "none" } = 显式消警，与 live 组合放行（liveInvalidateKeys 的 live != null 口径一致，
-    // live:false 亦视同声明 live——与 addDefinition/handleLive 现行为一致）。
-    if (def.live != null && def.auth != null && def.auth.type !== "none") {
+    // auth: { type: "none" } = 显式消警，与 live 组合放行。判定用 isLiveDeclared（硬化7）：
+    // live:false = 显式声明无 live，不触发本拦截（A2 批前误伤——与 addDefinition/handleLive 同口径）。
+    if (isLiveDeclared(def) && def.auth != null && def.auth.type !== "none") {
       throw new AtrEndpointError(
         endpointError(
           "ATR-315",
@@ -318,7 +416,7 @@ export class EndpointRegistry {
     }
     // 内部存储收口为非泛型形态（分发按 name 取用，泛型只活在注册调用点的类型检查里）
     this.defs.set(def.name, def as EndpointDef);
-    if (def.kind === "query" && def.live != null) this.liveEngine.addDefinition(def as EndpointDef); // FS-7：live query 喂入引擎
+    if (def.kind === "query" && isLiveDeclared(def)) this.liveEngine.addDefinition(def as EndpointDef); // FS-7：live query 喂入引擎（live:false 不进——硬化7）
     return this;
   }
 
@@ -399,13 +497,31 @@ export class EndpointRegistry {
    * 同走 POST——输入必须过契约校验这条纪律不因动词分叉）；FS-7 加法通道：GET <mount>/<name>/live
    * → 声明 live 的 query 端点走 SSE 订阅（live.ts 引擎：失效-重算-推送），其余非 POST 维持 ATR-311。
    * 装配点（§3.2）：db / auth 一次性显式注入，无 DI 容器——装配代码在应用入口明文可见。
+   * A2 硬化3：maxBodyBytes = 请求体上限（缺省 1MiB），JSON 解析处校验，超限 413 ATR-346
+   * （不进 handler、不入 journal——与鉴权拦截同款"被拒之门前不触碰 handler"语义）；
+   * node-host 桥侧另有读体中途截断的同上限闸（更早、更省内存），本兜底覆盖直挂宿主/进程内调用。
+   * A2 硬化5：statusToken = server-status 调试面门禁（缺省不设 = 行为零变化；设置后 GET
+   * <mount>/__atelier/server-status 要求 x-atelier-token 头，401 ATR-340——见 introspect.ts）。
    */
-  createHandler(opts: { mount?: string; db?: unknown; auth?: AuthReader } = {}): (req: Request) => Promise<Response> {
+  createHandler(
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions } = {}
+  ): (req: Request) => Promise<Response> {
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
     const db = opts.db; // 无库应用不传 = undefined（ctx.db 直通，诚实呈现）
     const readAuth = opts.auth;
+    const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+    const statusToken = opts.statusToken; // A2 硬化5：server-status 门禁（未设 = 行为零变化）
+    // A2 功能7：限流（缺省不启用——显式声明纪律；buckets 随本 handler 单例，重启即清零）
+    const rateLimit = opts.rateLimit;
+    const rateBuckets = rateLimit != null ? new Map<string, number[]>() : null;
+    const rateKeyOf = rateLimit?.keyBy ?? defaultRateLimitKey;
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     return async (req: Request): Promise<Response> => {
+      // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
+      if (rateLimit != null && rateBuckets != null) {
+        const verdict = tickRateLimit(rateBuckets, rateLimit, rateKeyOf(req), Date.now());
+        if (!verdict.ok) return rateLimitResponse(verdict.retryAfterSec);
+      }
       const url = new URL(req.url);
       let rest = url.pathname;
       if (mount && rest.startsWith(mount)) rest = rest.slice(mount.length);
@@ -415,7 +531,7 @@ export class EndpointRegistry {
       if (req.method === "GET" && name.endsWith("/live")) {
         const base = name.slice(0, -"/live".length);
         const liveDef = base !== "" ? this.defs.get(base) : undefined;
-        if (liveDef && liveDef.kind === "query" && liveDef.live != null) {
+        if (liveDef && liveDef.kind === "query" && isLiveDeclared(liveDef)) { // live:false 通道关闭（硬化7）
           const sse = this.liveEngine.handleLive(req, liveDef);
           if (sse) return sse;
         }
@@ -432,9 +548,11 @@ export class EndpointRegistry {
 
       // ---- D-F16 保留内省路由（§10.3）：GET <mount>/__atelier/server-status → 运行时事实 JSON。
       //      dev 面 server-status（父进程代理）与 MCP endpoint.* 族、调试页三处同源；prod 旗下
-      //      introspectResponse 返回 null，落回下方既有 ATR 路径（调试面不进生产 API 面）。 ----
+      //      introspectResponse 返回 null，落回下方既有 ATR 路径（调试面不进生产 API 面）。
+      //      A2 硬化5：statusToken 装配项透传——设置后该路由要求 x-atelier-token 头（401 ATR-340），
+      //      未设置 = 行为零变化；prod 隐身优先于 token 判定（判定在 introspect 内部）。 ----
       if (req.method === "GET" && name === INTROSPECT_NAME) {
-        const res = introspectResponse(this, { db, mount: mount || "/" });
+        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req });
         if (res) return res;
       }
 
@@ -490,9 +608,25 @@ export class EndpointRegistry {
         }
       }
 
+      // ---- A2 硬化3：请求体上限（缺省 1MiB，maxBodyBytes 可配）——超限 413 ATR-346 ----
+      // content-length 声明值先快速拒绝（不读体）；实际字节在缓冲后再兜底校验（声明可缺失/失真）。
+      const overLimitError = (bytes: number): Response =>
+        errorResponse(
+          413,
+          endpointError(
+            "ATR-346",
+            `请求体超限：${bytes} 字节 > 上限 ${maxBodyBytes}（端点 ${name}）`,
+            `缩小请求体（分批/裁剪字段）；服务端上限由装配点调整：createHandler({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）。超限请求不进 handler、不入审计 journal`
+          )
+        );
+      const declaredLength = Number(req.headers.get("content-length"));
+      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) return overLimitError(declaredLength);
+
       let input: unknown;
       try {
-        input = await req.json();
+        const raw = await req.arrayBuffer();
+        if (raw.byteLength > maxBodyBytes) return overLimitError(raw.byteLength);
+        input = JSON.parse(new TextDecoder().decode(raw));
       } catch {
         return errorResponse(400, endpointError("ATR-312", `请求体不是合法 JSON`, "发送 application/json 体，例如 {\"id\": 1}"));
       }
@@ -589,12 +723,20 @@ export class EndpointRegistry {
           return errorResponse(e.httpStatus ?? 422, e.atr);
         }
         // ---- 未捕获抛错：500 ATR-320（journal 记失败——审计与数据一致，D-F12） ----
-        const err = endpointError(
+        // A2 硬化4：journal 条目保留原始 message（日志侧 dev/prod 都不真丢）；对外 message 经
+        // foldProdMessage——prod 收敛为通用文案 + 指纹，dev 逐字（即 journalErr 与响应原样一致）。
+        const detail = `端点 ${def.name} handler 抛错：${(e as Error)?.message ?? String(e)}`;
+        const journalErr = endpointError(
           "ATR-320",
-          `端点 ${def.name} handler 抛错：${(e as Error)?.message ?? String(e)}`,
+          detail,
           `修复端点 ${def.name} 的 handler 内部错误；失败 command 亦入审计 journal（status=failed + 根因 error），journal() 时间轴可查"代理改了什么、砸了什么"`
         );
-        if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, dur, notes, err));
+        if (def.kind === "command") this.journalPush(this.journalEntry(def, payload, "failed", principal, dur, notes, journalErr));
+        const err = endpointError(
+          "ATR-320",
+          `端点 ${def.name} handler 抛错：${foldProdMessage((e as Error)?.message ?? String(e))}`,
+          journalErr.fix
+        );
         return errorResponse(500, err);
       } finally {
         // FS-7 捕获槽兜底：失败路径（抛错/超时/输出面违规的早退）也必须收槽——防槽泄漏与跨分发串写；

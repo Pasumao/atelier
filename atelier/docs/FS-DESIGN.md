@@ -193,12 +193,23 @@ export type EndpointContext<TDb = SqliteDb> = {
 |---|---|---|---|
 | 输入契约失败 | 400 | ATR-201（既有） | `context.component` = 端点名 |
 | 请求体非法 JSON | 400 | ATR-312（既有） | |
+| 请求体超上限 | 413 | ATR-346（A2 批） | `createHandler({ maxBodyBytes })` 可配（缺省 1MiB）；node-host 桥读体**中途截断**在前（超限残余不进 JS）；不进 handler、不入 journal |
 | handler 抛 `AtrEndpointError` | 自带 | 自带 code | **新增约定**：`AtrEndpointError` 可携带 `status`（401/403/404/409…），映射表缺省 422 |
 | 鉴权未通过（gen auth 拦截） | 401/403 | ATR-340/341 | §6 |
+| server-status token 门禁未过 | 401 | ATR-340（A2 批沿用） | `createHandler({ statusToken })` 显式装配后该路由要求 `x-atelier-token` 头（dev 面 token 机制同口径）；未设 = 行为零变化；prod 隐身优先于 token 判定 |
+| 限流窗口超配额 | 429 | ATR-344（A2 批） | `createHandler({ rateLimit })` 显式装配（缺省不启用）；`Retry-After` 头随行；单进程内存态重启清零 |
+| 登录失败锁定（gen auth 产物） | 423 | ATR-345（A2 批） | 同一标识连续失败 N 次锁 M 分钟（产物明文常量 knob）；in-memory 重启清零 |
 | 输出契约违规 | 500 | ATR-215（新） | 开发者错误 |
 | 输出非 JSON-safe | 500 | ATR-216（新） | |
-| handler 未捕获抛错 | 500 | ATR-320（既有） | message 含原错误；journal 记失败（§3.5） |
-| live 重算失败 | SSE error 事件 | ATR-321（新） | 不断流，推错误后保持订阅（§4.3） |
+| handler 未捕获抛错 | 500 | ATR-320（既有） | message 含原错误（**A2 批收敛**：prod 态对外为通用文案 + sha256 前 8 位指纹，journal 仍留原始）；journal 记失败（§3.5） |
+| live 重算失败 | SSE error 事件 | ATR-321（新） | 不断流，推错误后保持订阅（§4.3）；A2 批同款 prod 收敛（journal 留原始） |
+
+> **落地注记（2026-09-28，A2 server 安全收口批）**：请求体上限（硬化3）、限流钩子（功能7）、
+> 登录失败锁定（功能8）、server-status 可选 token 门禁（硬化5，`statusToken` 未设 = 行为零变化）
+> 四项依上表落地（红检先红后绿，回归钉在
+> `tests/server-security.test.ts`）；未捕获抛错的对外 message 在 prod 态收敛为通用文案 +
+> sha256 前 8 位指纹（同错恒同指纹，server 侧日志 journal/console 恒留原始——收敛是对外姿态
+> 不是丢根因，`foldProdMessage` 单源在 endpoints.ts、node-host.ts 零依赖单点复制）；dev 态逐字。
 
 响应体一律 AtrError 四段式 JSON（`fix` 永远可执行）——HTTP status 只是传输层映射，**结构化
 错误才是 agent 的导航面**（Next 16.3 "actionable errors" 同向，Atelier 多一层 code 体系）。
@@ -248,6 +259,12 @@ M1 现状"只记成功写入"（310-320 注释口径）升级为**完整审计�
 
 原则一句话：**"对内证伪"的校验可剥离，"对外设防 + 留证"的校验保留**。
 
+> **落地注记（2026-09-28，A2 server 安全收口批）**：prod 态未捕获抛错的对外 message 不再逐字——
+> 收敛为通用文案 + sha256 前 8 位短指纹（同错恒同指纹，可拿指纹到 server 侧日志检索全量上下文）；
+> journal/console 恒留原始错误（dev/prod 都不真丢）。三处兜底同口径：endpoints ATR-320 / live
+> ATR-321（SSE error 事件）/ node-host 500。`foldProdMessage` 单源 endpoints.ts，node-host.ts
+> 因零 server 依赖单点复制（与 isProd 双写同款纪律）。dev 态（`__ATELIER_PROD__` 未置）逐字保留。
+
 ---
 
 ## 4. live 端点：写后失效-重算-推送（FS-7 半 + 决策 20 细化）
@@ -270,6 +287,13 @@ export const chatList = defineQuery("chat.list", {
   显式 `emits` 优先。**读写两侧都显式可查**（MCP/机检消费），这是与 Convex 黑盒读集追踪的
   本质差异：粒度粗一档，但完全可推导（Q1/Q3）。
 - `live: true`（布尔）向后兼容 = 以端点全名自键失效（只受自身 command 重算）。
+
+> **落地注记（2026-09-28，A2 server 安全收口批）**：`live: false` 口径修正——语义 = **显式声明
+> 无 live**（显式选择优于沉默缺省），不再被误当作「配了 live 对象」（此前会误触 live×auth 的
+> ATR-315 注册期拒绝、GET /live 通道开着产生无失效键僵尸订阅）。统一判定谓词 `isLiveDeclared`
+> （true 或 {invalidate} 对象才算声明）收口四处：register ATR-315 / addDefinition 喂引擎 /
+> createHandler /live 路由 / introspect live 名单；live:false 端点 POST 直调与 registry.list()
+> 摘要口径零变化。
 
 ### 4.2 服务端机制
 
@@ -405,6 +429,11 @@ export const messages = table("messages", {
   lint 规则候选（`@atelier/eslint`）：`prepare()` 参数含模板字符串插值即 WARN（B 队）。
 - 只支持 SQLite 方言（不做方言抽象层——Bun.SQL 否决理由维持）。
 
+> **落地注记（2026-09-28，A2 server 安全收口批）**：openSqlite 单点统一 PRAGMA——打开后
+> `foreign_keys=ON` + `busy_timeout=5000`（差异锁死 sqlite.ts 清单，bun/node 同一清单）。
+> 此前 bun 路径 foreign_keys 缺省关闭：REFERENCES 孤儿行会静默插入；migrate/seed/应用全部
+> 经 openSqlite 的路径自动受益，零调用方改动。
+
 ### 5.4 可逆迁移器（FS-4 全规格）
 
 **文件形态**：
@@ -457,6 +486,12 @@ CREATE TABLE atelier_migrations (
 > 快照携 journal 尾部，review 统一时间轴只补 down/failed 行（up ok 已由状态表呈现，补入即双计）；
 > seed 不入 journal（`atelier_seeds` 自有记账，混入污染 down 历史时间轴）。诚实边界：库删即史灭、
 > 旧库既有迁移不追溯补记（journal 段 ok:false 降级零假数据）、CLI 场景 principal 恒缺省值。
+
+> **落地注记（2026-09-28，A2 server 安全收口批）**：`atelier_migrations.name` 唯一约束落地——
+> **最小升级方案 = 命名唯一索引**（`MIGRATIONS_NAME_UK_DDL`，migrateUp 惰性 `IF NOT EXISTS`
+> 执行），不在 CREATE TABLE 里加 UNIQUE：既有库拿不到惰性 DDL 升级、免 DDL 重建，新旧库最终
+> 索引对象一致，列形状零变化（struct 守卫/checkpoint 联动/sha256 体检三面消费者零感知）。旧库
+> 若已有重名行（迁移器从不产生，出现即人工损坏）索引创建失败原样抛出——fail loudly 不带病续跑。
 
 ### 5.5 事务原语与 command 边界
 
@@ -515,6 +550,17 @@ src/server/auth/
 - 默认形态 = 邮箱+密码（scrypt/bun:crypto，无外部依赖）+ 会话表；magic link 变体 = regen 时
   选模板（Phoenix 1.8 默认 magic link 的启示：**生成器携带最佳实践演进**，regen 即升级）。
 - 密码哈希宿主差异（Bun crypto vs Node crypto）锁死在 auth.ts 单文件（同 sqlite.ts 纪律）。
+
+> **落地注记（2026-09-28，A2 server 安全收口批）**：①scrypt 显式 cost 参数（SCRYPT_N/R/P
+> 明文常量，不再靠 node:crypto 缺省——缺省随宿主版本漂移）+ 哈希串参数版本位
+> `scrypt$N=..,r=..,p=..$<salt>$<hash>`，verify 按前缀解析参数分派（未来提 cost 存量哈希不静默
+> 失配）+ 超界参数 DoS 护栏；无存量语义 → 不设旧 3 段式兼容层（regen 升级需应用侧重置凭据）。
+> ②validateSession 惰性 DELETE 过期会话行（查到才判→顺手清，无后台任务纪律的延续）。
+> ③login 账号枚举时序侧信道收口：用户不存在也对固定 DUMMY_HASH 跑等价 scrypt
+> （verifyPasswordEqualized），失败路径恒时近似 + 统一 401 文案。
+> ④登录失败锁定 in-memory v1（ATR-345，§3.3）：产物 endpoints.ts 落明文常量 knob
+> （连续失败 5 次锁 15 分钟），锁定期 423 不做 scrypt，成功清零、过期解锁、按标识隔离；
+> 诚实边界=单进程内存态重启清零。
 
 ### 6.2 auth 元数据 × 机检 × MCP
 
@@ -953,6 +999,9 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 | ATR-333 | 3xx 运行 | down 缺失/执行失败 | §5.4 |
 | ATR-334 | 3xx 运行 | up 失败（事务已回滚） | §5.4 |
 | ATR-340/341 | 3xx 运行 | 鉴权未通过 / 权限不足（401/403） | §6.2 |
+| ATR-344 | 3xx 运行 | 限流窗口超配额（429 + Retry-After；rateLimit 显式装配、缺省不启用，in-memory v1） | §3.3（A2 批，已落地） |
+| ATR-345 | 3xx 运行 | 登录失败锁定（423；gen auth 产物明文 knob，in-memory v1） | §3.3/§6.1（A2 批，已落地） |
+| ATR-346 | 3xx 运行 | 请求体超上限（413；maxBodyBytes 可配，node-host 中途截断 + 分发器兜底） | §3.3（A2 批，已落地） |
 | ATR-35x | 3xx 运行 | 队列域（预留，P2+） | §5.6 |
 | ATR-403 | 4xx 工具/dev 面 | dev 托管 server 面不可用（未托管/未就绪/热重启中/子进程连接被拒——代理以 HTTP 503 返回，fix 可执行） | §11.1（FS-7，已落地） |
 | 既有 | — | 310/311/312/313/320 端点、330 SQLite、301/305 模板、201/204 契约/token、401/402 MCP | 不动 |
