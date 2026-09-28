@@ -31,6 +31,7 @@ import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contrac
 import { LiveEngine, type LiveEngineOptions } from "./live.ts";
 import { beginWriteCapture, endWriteCapture, type SqliteDb, type WriteCapture } from "./sqlite.ts";
 import { INTROSPECT_NAME, introspectResponse } from "./introspect.ts";
+import { HEALTH_NAME, healthResponse } from "./health.ts";
 import type { BoundJobs, JobsHandle, KvView } from "./jobs.ts"; // 仅类型——运行时单向依赖 jobs.ts → endpoints.ts，零环
 
 export type EndpointKind = "query" | "command";
@@ -521,10 +522,13 @@ export class EndpointRegistry {
    * A1/A4 差距批：jobs = startJobs 产物句柄（jobs.ts）装配——ctx 增 jobs.enqueue（固定经 db
    * 同连接执行 → tx 原子投递）与 ctx.kv（幂等键显式原语，绑定 db）；未装配 = 两 ctx 位不存在
    * （可选位诚实呈现，行为零变化）。
+   * B4 差距批（2026-09-28）：version = 健康面装配点自报版本（可选，缺省 null——语义与边界见
+   * health.ts）；startedAtMs 在本装配点记一处（performance.now()）作 uptimeMs 的 monotonic 起点。
    */
   createHandler(
-    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; jobs?: JobsHandle } = {}
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; jobs?: JobsHandle; version?: string | null } = {}
   ): (req: Request) => Promise<Response> {
+    const startedAtMs = performance.now(); // B4 健康面 uptime 起点（装配时刻 = handler 体诞生时刻）
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
     const db = opts.db; // 无库应用不传 = undefined（ctx.db 直通，诚实呈现）
     const readAuth = opts.auth;
@@ -577,6 +581,22 @@ export class EndpointRegistry {
       if (req.method === "GET" && name === INTROSPECT_NAME) {
         const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs });
         if (res) return res;
+      }
+
+      // ---- B4 差距批（2026-09-28）：健康面路由 GET <mount>/__atelier/health → 三事实 JSON（health.ts）。
+      //      与 introspect 同族命名空间、语义分离：server-status=内省面（prod 405 隐身，上方路由）、
+      //      health=健康面（prod 恒在——docker/orchestrator 的探活口，永不离线）；**不走 statusToken 门**
+      //      （健康面无秘密，门禁只会把探活变成假死报警）；非 GET → 405 ATR-311（既有口径复用，不新配码）；
+      //      db 探活抛错 → 503（ok:false + db:"error"——状态码即报警面）。限流闸（本函数最前）对
+      //      health 同样计数（闸位单一不分路由豁免）。三事实组装单源 = healthResponse（health.ts）。 ----
+      if (name === HEALTH_NAME) {
+        if (req.method !== "GET") {
+          return errorResponse(
+            405,
+            endpointError("ATR-311", `健康检查端点只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/${HEALTH_NAME}（探活 = 幂等读，无请求体；响应 = { ok, uptimeMs, db, version } 四键 JSON）`)
+          );
+        }
+        return healthResponse({ db, version: opts.version ?? null, startedAtMs });
       }
 
       if (req.method !== "POST") {

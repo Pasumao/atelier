@@ -270,6 +270,26 @@ M1 现状"只记成功写入"（310-320 注释口径）升级为**完整审计�
 > ATR-321（SSE error 事件）/ node-host 500。`foldProdMessage` 单源 endpoints.ts，node-host.ts
 > 因零 server 依赖单点复制（与 isProd 双写同款纪律）。dev 态（`__ATELIER_PROD__` 未置）逐字保留。
 
+> **落地注记（2026-09-28，差距批 B4 健康面）**：`GET <mount>/__atelier/health`（health.ts，分发器
+> 保留路由，与 server-status 同族命名空间）——**语义分离：内省面可隐身，健康面永不离线**。
+> server-status 是内省面（端点全表/journal/db 快照），prod 旗下 405 ATR-311 隐身不变；health 是
+> 健康面（部署面 docker/orchestrator/守护进程的探活口），**prod 旗下照常 200**（对照双钉见
+> tests/health.test.ts），且**不走 statusToken 门**（健康面无秘密，门禁只会把探活变成假死报警——
+> orchestrator 眼里 401 与宕机同形）。响应体恒恰四键：`{ ok, uptimeMs, db: "ok"|"none"|"error",
+> version }`——uptimeMs = createHandler 装配起点的 performance.now() monotonic 时差；db 有装配则
+> 经同一连接 `SELECT 1` 探活，抛错 → **503 + ok:false + db:"error"**（状态码即报警面），未装配 →
+> "none" 仍 200（纯静态应用合法）；version = `createHandler({ version })` **装配点自报**（模板
+> main-server.ts 用 node:fs 读应用 package.json，零诊断路径），缺省 null。诚实边界：① version 不
+> 是框架版本自动探测——dist 启动壳注入框架版本归发布批；② 探活只证 SQL 通道活着，不证迁移
+> head/数据完整性（那是 migrate verify / server-status 的职责）；③ 限流装配下 health 与其余路由
+> 同闸计数（闸位单一不分路由豁免）；④ 非 GET → 405 ATR-311（复用既有口径，不新配码）。dev 面
+> 插件闸现状（真实 dev server curl 实测，2026-09-28）：健康面**不进** dev 插件的 `/__atelier/`
+> 命名空间——该命名空间有 W6 Origin/Host 闸（伪造 Origin 403；无 Origin 的 curl 放行）+ P1-12
+> token 门（无 token 401 ATR-402，回环限定），带 token 也只会落回 Vite 静态回退（dev 面无此路由）
+> ——本批不加洞，健康面在 dev 的正门是 API mount：`GET /api/__atelier/health` 经 `/api` 反代直达
+> server 子进程，200 无门（实测证据）；生产经 dist 壳（无 dev 插件无 token 门）同路径公网可达
+> （dist/server.mjs spawn 实测：health 200 三事实 × server-status 405 对照）。
+
 ---
 
 ## 4. live 端点：写后失效-重算-推送（FS-7 半 + 决策 20 细化）

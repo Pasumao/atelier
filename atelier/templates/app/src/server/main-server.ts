@@ -12,8 +12,12 @@
  *
  * 就绪握手：listen 成功后由框架 serve() 向 stdout 打印恰好一行
  *   ATELIER_SERVER_READY {"port":<实际端口>} —— 模板不自己写，父进程按此探活。
+ *
+ * 健康面（B4 差距批，2026-09-28）：GET <mount>/__atelier/health 恒在（prod 亦可见、不走 token
+ *   门），响应 = { ok, uptimeMs, db, version }——version 由本装配点自报（readAppVersion，见下），
+ *   orchestrator/docker 的探活口就是它。
  */
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EndpointRegistry, serve } from "../vendor/atelier/server/index.ts";
@@ -57,7 +61,24 @@ registry.register(noteList).register(addNote);
  */
 export function createAppHandler(): (req: Request) => Promise<Response> {
   const mount = process.env.ATELIER_SERVER_MOUNT ?? "/api";
-  return registry.createHandler({ mount });
+  return registry.createHandler({ mount, version: readAppVersion() });
+}
+
+/**
+ * 应用自报版本（B4 健康面三事实之一，2026-09-28 差距批）：读应用根 package.json 的 version
+ * 字段，经 createHandler({ version }) 进 GET <mount>/__atelier/health 响应体。诚实边界：
+ * 这是**装配点自报**（应用说自己是几版就是几版），不是框架版本自动探测——框架版本注入归
+ * dist 启动壳发布批。读失败/字段缺失（部署布局裁剪等）恒 null 降级——健康面绝不因 version
+ * 探测炸掉。用 node:fs 读文件而非 JSON import 属性：后者会碰 tsc 门禁（gen-compile-gate
+ * 零诊断红线），前者零诊断。
+ */
+function readAppVersion(): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version?: unknown };
+    return typeof pkg.version === "string" && pkg.version.length > 0 ? pkg.version : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 主模块判定：Node ≥23.7 / Bun 有 import.meta.main；更早的 strip-types 宿主回退 argv[1] 实路径比对。 */
