@@ -114,12 +114,19 @@ function recordWrite(tables: string[]): void {
   }
 }
 
+/** 打开后统一 PRAGMA（A2 安全收口批）：外键约束真生效 + 忙等让权。
+ *  显式统一的原因：两宿主缺省不一致——node:sqlite DatabaseSync 缺省开 foreign_keys，
+ *  bun:sqlite/SQLite 本体缺省关；不显式声明则 REFERENCES 在 bun 下只是装饰。
+ *  busy_timeout=5000：写锁争用（dev 热重启窗口/多句柄）时等 5s 而非立刻 SQLITE_BUSY 炸错。 */
+const OPEN_PRAGMAS = ["PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000"];
+
 export async function openSqlite(path: string): Promise<SqliteDb> {
   const g = globalThis as { Bun?: unknown };
   if (g.Bun) {
     const spec = "bun:sqlite"; // 变量间接 + 动态 import：非 Bun 宿主加载本模块不炸（vite 静态分析跳过）
     const mod = (await import(/* @vite-ignore */ spec)) as { Database: new (path: string) => { prepare(sql: string): RawStatement; exec(sql: string): void; close(): void } };
     const db = new mod.Database(path);
+    for (const pragma of OPEN_PRAGMAS) db.exec(pragma); // 运行时单点：migrate/seed/call 等所有经 openSqlite 的路径自动受益
     // exec 归一单点（handle.exec 与 tx 内 exec 同源——tx 直用裸 db.exec 会让归一漏进事务路径）
     const execNormalized = (sql: string): void => {
       recordWrite(extractWriteTables(sql));
@@ -151,6 +158,7 @@ export async function openSqlite(path: string): Promise<SqliteDb> {
   } catch (e) {
     throw new SqliteUnavailableError(`node:sqlite 加载失败：${(e as Error)?.message ?? String(e)}`);
   }
+  for (const pragma of OPEN_PRAGMAS) nodeDb.exec(pragma); // 与 bun 路径同一清单（差异锁死本文件）
   const handle: SqliteDb = {
     host: "node",
     prepare: (sql: string) => wrapStatement(nodeDb.prepare(sql), extractWriteTables(sql)),
