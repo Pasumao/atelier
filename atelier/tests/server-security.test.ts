@@ -30,6 +30,7 @@ import {
 } from "../server/endpoints";
 import { openSqlite, type SqliteDb } from "../server/sqlite";
 import { serverStatusSnapshot } from "../server/introspect";
+import { migrateDown, migrateUp } from "../server/migrate";
 import { genAuth } from "../gen/gen-auth.mjs";
 
 /* ---------------- node:sqlite 在场探测（Node ≥22.5 内建；与 server.test.ts 同口径） ---------------- */
@@ -400,5 +401,56 @@ describe("硬化5：server-status 可选 token 门禁（statusToken → 401 ATR-
       expect(res.status).toBe(405);
       expect(((await res.json()) as { code: string }).code).toBe("ATR-311");
     });
+  });
+});
+
+/* ================= 硬化6：迁移状态表 name UNIQUE + 过期会话惰性清理 =================
+ * 现状①：atelier_migrations 无 name 唯一约束——迁移器自身不产生重名行，但任何手工/脚本误插
+ * 重名行会破坏 head 判定（max id）与完整性体检的 1:1 假设。修法 = 命名唯一索引（不在 CREATE TABLE
+ * 加 UNIQUE——既有库惰性升级零 DDL 重建，新旧库索引对象一致；migrateUp 幂等执行）。
+ * 现状②：gen auth validateSession 对过期会话只判 null 不删行——过期僵尸行无限累积。
+ * 修法 = validate 命中点惰性 DELETE 全部过期行（查到才判→顺手清，无后台任务纪律的延续）。
+ */
+
+async function makeMigrationFixture(): Promise<{ root: string; migDir: string }> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-a2-mig-"));
+  genTmpDirs.push(root);
+  const migDir = path.join(root, "src", "server", "db", "migrations");
+  fs.mkdirSync(migDir, { recursive: true });
+  fs.writeFileSync(path.join(migDir, "001_boxes.up.sql"), "CREATE TABLE boxes (id INTEGER PRIMARY KEY, label TEXT NOT NULL);");
+  fs.writeFileSync(path.join(migDir, "001_boxes.down.sql"), "DROP TABLE IF EXISTS boxes;");
+  return { root, migDir };
+}
+
+describeSqlite("硬化6：atelier_migrations.name UNIQUE + 会话过期惰性清理", () => {
+  it("红检：migrateUp 后状态表重名 INSERT 被拒（UNIQUE 索引在，防重复记账破坏 head 判定）", async () => {
+    const { migDir } = await makeMigrationFixture();
+    const db = await openSqlite(":memory:");
+    expect(migrateUp(db, migDir).map((s) => s.name)).toEqual(["001_boxes"]);
+    expect(() =>
+      db.prepare("INSERT INTO atelier_migrations (name, checksum, applied_at, down_verified) VALUES ('001_boxes', 'x', 0, 0)").run()
+    ).toThrow(/UNIQUE/i); // 红态：无约束 → 静默插入成功
+    // down→up 循环不受索引干扰（删行后重插照常）
+    expect(migrateDown(db, migDir).map((s) => s.name)).toEqual(["001_boxes"]);
+    expect(migrateUp(db, migDir).map((s) => s.name)).toEqual(["001_boxes"]);
+    db.close();
+  });
+
+  it("红检：gen auth validateSession 惰性删除过期会话行；有效会话不受扰", async () => {
+    const { root, authMod } = await genAuthModule();
+    const db = await openSqlite(":memory:");
+    await migrateUp(db, path.join(root, "src", "server", "db", "migrations"));
+    const u = db.prepare("INSERT INTO users (email, passwordHash, role, createdAt) VALUES ('a@test.dev', 'x', 'user', 0)").run();
+    const uid = Number(u.lastInsertRowid);
+    db.prepare("INSERT INTO sessions (token, userId, createdAt, expiresAt) VALUES ('tok-expired', ?, 0, 1)").run(uid); // 1970 过期
+    db.prepare("INSERT INTO sessions (token, userId, createdAt, expiresAt) VALUES ('tok-live', ?, 0, ?)").run(uid, Date.now() + 60_000);
+
+    expect(authMod.validateSession(db, "tok-expired")).toBeNull(); // 过期判定照旧
+    expect(db.prepare("SELECT token FROM sessions WHERE token = 'tok-expired'").get()).toBeUndefined(); // 红态：僵尸行仍在
+
+    const hit = authMod.validateSession(db, "tok-live");
+    expect(hit).not.toBeNull(); // 有效会话照常（对照组）
+    expect(db.prepare("SELECT token FROM sessions WHERE token = 'tok-live'").get()).toBeDefined();
+    db.close();
   });
 });
