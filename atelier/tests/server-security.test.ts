@@ -496,3 +496,56 @@ describe("硬化8：登录账号枚举时序侧信道（gen auth 产物）", () 
     db.close();
   });
 });
+
+/* ================= 功能7：限流钩子位（createHandler({ rateLimit })，in-memory v1 纯新增） =================
+ * 现状：分发器无任何限流位——公网部署下无限速。修法 = 显式装配项 rateLimit: { windowMs, max,
+ * keyBy? }，缺省不启用（显式声明纪律）；滑动窗口按 key 计数，超限 429 + ATR-344 + Retry-After 头；
+ * keyBy 缺省读 x-atelier-remote-addr 头（node-host 桥从 socket 对端注入、覆盖入站同名头防伪造），
+ * 无该头落 "unknown" 共享桶。诚实边界：单进程内存态，重启清零；键表软上限防海量伪 IP 撑爆内存。
+ */
+
+describe("功能7：限流钩子位（rateLimit → 429 ATR-344 + Retry-After）", () => {
+  it("红检：窗口内超配额 429 ATR-344 + Retry-After 整数秒；配额内不受扰；缺省不启用零行为变化", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("rl.ping", { handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({ rateLimit: { windowMs: 60_000, max: 3 } });
+    for (let i = 0; i < 3; i++) {
+      expect((await post(handler, "rl.ping", {})).status).toBe(200); // 配额内不受扰
+    }
+    const over = await post(handler, "rl.ping", {});
+    expect(over.status).toBe(429); // 红态：装配项不存在 → 200
+    expect(over.headers.get("retry-after")).toMatch(/^\d+$/);
+    expect(((await over.json()) as { code: string }).code).toBe("ATR-344");
+    // 缺省不启用（显式声明纪律）：同一 registry 不带 rateLimit 的装配零行为变化
+    const free = reg.createHandler({});
+    for (let i = 0; i < 6; i++) expect((await post(free, "rl.ping", {})).status).toBe(200);
+  });
+
+  it("红检：滑动窗口过期后放行 + keyBy 自定义键独立计数", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("rl.ping", { handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({
+      rateLimit: { windowMs: 200, max: 1, keyBy: (req) => req.headers.get("x-tenant") ?? "anon" },
+    });
+    expect((await post(handler, "rl.ping", {}, { headers: { "x-tenant": "a" } })).status).toBe(200);
+    expect((await post(handler, "rl.ping", {}, { headers: { "x-tenant": "b" } })).status).toBe(200); // b 独立桶
+    expect((await post(handler, "rl.ping", {}, { headers: { "x-tenant": "a" } })).status).toBe(429); // a 桶满
+    await new Promise((r) => setTimeout(r, 260)); // 窗口滑过
+    expect((await post(handler, "rl.ping", {}, { headers: { "x-tenant": "a" } })).status).toBe(200); // 放行
+  });
+
+  it("红检：node-host 桥注入 x-atelier-remote-addr（socket 对端，覆盖入站防伪造）——缺省键源真按客户端计数", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("rl.ping", { handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({ rateLimit: { windowMs: 60_000, max: 1 } });
+    const server = createNodeServer(handler);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    try {
+      const port = (server.address() as { port: number }).port;
+      expect((await fetch(`http://127.0.0.1:${port}/rl.ping`, { method: "POST", body: "{}" })).status).toBe(200);
+      expect((await fetch(`http://127.0.0.1:${port}/rl.ping`, { method: "POST", body: "{}" })).status).toBe(429); // 红态：200
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+});
