@@ -2,16 +2,24 @@
  * server-security.test.ts — A2 server 安全收口批（2026-09-28；依据 docs/research/
  * 2026-09-28-fullstack-feature-gap.md §2-A2/§5 与 BACKLOG「评审队列 → server 安全收口包」条目，
  * 公网部署前提件）。覆盖：
+ *   硬化1 scrypt 显式参数 + 哈希串版本位（gen auth 产物 auth.ts：scrypt$N=..,r=..,p=..$salt$hash）
  *   硬化2 openSqlite 统一 PRAGMA（foreign_keys=ON + busy_timeout，运行时单点全路径受益）
  *   硬化3 请求体上限（endpoints maxBodyBytes + node-host 中途截断）→ 413 ATR-346
  *   硬化4 prod 错误 message 收敛 + 指纹（endpoints ATR-320 / live ATR-321 / node-host 500 兜底）
  *   硬化5 server-status 可选 token 门禁（createHandler({ statusToken })，dev 面口径 x-atelier-token）
+ *   硬化6 迁移状态表 name UNIQUE + 过期会话惰性清理
  *   硬化7 live:false 口径修正（显式声明「无 live」≠「配了 live 对象」，ATR-315 判定联动放宽）
- *   功能9 限流钩子位（createHandler({ rateLimit })）→ 429 ATR-344 + Retry-After
+ *   硬化8 登录账号枚举时序侧信道（用户不存在路径 dummy scrypt verify）
+ *   功能7 限流钩子位（createHandler({ rateLimit })）→ 429 ATR-344 + Retry-After
+ *   功能8 登录失败锁定钩子位（gen auth 产物 in-memory v1）→ 423 ATR-345
  * 批纪律：每项先红（红检 commit）后绿（修复 commit）；红检保留为回归钉。
  * 风格对齐 server.test.ts / server-v2.test.ts（node:sqlite 在场探测 + describeSqlite 门）。
  */
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createNodeServer } from "../server/node-host";
 import {
   AtrEndpointError,
@@ -22,6 +30,7 @@ import {
 } from "../server/endpoints";
 import { openSqlite, type SqliteDb } from "../server/sqlite";
 import { serverStatusSnapshot } from "../server/introspect";
+import { genAuth } from "../gen/gen-auth.mjs";
 
 /* ---------------- node:sqlite 在场探测（Node ≥22.5 内建；与 server.test.ts 同口径） ---------------- */
 let nodeSqlite = false;
@@ -106,5 +115,65 @@ describe("硬化7：live:false 口径修正（ATR-315 判定放宽 + live 通道
     reg2.register(defineQuery("on.feed", { live: true, handler: () => ({ ok: true }) }));
     expect(reg2.list().find((s) => s.name === "on.feed")!.live).toBe(true);
     expect(serverStatusSnapshot(reg2).live.endpoints).toContain("on.feed");
+  });
+});
+
+/* ================= gen auth 产物夹具（本文件多处复用；vendor shim 布局，与 gen-auth.test.ts 同法） ================= */
+
+const genTmpDirs: string[] = [];
+afterEach(() => {
+  while (genTmpDirs.length > 0) fs.rmSync(genTmpDirs.pop()!, { recursive: true, force: true });
+});
+
+/** 生成 auth 五件套到临时目录并动态 import auth.ts（vitest vendor shim 使 import 闭合真实成立） */
+async function genAuthModule(): Promise<{ root: string; authMod: Record<string, any>; endpointsUrl: string }> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-a2-genauth-"));
+  genTmpDirs.push(root);
+  genAuth(root);
+  const authUrl = pathToFileURL(path.join(root, "src", "server", "auth", "auth.ts")).href;
+  const endpointsUrl = pathToFileURL(path.join(root, "src", "server", "auth", "endpoints.ts")).href;
+  return { root, authMod: await import(authUrl), endpointsUrl };
+}
+
+/* ================= 硬化1：scrypt 显式参数 + 哈希串版本位（gen auth 产物 auth.ts） =================
+ * 现状：scrypt 靠 node:crypto 缺省 cost（缺省值随宿主版本漂移——可验证性依赖构建时点）；
+ * 哈希串 = 无参数 3 段式「scrypt$<salt>$<hash>」，未来提 cost 会让新旧哈希无法区分（verify
+ * 只能全按一套参数跑，提级即存量失配）。修法 = 显式参数常量 + 哈希串第二段参数版本位
+ * 「scrypt$N=..,r=..,p=..$<salt>$<hash>」，verify 按前缀解析参数分派；无存量语义（本生成器
+ * 此前格式无参数位）→ 不设旧格式兼容层，旧格式恒 false（regen 升级需应用侧重置凭据，注释写明）。
+ */
+
+describeSqlite("硬化1：scrypt 显式参数 + 哈希串版本位（gen auth 产物）", () => {
+  it("红检：hashPassword 产出带参数版本位（scrypt$N=..,r=..,p=..$salt$hash）；verify 按前缀分派 + 超界参数拒绝 + 旧 3 段式恒 false", async () => {
+    const { root, authMod } = await genAuthModule();
+    // 模板面：scrypt cost 显式常量（不靠库缺省——缺省值随 Node 版本漂移）
+    const auth = fs.readFileSync(path.join(root, "src", "server", "auth", "auth.ts"), "utf8");
+    expect(auth).toMatch(/SCRYPT_N\s*=\s*\d+/);
+    expect(auth).toMatch(/SCRYPT_R\s*=\s*\d+/);
+    expect(auth).toMatch(/SCRYPT_P\s*=\s*\d+/);
+
+    // 行为面：哈希串 = 4 段式，第二段即参数版本位（N/r/p 明文可读）
+    const pw = "correct horse battery staple";
+    const hash: string = await authMod.hashPassword(pw);
+    const m = /^scrypt\$N=(\d+),r=(\d+),p=(\d+)\$([0-9a-f]{32})\$([0-9a-f]{128})$/.exec(hash);
+    expect(m, `哈希串缺参数版本位（现状 3 段式：${hash.slice(0, 36)}…）`).not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThanOrEqual(16384); // N 下限 = RFC 7914 §11 建议最小值 2^14
+    expect(Number(m![2])).toBe(8);
+    expect(Number(m![3])).toBe(1);
+
+    // verify 按前缀分派：对参通过 / 错密码拒绝 / 畸形串恒 false 不抛
+    expect(await authMod.verifyPassword(pw, hash)).toBe(true);
+    expect(await authMod.verifyPassword("wrong", hash)).toBe(false);
+    expect(await authMod.verifyPassword("x", "not-a-hash")).toBe(false);
+    expect(await authMod.verifyPassword("x", "scrypt$garbage$ab$cd")).toBe(false);
+
+    // 无存量语义 → 不设兼容层：剥掉参数位的旧 3 段式恒 false（regen 升级需重置凭据，不做静默迁移）
+    const seg = hash.split("$");
+    const legacy = `scrypt$${seg[3]}$${seg[4]}`;
+    expect(await authMod.verifyPassword(pw, legacy)).toBe(false);
+
+    // DoS 护栏：哈希串可能来自不可信侧（库泄露/手填）——超界 N 拒绝执行（防 CPU/内存打爆）
+    const evil = `scrypt$N=1073741824,r=8,p=1$${seg[3]}$${seg[4]}`;
+    expect(await authMod.verifyPassword("x", evil)).toBe(false);
   });
 });
