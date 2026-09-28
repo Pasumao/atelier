@@ -11,7 +11,8 @@
  * 320 handler 抛错 /
  * 321 live 重算失败（SSE error 事件，不断流——live.ts）/ 322 端点超时；2xx 契约域：215 输出契约违规
  * （开发者错误）/ 216 输出非 JSON-safe；SQLite 宿主面见 sqlite.ts ATR-330。
- * 安全域（A2 收口批）：346 请求体超上限（413，maxBodyBytes 可配）。
+ * 安全域（A2 收口批）：346 请求体超上限（413，maxBodyBytes 可配）；
+ * 344 限流窗口超配额（429，rateLimit 显式装配、缺省不启用）。
  * 鉴权域（FS-M2(m2d) 加法，§6.2）：340 会话缺失/读取器未装配（401）/ 341 角色不符（403）——
  * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）；
  * live SSE 通道不设 per-subscriber 门禁（引擎共享重算 ctx.auth=null）——live×auth(type≠none) 组合
@@ -149,6 +150,68 @@ export type EndpointSummary = {
 
 export function endpointError(code: string, message: string, fix: string, hints?: string[]): AtrError {
   return { code, message, context: { component: "atelier-server", hints }, fix };
+}
+
+/**
+ * 限流装配项（A2 功能批，in-memory v1）：显式声明纪律——缺省不启用，零行为变化。
+ * 滑动窗口按 key 计数：窗口内第 max+1 个请求 → 429 + ATR-344 + Retry-After 头。
+ * 诚实边界（随装配点注释重申）：单进程内存态，重启清零；多实例部署需外置限流器（v1 不做）；
+ * 键表软上限（超 1 万键清半）防海量伪造 IP 撑爆内存——宁可瞬时放开不无界吃内存。
+ */
+export type RateLimitOptions = {
+  /** 滑动窗口长度 ms */
+  windowMs: number;
+  /** 窗口内每 key 允许的最大请求数 */
+  max: number;
+  /**
+   * 限流键提取（缺省读 x-atelier-remote-addr 头——node-host 桥从 socket 对端注入并覆盖入站
+   * 同名头（防伪造），无该头的直挂调用落 "unknown" 共享桶；反代链后面的部署应自定义 keyBy
+   * 读可信跳（如自身反代追加的 x-forwarded-for 尾值）。
+   */
+  keyBy?: (req: Request) => string;
+};
+
+/** 限流缺省键：桥注入的 x-atelier-remote-addr → 兜底共享桶（诚实：缺头时所有调用方同桶） */
+function defaultRateLimitKey(req: Request): string {
+  return req.headers.get("x-atelier-remote-addr") ?? "unknown";
+}
+
+/** 限流判定（滑动窗口，纯同步）：true = 放行（时间戳已入桶）；false = 超限（附 Retry-After 秒数） */
+function tickRateLimit(buckets: Map<string, number[]>, opts: RateLimitOptions, key: string, now: number): { ok: true } | { ok: false; retryAfterSec: number } {
+  const cutoff = now - opts.windowMs;
+  let list = buckets.get(key);
+  if (list == null) {
+    list = [];
+    buckets.set(key, list);
+  }
+  while (list.length > 0 && list[0]! <= cutoff) list.shift(); // 滑出窗口的时间戳出列
+  if (list.length >= opts.max) {
+    const retryMs = list[0]! + opts.windowMs - now; // 最早入窗时间戳滑出的时刻 = 桶腾出位子的时刻
+    return { ok: false, retryAfterSec: Math.max(1, Math.ceil(retryMs / 1000)) };
+  }
+  list.push(now);
+  // 键表有界（诚实边界见 RateLimitOptions）：超软上限清一半（Map 插入序 ≈ 最旧键优先）
+  if (buckets.size > 10_000) {
+    for (const k of buckets.keys()) {
+      buckets.delete(k);
+      if (buckets.size <= 5_000) break;
+    }
+  }
+  return { ok: true };
+}
+
+/** 429 ATR-344 响应（Retry-After 头 = 距桶腾出位子的秒数，向上取整最少 1） */
+function rateLimitResponse(retryAfterSec: number): Response {
+  const res = errorResponse(
+    429,
+    endpointError(
+      "ATR-344",
+      "请求过于频繁：限流窗口内已超配额（429）",
+      `等待 Retry-After 指示的秒数后重试；配额与窗口由装配点 createHandler({ rateLimit: { windowMs, max } }) 显式声明（缺省不限流）。诚实边界：单进程内存态，重启清零`
+    )
+  );
+  res.headers.set("retry-after", String(retryAfterSec));
+  return res;
 }
 
 /** 框架内部抛错形态（同 runtime 惯例：message 带码前缀），四段式字段随行可结构化消费。
@@ -440,15 +503,24 @@ export class EndpointRegistry {
    * <mount>/__atelier/server-status 要求 x-atelier-token 头，401 ATR-340——见 introspect.ts）。
    */
   createHandler(
-    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string } = {}
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions } = {}
   ): (req: Request) => Promise<Response> {
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
     const db = opts.db; // 无库应用不传 = undefined（ctx.db 直通，诚实呈现）
     const readAuth = opts.auth;
     const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     const statusToken = opts.statusToken; // A2 硬化5：server-status 门禁（未设 = 行为零变化）
+    // A2 功能7：限流（缺省不启用——显式声明纪律；buckets 随本 handler 单例，重启即清零）
+    const rateLimit = opts.rateLimit;
+    const rateBuckets = rateLimit != null ? new Map<string, number[]>() : null;
+    const rateKeyOf = rateLimit?.keyBy ?? defaultRateLimitKey;
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     return async (req: Request): Promise<Response> => {
+      // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
+      if (rateLimit != null && rateBuckets != null) {
+        const verdict = tickRateLimit(rateBuckets, rateLimit, rateKeyOf(req), Date.now());
+        if (!verdict.ok) return rateLimitResponse(verdict.retryAfterSec);
+      }
       const url = new URL(req.url);
       let rest = url.pathname;
       if (mount && rest.startsWith(mount)) rest = rest.slice(mount.length);

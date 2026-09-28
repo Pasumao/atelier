@@ -143,6 +143,10 @@ async function toWebRequest(nodeReq: IncomingMessage, opts: NodeHostOptions | un
   for (let i = 0; i < nodeReq.rawHeaders.length; i += 2) {
     headers.append(nodeReq.rawHeaders[i]!, nodeReq.rawHeaders[i + 1]!);
   }
+  // A2 功能7（限流 v1 键源）：socket 对端地址注入 x-atelier-remote-addr——**覆盖**入站同名头
+  // （该头只有桥签发才可信，入站伪造一律作废）；限流 keyBy 缺省读它。请求侧头保真原则的显式
+  // 例外（同 Set-Cookie 特例并列）：新增/覆盖桥自签头，其余头零改动。
+  headers.set("x-atelier-remote-addr", nodeReq.socket.remoteAddress ?? "unknown");
   return new Request(url, { method: nodeReq.method ?? "GET", headers, body });
 }
 
