@@ -15,7 +15,7 @@
  * 批纪律：每项先红（红检 commit）后绿（修复 commit）；红检保留为回归钉。
  * 风格对齐 server.test.ts / server-v2.test.ts（node:sqlite 在场探测 + describeSqlite 门）。
  */
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -229,6 +229,125 @@ describe("硬化3：请求体上限（413 ATR-346）", () => {
       expect(((await res.json()) as { code: string }).code).toBe("ATR-346");
       expect(handlerHits).toBe(0); // 红态：1——64KB 体已整体进 handler（未截断）
     } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+});
+
+/* ================= 硬化4：prod 错误 message 收敛 + 指纹（三处兜底同口径） =================
+ * 现状：未捕获抛错的原始 message 逐字对外——endpoints ATR-320 兜底 / live ATR-321 SSE error 事件 /
+ * node-host 500 兜底。message 可能携带 SQL 片段/路径/栈帧/凭据残片（公网部署信息泄露面）。
+ * 修法 = prod 态（__ATELIER_PROD__，与 isProd 同读法）对外 message 收敛为通用文案 + 短指纹
+ * （sha256 前 8 位，同错恒同指纹、可对日志检索）；dev 态逐字保留；日志侧（journal/console）dev/prod
+ * 都保留原始错误——收敛只是对外姿态，不真丢根因。
+ */
+
+/** prod 旗置位/复位护栏（防污染同进程后续测试——codegen-prodflags.test.ts 同款纪律） */
+async function withProd(prod: boolean, fn: () => Promise<void>): Promise<void> {
+  const g = globalThis as { __ATELIER_PROD__?: boolean };
+  const prev = g.__ATELIER_PROD__;
+  g.__ATELIER_PROD__ = prod;
+  try {
+    await fn();
+  } finally {
+    g.__ATELIER_PROD__ = prev;
+  }
+}
+
+const A2_SECRET = "敏感根因：select * from users where passwd='hunter2' at /home/agent/.secrets";
+
+describe("硬化4：prod 错误 message 收敛 + 指纹（endpoints ATR-320 / live ATR-321 / node-host 500）", () => {
+  it("红检：prod 旗下 endpoints ATR-320 兜底不外泄原始 message，收敛文案带 8 位稳定指纹；journal 日志侧保留原始", async () => {
+    await withProd(true, async () => {
+      const reg = new EndpointRegistry();
+      reg.register(defineCommand("boom.cmd", { handler: () => { throw new Error(A2_SECRET); } }));
+      const handler = reg.createHandler({});
+      const res = await post(handler, "boom.cmd", {});
+      expect(res.status).toBe(500);
+      const err = (await res.json()) as { code: string; message: string };
+      expect(err.code).toBe("ATR-320");
+      expect(JSON.stringify(err)).not.toContain(A2_SECRET); // 红态：原始 message 逐字外泄
+      expect(err.message).toMatch(/指纹\s[0-9a-f]{8}/);
+      // 日志侧不真丢：journal 失败条目保留完整根因
+      const entry = reg.journal()[0] as { status: string; error?: { message: string } };
+      expect(entry?.status).toBe("failed");
+      expect(entry?.error?.message).toContain(A2_SECRET);
+    });
+  });
+
+  it("红检：指纹稳定（同错误恒同指纹、异错误异指纹）+ dev 旗下逐字保留不收敛", async () => {
+    const fps = new Set<string>();
+    await withProd(true, async () => {
+      for (const name of ["boom.one", "boom.two"]) {
+        const reg = new EndpointRegistry();
+        reg.register(defineCommand(name, { handler: () => { throw new Error(A2_SECRET); } }));
+        const res = await post(reg.createHandler({}), name, {});
+        fps.add(/指纹\s([0-9a-f]{8})/.exec(((await res.json()) as { message: string }).message)![1]);
+      }
+    });
+    expect(fps.size).toBe(1); // 同错误不同注册表实例 → 指纹稳定
+    await withProd(false, async () => {
+      const reg = new EndpointRegistry();
+      reg.register(defineCommand("boom.dev", { handler: () => { throw new Error(A2_SECRET); } }));
+      const res = await post(reg.createHandler({}), "boom.dev", {});
+      const err = (await res.json()) as { message: string };
+      expect(err.message).toContain(A2_SECRET); // dev：逐字保留
+      expect(err.message).not.toMatch(/指纹/);
+    });
+  });
+
+  it("红检：prod 旗下 live ATR-321 SSE error 事件收敛（journal 保留原始）；dev 旗下逐字", async () => {
+    async function firstErrorFrame(prod: boolean): Promise<{ frame: string; journalMsg: string | undefined }> {
+      let journalMsg: string | undefined;
+      await withProd(prod, async () => {
+        const reg = new EndpointRegistry();
+        reg.register(defineQuery("boom.live", { live: true, handler: () => { throw new Error(A2_SECRET); } }));
+        const handler = reg.createHandler({});
+        const res = await handler(new Request("http://local.test/boom.live/live", { method: "GET" }));
+        expect(res.status).toBe(200);
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let text = "";
+        for (let i = 0; i < 20 && !text.includes("event: error"); i++) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          text += decoder.decode(value, { stream: true });
+        }
+        await reader.cancel().catch(() => {});
+        const frame = text.split("\n\n").find((f) => f.startsWith("event: error")) ?? "";
+        journalMsg = (reg.journal()[0] as { error?: { message: string } } | undefined)?.error?.message;
+        expect(frame).toContain("ATR-321");
+        if (prod) {
+          expect(frame).not.toContain(A2_SECRET); // 红态：SSE error 事件逐字外泄
+          expect(frame).toMatch(/指纹\s[0-9a-f]{8}/);
+        } else {
+          expect(frame).toContain(A2_SECRET); // dev：逐字
+        }
+      });
+      return { frame: "", journalMsg };
+    }
+    const prodRun = await firstErrorFrame(true);
+    expect(prodRun.journalMsg).toContain(A2_SECRET); // 日志侧保留原始（prod 也不丢）
+    await firstErrorFrame(false);
+  });
+
+  it("红检：prod 旗下 node-host 500 兜底收敛 + console 侧 dev/prod 都保留原始（不真丢）", async () => {
+    const server = createNodeServer(async () => {
+      throw new Error(A2_SECRET);
+    });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    try {
+      const port = (server.address() as { port: number }).port;
+      const res = await fetch(`http://127.0.0.1:${port}/x`, { method: "POST", body: "{}" });
+      expect(res.status).toBe(500);
+      const err = (await res.json()) as { code: string; error?: { message: string } };
+      expect(JSON.stringify(err)).not.toContain(A2_SECRET); // 红态：500 兜底逐字外泄
+      expect(JSON.stringify(err)).toMatch(/指纹\s[0-9a-f]{8}/);
+      // console 侧保留原始（红态：node-host 兜底当前完全不落 console——原始错误真丢）
+      expect(errSpy.mock.calls.some((args) => args.join(" ").includes(A2_SECRET))).toBe(true);
+    } finally {
+      errSpy.mockRestore();
       await new Promise<void>((r) => server.close(() => r()));
     }
   });
