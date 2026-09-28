@@ -557,6 +557,19 @@ await ctx.db.tx(async (tx) => {
   定期 `.backup` API/文件拷贝说明）；**不做**内建云复制（决策 19）。A3 备份 CLI（差距调研 §2
   候选）可挂 jobs recurring——`cron:backup` 一行声明即周期备份（差距批 A1 落地后的顺路件），
   候选**本批不实现**，立项走 `BACKLOG.md`。
+- **落地注记（2026-09-28，差距批 A3）**：备份 CLI 已落地——`atelier db backup --out <file>
+  [--root <dir>] [--db <f>] [--force] [--no-verify]`（runner `scripts/backup.mjs`；库路径解析与
+  `migrate` 同口径）。实现 = **`VACUUM INTO`**（单语句零依赖、node:sqlite/bun:sqlite 两宿主通用、
+  产物页级压缩整理；不用宿主专属 backup API——两宿主备份面差异不值得破「差异锁死 sqlite.ts」
+  纪律）。在线备份：读快照、不锁写、不要求停机（WAL 下同一致）。目标已存在时 SQLite 本身报错——
+  无 `--force` 先行拒绝并给指引，`--force` 先删旧产物再备份（绝不静默覆盖，§18 R7 同纪律）；
+  `--out` 与源库同路径一律拒绝（同路径「覆盖」= 删源库，该破坏面不可被旗标同意）。自证面
+  （checkpoint「可验证性叙事」同构）：完成后对产物跑 `PRAGMA quick_check`，stdout 单行 JSON 证据
+  `{out, bytes, sha256(前12位), quickCheck, durMs, source}`（`--no-verify` = 逃生口——证据行无
+  quickCheck 字段，没验证就不冒充验证过）。定时备份**无内建 job**：应用可经 §5.6 recurring job
+  自行调度 backup。诚实边界：无云复制（决策 19 边界不变，Litestream 仍是流式容灾的外部路径）、
+  无增量备份（全量快照语义）、单文件库快照——库外状态不在射程。回归钉 = `tests/backup.test.ts`
+  （9 用例）。
 
 ---
 

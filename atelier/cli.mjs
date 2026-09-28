@@ -74,6 +74,10 @@ GENERATE / DATA (FS-M2 全站化)
   atelier migrate status|up|down|verify|seed [--root <dir>]        MINI* 可逆迁移器（FS-4）+ SQL 种子（D-F17）：
                                             [--db <f>] [--to <name>] [--force]（影子库干跑幂等校验；seed 逐文件 tx
                                                                           幂等重跑，库缺失不静默建库）
+  atelier db backup --out <file> [--root <dir>] [--db <f>]         MINI* 在线备份（A3，FS-DESIGN §5.7）：
+                                            [--force] [--no-verify]      VACUUM INTO 单文件快照（读快照不锁写、
+                                                                          不要求停机）；目标已存在须 --force（绝不
+                                                                          静默覆盖）；产物 quick_check+sha256 自证行
   atelier impact <contractKey> [--root <dir>]                      MINI* 契约 → 端点 → 前端调用点 两跳影响面导航
                                                                           （导航不是门禁——exit 恒 0）
   atelier call <endpoint> ['<json>'] [--root <dir>] [--mount /api]  MINI  端点直调 CLI 通道（D-F15，§14.4
@@ -242,6 +246,12 @@ switch (cmd) {
     // （破坏性 down 走 --force 显式同意；seed 逐文件 tx 幂等，库缺失提示先 up——不静默建库）
     if (!["status", "up", "down", "verify", "seed"].includes(sub)) die("usage: atelier migrate status|up|down|verify|seed [--root <dir>] [--db <f>] [--to <name>] [--force]", 2);
     runFile(script("migrate.mjs"), [sub, ...rest]);
+    break;
+  case "db":
+    // A3 备份 CLI（差距批，FS-DESIGN §5.7 落地注记 2026-09-28）：VACUUM INTO 在线单文件快照 +
+    // quick_check/sha256 自证行——语义在 scripts/backup.mjs（migrate.mjs「装配与诚实呈现」分层同构）
+    if (sub !== "backup") die("usage: atelier db backup --root <dir> --out <file> [--db <f>] [--force] [--no-verify]", 2);
+    runFile(script("backup.mjs"), [sub, ...rest]);
     break;
   case "impact":
     // §2.5 契约影响面两跳导航（导航不是门禁，exit 恒 0）
