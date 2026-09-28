@@ -436,14 +436,17 @@ export class EndpointRegistry {
    * A2 硬化3：maxBodyBytes = 请求体上限（缺省 1MiB），JSON 解析处校验，超限 413 ATR-346
    * （不进 handler、不入 journal——与鉴权拦截同款"被拒之门前不触碰 handler"语义）；
    * node-host 桥侧另有读体中途截断的同上限闸（更早、更省内存），本兜底覆盖直挂宿主/进程内调用。
+   * A2 硬化5：statusToken = server-status 调试面门禁（缺省不设 = 行为零变化；设置后 GET
+   * <mount>/__atelier/server-status 要求 x-atelier-token 头，401 ATR-340——见 introspect.ts）。
    */
   createHandler(
-    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number } = {}
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string } = {}
   ): (req: Request) => Promise<Response> {
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
     const db = opts.db; // 无库应用不传 = undefined（ctx.db 直通，诚实呈现）
     const readAuth = opts.auth;
     const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+    const statusToken = opts.statusToken; // A2 硬化5：server-status 门禁（未设 = 行为零变化）
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     return async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
@@ -472,9 +475,11 @@ export class EndpointRegistry {
 
       // ---- D-F16 保留内省路由（§10.3）：GET <mount>/__atelier/server-status → 运行时事实 JSON。
       //      dev 面 server-status（父进程代理）与 MCP endpoint.* 族、调试页三处同源；prod 旗下
-      //      introspectResponse 返回 null，落回下方既有 ATR 路径（调试面不进生产 API 面）。 ----
+      //      introspectResponse 返回 null，落回下方既有 ATR 路径（调试面不进生产 API 面）。
+      //      A2 硬化5：statusToken 装配项透传——设置后该路由要求 x-atelier-token 头（401 ATR-340），
+      //      未设置 = 行为零变化；prod 隐身优先于 token 判定（判定在 introspect 内部）。 ----
       if (req.method === "GET" && name === INTROSPECT_NAME) {
-        const res = introspectResponse(this, { db, mount: mount || "/" });
+        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req });
         if (res) return res;
       }
 

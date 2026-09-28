@@ -300,7 +300,12 @@ export function atelierDevPlugin() {
         const port = serverSupervisor?.targetPort?.() ?? null;
         if (!port) return null;
         try {
-          const r = await fetch(`http://127.0.0.1:${port}/__atelier/server-status`, { signal: AbortSignal.timeout(4000) });
+          // A2 硬化5 生态位：应用若把 server 面 statusToken 装配为 dev-token 同值（双面同钥），
+          // 此代理自动携带 x-atelier-token；子进程未设门禁时忽略该头，零影响。
+          const r = await fetch(`http://127.0.0.1:${port}/__atelier/server-status`, {
+            signal: AbortSignal.timeout(4000),
+            headers: { "x-atelier-token": TOKEN },
+          });
           if (!r.ok) return null;
           const child = await r.json();
           return {
