@@ -36,6 +36,7 @@ export {
   migrateDown,
   migrateVerify,
   MIGRATIONS_TABLE_DDL,
+  MIGRATIONS_NAME_UK_DDL,
   readMigrationJournal,
   MIGRATION_JOURNAL_DDL,
   MIGRATION_JOURNAL_TAIL_LIMIT,
