@@ -354,3 +354,51 @@ describe("硬化4：prod 错误 message 收敛 + 指纹（endpoints ATR-320 / li
     }
   });
 });
+
+/* ================= 硬化5：server-status 可选 token 门禁（createHandler({ statusToken })） =================
+ * 现状：GET <mount>/__atelier/server-status 在非 prod 态对任何调用方全量吐出端点契约体/journal/
+ * live 订阅/db 快照——公网直挂形态是信息泄露面（prod 隐身已有，但 dev/内网直挂裸奔）。
+ * 修法 = 装配项 statusToken（缺省不设 = 行为零变化）：设置后该路由要求 x-atelier-token 头
+ * （与 dev 面 token 机制同口径），不匹配 401 ATR-340（鉴权域既有码，不另开号）；prod 隐身
+ * 语义优先于 token 判定（门禁检查不泄露 prod 下该路由的存在性）。
+ */
+
+const statusGet = (handler: (req: Request) => Promise<Response>, token?: string): Promise<Response> =>
+  handler(new Request("http://local.test/__atelier/server-status", { method: "GET", headers: token ? { "x-atelier-token": token } : {} }));
+
+describe("硬化5：server-status 可选 token 门禁（statusToken → 401 ATR-340）", () => {
+  it("红检：设 statusToken 后无头 401 / 错头 401 / 对头 200 快照照常", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("q.ok", { handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({ statusToken: "s3cret-token" });
+
+    const noHeader = await statusGet(handler);
+    expect(noHeader.status).toBe(401); // 红态：门禁选项不存在 → 200 全量快照外泄
+    expect(((await noHeader.json()) as { code: string }).code).toBe("ATR-340");
+
+    const badHeader = await statusGet(handler, "wrong-token");
+    expect(badHeader.status).toBe(401);
+    expect(((await badHeader.json()) as { code: string }).code).toBe("ATR-340");
+
+    const good = await statusGet(handler, "s3cret-token");
+    expect(good.status).toBe(200);
+    const snap = (await good.json()) as { endpoints: { name: string }[] };
+    expect(snap.endpoints.some((e) => e.name === "q.ok")).toBe(true);
+  });
+
+  it("红检：未设 statusToken = 行为零变化（无头照常 200）", async () => {
+    const reg = new EndpointRegistry();
+    const handler = reg.createHandler({});
+    expect((await statusGet(handler)).status).toBe(200); // 回归钉：缺省不设门禁
+  });
+
+  it("红检：prod 隐身优先于 token 判定（prod 旗下该路由照旧 405 ATR-311，不泄露存在性）", async () => {
+    await withProd(true, async () => {
+      const reg = new EndpointRegistry();
+      const handler = reg.createHandler({ statusToken: "t" });
+      const res = await statusGet(handler, "t");
+      expect(res.status).toBe(405);
+      expect(((await res.json()) as { code: string }).code).toBe("ATR-311");
+    });
+  });
+});
