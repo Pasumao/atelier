@@ -82,3 +82,5 @@ export {
   type BoundJobs,
   type StartJobsOptions,
 } from "./jobs.ts";
+/* B4 差距批追加（健康面，2026-09-28，只加不改——既有行不动）：GET <mount>/__atelier/health 三事实探活口 */
+export { HEALTH_NAME, healthResponse, type HealthSnapshot } from "./health.ts";
