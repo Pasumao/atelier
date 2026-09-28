@@ -177,3 +177,59 @@ describeSqlite("硬化1：scrypt 显式参数 + 哈希串版本位（gen auth �
     expect(await authMod.verifyPassword("x", evil)).toBe(false);
   });
 });
+
+/* ================= 硬化3：请求体上限（endpoints maxBodyBytes → 413 ATR-346；node-host 读体中途截断） =================
+ * 现状：请求体无任何上限——公网部署下单请求即可打爆内存（node-host 桥全量缓冲读体）。修法 =
+ * 两道闸：node-host 桥读体时按上限**中途截断**（不等读完整再拒，超限残余不再进 JS，桥直答 413）；
+ * endpoints 分发器在 JSON 解析处兜底（直挂 handler 的宿主/进程内调用路径），装配项
+ * createHandler({ maxBodyBytes }) 可配、缺省 1MiB。超限 = 413 + ATR-346（四段式），不进 handler、不入 journal。
+ */
+
+describe("硬化3：请求体上限（413 ATR-346）", () => {
+  it("红检：缺省上限 1MiB——超限 413 ATR-346 且不进 handler；小体不受扰", async () => {
+    let handlerHits = 0;
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("big.echo", { handler: (i) => { handlerHits++; return i; } }));
+    const handler = reg.createHandler({});
+    const small = await post(handler, "big.echo", { ok: 1 }); // 对照组：小体照常
+    expect(small.status).toBe(200);
+    const big = await handler(
+      new Request("http://local.test/big.echo", { method: "POST", body: JSON.stringify({ pad: "x".repeat(Math.round(1.5 * 1024 * 1024)) }) })
+    );
+    expect(big.status).toBe(413); // 红态：无上限 → 200 全单照收
+    expect(((await big.json()) as { code: string }).code).toBe("ATR-346");
+    expect(handlerHits).toBe(1); // 红态：2——超限体也进了 handler
+  });
+
+  it("红检：createHandler({ maxBodyBytes }) 自定义上限生效（超限 413 / 界内不受扰）", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("big.echo", { handler: (i) => i }));
+    const handler = reg.createHandler({ maxBodyBytes: 200 });
+    const ok = await post(handler, "big.echo", { pad: "y".repeat(10) });
+    expect(ok.status).toBe(200); // 界内不受扰
+    const over = await handler(new Request("http://local.test/big.echo", { method: "POST", body: JSON.stringify({ pad: "y".repeat(300) }) }));
+    expect(over.status).toBe(413); // 红态：装配项不存在 → 200
+    expect(((await over.json()) as { code: string }).code).toBe("ATR-346");
+  });
+
+  it("红检：node-host 桥读体中途截断——超限残余不再喂 handler，桥直答 413 ATR-346（真实 socket 往返）", async () => {
+    let handlerHits = 0;
+    const server = createNodeServer(
+      async () => {
+        handlerHits++;
+        return new Response('{"ok":true}', { headers: { "content-type": "application/json" } });
+      },
+      { maxBodyBytes: 1000 }
+    );
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    try {
+      const port = (server.address() as { port: number }).port;
+      const res = await fetch(`http://127.0.0.1:${port}/whatever`, { method: "POST", body: "z".repeat(64 * 1024) });
+      expect(res.status).toBe(413); // 红态：桥无上限 → 全量读入喂 handler → 200
+      expect(((await res.json()) as { code: string }).code).toBe("ATR-346");
+      expect(handlerHits).toBe(0); // 红态：1——64KB 体已整体进 handler（未截断）
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+});
