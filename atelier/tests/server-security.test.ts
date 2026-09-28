@@ -126,6 +126,20 @@ afterEach(() => {
   while (genTmpDirs.length > 0) fs.rmSync(genTmpDirs.pop()!, { recursive: true, force: true });
 });
 
+/* ---- 硬化8 机检基座：node:crypto scrypt 计数包装（本文件模块图内生效——gen auth 产物的
+ * 动态 import 也走此 mock）。注意不透传 scrypt[promisify.custom]：那样 promisify(scrypt) 会
+ * 拿到原生定制版绕过计数。通用 promisify 全参转发路径下包装器计数可靠。 ---- */
+const scryptCounter = vi.hoisted(() => ({ calls: 0 }));
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  const native = actual.scrypt as (...args: unknown[]) => unknown;
+  const wrapped = (...args: unknown[]): unknown => {
+    scryptCounter.calls++;
+    return native(...args);
+  };
+  return { ...actual, scrypt: wrapped };
+});
+
 /** 生成 auth 五件套到临时目录并动态 import auth.ts（vitest vendor shim 使 import 闭合真实成立） */
 async function genAuthModule(): Promise<{ root: string; authMod: Record<string, any>; endpointsUrl: string }> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-a2-genauth-"));
@@ -451,6 +465,34 @@ describeSqlite("硬化6：atelier_migrations.name UNIQUE + 会话过期惰性清
     const hit = authMod.validateSession(db, "tok-live");
     expect(hit).not.toBeNull(); // 有效会话照常（对照组）
     expect(db.prepare("SELECT token FROM sessions WHERE token = 'tok-live'").get()).toBeDefined();
+    db.close();
+  });
+});
+
+/* ================= 硬化8：登录账号枚举时序侧信道（dummy scrypt verify） =================
+ * 现状：login handler `if (user == null || !(await verifyPassword(...)))` 短路——邮箱不存在时
+ * 0 次 scrypt、密码错误时 1 次 scrypt（N=2^14 约 50-100ms），响应时间区分两种失败 =
+ * 账号存在性枚举信道。修法 = 用户不存在也对固定占位哈希（同参数同代价）跑一次 verify 再统一失败路径。
+ * 机检方式：vi.mock 包 scrypt 计数（注入计数比计时断言可靠——计时受环境噪声）。
+ */
+
+describe("硬化8：登录账号枚举时序侧信道（gen auth 产物）", () => {
+  it("红检：用户不存在路径也执行等价 scrypt 运算（scrypt 计数 > 0），失败路径统一 401 文案", async () => {
+    const { root, endpointsUrl } = await genAuthModule();
+    const db = await openSqlite(":memory:");
+    await migrateUp(db, path.join(root, "src", "server", "db", "migrations"));
+    const epMod = (await import(endpointsUrl)) as { registerAuthEndpoints: (reg: EndpointRegistry) => void };
+    const reg = new EndpointRegistry();
+    epMod.registerAuthEndpoints(reg);
+    const handler = reg.createHandler({ db });
+
+    scryptCounter.calls = 0;
+    const res = await post(handler, "auth.login", { email: "ghost@test.dev", password: "whatever1" });
+    expect(res.status).toBe(401);
+    const err = (await res.json()) as { code: string; message: string };
+    expect(err.code).toBe("ATR-340");
+    expect(err.message).toBe("登录失败：邮箱或密码不正确"); // 统一文案（不区分两种失败）
+    expect(scryptCounter.calls).toBeGreaterThan(0); // 红态：0——短路使「邮箱不存在」时序可辨
     db.close();
   });
 });
