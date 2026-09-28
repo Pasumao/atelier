@@ -15,7 +15,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startJobs, type JobsHandle, type SqliteDb } from "../server/jobs";
+import { startJobs, JOBS_TABLE_DDL, type JobsHandle, type SqliteDb } from "../server/jobs";
 import { openSqlite } from "../server/sqlite";
 import { AtrEndpointError, defineCommand, defineQuery, EndpointRegistry } from "../server/endpoints";
 import { serverStatusSnapshot } from "../server/introspect";
@@ -33,7 +33,15 @@ const describeSqlite = nodeSqlite ? describe : describe.skip;
 /* ---------------- 夹具：真实 SQLite（:memory: 单连接 / 临时文件库跨连接）+ 快轮询旋钮 ---------------- */
 const tmpDirs: string[] = [];
 const openHandles: JobsHandle[] = [];
+const openDbs: SqliteDb[] = [];
 afterAll(() => {
+  for (const d of openDbs) {
+    try {
+      d.close();
+    } catch {
+      /* 重复 close 幂等跳过 */
+    }
+  }
   while (tmpDirs.length > 0) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true });
 });
 afterEach(async () => {
@@ -54,13 +62,17 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const POLL = { busyMs: 5, idleMaxMs: 40 };
 
 async function memoryDb(): Promise<SqliteDb> {
-  return openSqlite(":memory:");
+  const db = await openSqlite(":memory:");
+  openDbs.push(db);
+  return db;
 }
 async function fileDb(): Promise<{ db: SqliteDb; file: string }> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-jobs-"));
   tmpDirs.push(dir);
   const file = path.join(dir, "jobs.db");
-  return { db: await openSqlite(file), file };
+  const db = await openSqlite(file);
+  openDbs.push(db);
+  return { db, file };
 }
 
 function jobRow(db: SqliteDb, type: string): Record<string, unknown> | undefined {
@@ -103,6 +115,7 @@ describeSqlite("A1 jobs：全链 / 原子取出 / 取出序", () => {
     });
     const a = startJobs({ db, handlers: mk(), poll: POLL });
     const db2 = await openSqlite(file); // 第二连接（独立句柄同库文件）
+    openDbs.push(db2);
     const b = startJobs({ db: db2, handlers: mk(), poll: POLL });
     openHandles.push(a, b);
     for (let i = 0; i < 20; i++) a.enqueue({ type: "batch", payload: { n: i } });
@@ -110,7 +123,6 @@ describeSqlite("A1 jobs：全链 / 原子取出 / 取出序", () => {
     await waitFor(() => a.stats().counts.pending === 0 && b.stats().counts.pending === 0, 2000);
     expect([...exec.values()].every((c) => c === 1)).toBe(true); // 零重复（原子取出语义）
     expect(exec.size).toBe(20); // 零丢失
-    db2.close();
   });
 
   it("取出序：priority DESC 优先，同级 run_at ASC 先到先执行", async () => {
@@ -289,13 +301,14 @@ describeSqlite("A1 jobs：tx 原子投递 / stale lock 回收 / prune", () => {
     const boom = await call({ body: "x", boom: true });
     expect(boom.status).toBe(500); // 业务异常（ATR-320 域）
     expect(countByType(db, "note.notify")).toBe(1); // 失败路径：job 行随 tx 回滚，绝无孤儿投递
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM notes").get()!.n)).toBe(0); // 业务写同证回滚
+    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM notes").get()!.n)).toBe(1); // notes 仅剩提交路径那一行（boom 行同证回滚）
   });
 
   it("stale lock 回收：locked_at 超时的 running 行重置 pending（attempts 保留），续跑至 done", async () => {
     const db = await memoryDb();
+    // 前置：模拟「上一进程已建表 + 崩溃遗留 running 行」——表 DDL 先手落（startJobs 的惰性建表幂等）
+    db.exec(JOBS_TABLE_DDL);
     const now = Date.now();
-    // 模拟崩溃 worker 的遗留 running 行（attempts=2 已烧两次预算，locked_at 远超时）
     db.prepare(
       "INSERT INTO atelier_jobs (type, queue, payload, status, priority, attempts, max_attempts, run_at, locked_by, locked_at, created_at, updated_at) VALUES (?, 'default', '{}', 'running', 0, 2, 5, ?, 'dead-worker', ?, ?, ?)"
     ).run("stale.report", now, now - 60_000, now, now);
