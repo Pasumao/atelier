@@ -16,7 +16,9 @@
  * 零新依赖、TS 仅 erasable 语法（type stripping 直接可跑）；Bun 侧桥归 Bun 启动壳，不经此文件。
  *
  * 诚实边界：
- * - 请求体缓冲读取（JSON 端点为主的 dev 形态；流式上传不做——出现真实场景再议增量请求桥）；
+ * - 请求体缓冲读取（JSON 端点为主的 dev 形态；流式上传不做——出现真实场景再议增量请求桥），
+ *   但设体上限闸（A2 硬化3）：超 maxBodyBytes（缺省 1MiB）即**读体中途截断**直答 413 ATR-346，
+ *   残余不进 JS——公网形态下单请求打爆内存的路已封；上限经 createNodeServer/serve({ maxBodyBytes }) 可配；
  *   响应侧 ReadableStream 逐 chunk 增量 write 不缓冲（SSE 依赖），socket 背压经 drain 对接；
  * - 多 Set-Cookie 用 Response.headers.getSetCookie() 逐条回写（auth 会话依赖，绝不能逗号合并）；
  *   其余响应头经 Headers 迭代回写——同 name 多值按 Web Headers 规范合并为逗号连接
@@ -34,7 +36,17 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 export type NodeHostOptions = {
   /** 缺省 127.0.0.1（与 serve() 的 listen host 同语义） */
   host?: string;
+  /**
+   * 请求体上限字节（A2 硬化3）：读体**中途截断**（不等读完整再拒——超限即停，残余不再进 JS），
+   * 桥直答 413 ATR-346。缺省 1MiB（endpoints.ts DEFAULT_MAX_BODY_BYTES 同值单点复制——不跨模块
+   * 开私有口，与 isProd 双写同款纪律，两处注释互指）；createHandler({ maxBodyBytes }) 是另一道
+   * 兜底闸（JSON 解析处），两道都设时取小者生效。
+   */
+  maxBodyBytes?: number;
 };
+
+/** 请求体上限缺省值（A2 硬化3，与 endpoints.ts DEFAULT_MAX_BODY_BYTES 互指同值） */
+const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
 /** Web 标准 handler 形态（endpoints.ts createHandler 产出的签名——桥不关心 handler 内部） */
 export type WebHandler = (req: Request) => Promise<Response>;
@@ -61,7 +73,32 @@ async function dispatch(
   opts?: NodeHostOptions
 ): Promise<void> {
   try {
-    const res = await handler(await toWebRequest(nodeReq, opts));
+    const maxBodyBytes = opts?.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+    const read = await readBody(nodeReq, maxBodyBytes);
+    if (read.overLimit) {
+      // A2 硬化3：读体已中途截断（残余不再进 JS）——桥直答 413 ATR-346（四段式与 endpoints 同款线型）。
+      // 超限是客户端问题，不入 handler。收尾纪律：**drain 后再断**——若此刻直接 destroy，客户端仍在
+      // 发送，RST 会把它接收缓冲里的 413 一并丢掉（超限方反而看不到明确错误）；改为 resume() 以
+      // discard 模式放完残余（无 data 监听器 = 纯丢弃，不进 JS 不占内存），请求侧到 end（内核接收
+      // 缓冲已空）再断连接（此时是 FIN 不是 RST，响应可达）。30s 失败保护（unref 不阻进程退出）
+      // 防恶意慢发把连接吊死——那时客户端拿不拿得到 413 已无所谓。
+      const body413 = JSON.stringify({
+        code: "ATR-346",
+        message: `请求体超限：读入 ${read.seenBytes} 字节后超过桥上限 ${maxBodyBytes}（读体中途截断）`,
+        context: { component: "atelier-node-host" },
+        fix: `缩小请求体；上限可配：createNodeServer/serve({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）`,
+      });
+      nodeRes.writeHead(413, { "content-type": "application/json; charset=utf-8", "connection": "close" });
+      nodeRes.end(body413);
+      const teardown = () => nodeReq.destroy();
+      nodeReq.on("end", teardown);
+      const failsafe = setTimeout(teardown, 30_000);
+      (failsafe as unknown as { unref?: () => void }).unref?.();
+      nodeReq.on("close", () => clearTimeout(failsafe));
+      nodeReq.resume();
+      return;
+    }
+    const res = await handler(await toWebRequest(nodeReq, opts, read.body));
     await writeResponse(nodeRes, res);
   } catch (e) {
     if (nodeRes.writableEnded || nodeRes.destroyed) return;
@@ -83,33 +120,74 @@ async function dispatch(
 }
 
 /** node:http 请求 → Web 标准 Request（头 rawHeaders 逐条 append 保真；体缓冲读取） */
-async function toWebRequest(nodeReq: IncomingMessage, opts?: NodeHostOptions): Promise<Request> {
+async function toWebRequest(nodeReq: IncomingMessage, opts: NodeHostOptions | undefined, body: Uint8Array<ArrayBuffer> | undefined): Promise<Request> {
   const host = nodeReq.headers.host ?? opts?.host ?? "127.0.0.1";
   const url = new URL(nodeReq.url ?? "/", `http://${host}`);
   const headers = new Headers();
   for (let i = 0; i < nodeReq.rawHeaders.length; i += 2) {
     headers.append(nodeReq.rawHeaders[i]!, nodeReq.rawHeaders[i + 1]!);
   }
-  return new Request(url, { method: nodeReq.method ?? "GET", headers, body: await readBody(nodeReq) });
+  return new Request(url, { method: nodeReq.method ?? "GET", headers, body });
 }
 
 /**
- * 请求体缓冲读取（诚实边界：JSON 端点为主，不做流式上传）。GET/HEAD 无体时 for-await
+ * 请求体缓冲读取（诚实边界：JSON 端点为主，不做流式上传）。GET/HEAD 无体时 data 事件不来、
  * 立即 end → 返回 undefined（Request 构造不携带 body——GET 带 body 会被 Web 标准拒绝）。
- * 返回类型钉死 Uint8Array<ArrayBuffer>（BodyInit 所需——TS 5.7+ TypedArray 泛型化）。
+ * A2 硬化3：按 maxBodyBytes **中途截断**——超限即停（不等读完整再拒），残余不再进 JS。
+ * 显式 data/end/error 监听器而非 async iterator：iterator 的 early-return/break 会触发流的
+ * return() → destroy → socket 断，413 就写不出去了；显式监听器让"停读不毁流"成为可控动作
+ * （pause 后由 dispatch 决定 drain 收尾节奏）。
  */
-async function readBody(nodeReq: IncomingMessage): Promise<Uint8Array<ArrayBuffer> | undefined> {
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of nodeReq) chunks.push(chunk as Uint8Array);
-  if (chunks.length === 0) return undefined;
-  const total = chunks.reduce((n, c) => n + c.byteLength, 0);
-  const body = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    body.set(c, off);
-    off += c.byteLength;
-  }
-  return body;
+type BodyRead = { body: Uint8Array<ArrayBuffer> | undefined; overLimit: boolean; seenBytes: number };
+
+function readBody(nodeReq: IncomingMessage, maxBodyBytes: number): Promise<BodyRead> {
+  return new Promise((resolve, reject) => {
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    let settled = false;
+    const detach = () => {
+      nodeReq.off("data", onData);
+      nodeReq.off("end", onEnd);
+      nodeReq.off("error", onError);
+    };
+    const finish = (r: BodyRead): void => {
+      if (settled) return;
+      settled = true;
+      detach();
+      resolve(r);
+    };
+    const onData = (chunk: Uint8Array): void => {
+      if (total + chunk.byteLength > maxBodyBytes) {
+        nodeReq.pause(); // 停止消费（残余留内核/流缓冲）——收尾节奏归 dispatch（drain 后断）
+        finish({ body: undefined, overLimit: true, seenBytes: total });
+        return;
+      }
+      chunks.push(chunk);
+      total += chunk.byteLength;
+    };
+    const onEnd = (): void => {
+      if (chunks.length === 0) {
+        finish({ body: undefined, overLimit: false, seenBytes: 0 });
+        return;
+      }
+      const body = new Uint8Array(total);
+      let off = 0;
+      for (const c of chunks) {
+        body.set(c, off);
+        off += c.byteLength;
+      }
+      finish({ body, overLimit: false, seenBytes: total });
+    };
+    const onError = (e: unknown): void => {
+      if (settled) return;
+      settled = true;
+      detach();
+      reject(e);
+    };
+    nodeReq.on("data", onData);
+    nodeReq.on("end", onEnd);
+    nodeReq.on("error", onError);
+  });
 }
 
 /** Web 标准 Response → node:http 回写（多 Set-Cookie 逐条 + ReadableStream 增量 write 不缓冲） */
@@ -169,9 +247,9 @@ async function writeResponse(nodeRes: ServerResponse, res: Response): Promise<vo
  * 自托管启动壳的框架侧单源（应用启动壳 = 本函数 + env 解析 + db 装配，约 30 行）。
  * 固定端口被占 → EADDRINUSE 原样上抛（契约：不静默换口，应用侧负责诚实报错退出）。
  */
-export async function serve(handler: WebHandler, opts: { port: number; host?: string }): Promise<Server> {
+export async function serve(handler: WebHandler, opts: { port: number; host?: string; maxBodyBytes?: number }): Promise<Server> {
   const host = opts.host ?? "127.0.0.1";
-  const server = createNodeServer(handler, { host });
+  const server = createNodeServer(handler, { host, maxBodyBytes: opts.maxBodyBytes });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject); // listen 期错误（EADDRINUSE 等）原样上抛；resolve 后再触发即 no-op
     server.listen(opts.port, host, () => resolve());

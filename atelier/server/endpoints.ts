@@ -11,6 +11,7 @@
  * 320 handler 抛错 /
  * 321 live 重算失败（SSE error 事件，不断流——live.ts）/ 322 端点超时；2xx 契约域：215 输出契约违规
  * （开发者错误）/ 216 输出非 JSON-safe；SQLite 宿主面见 sqlite.ts ATR-330。
+ * 安全域（A2 收口批）：346 请求体超上限（413，maxBodyBytes 可配）。
  * 鉴权域（FS-M2(m2d) 加法，§6.2）：340 会话缺失/读取器未装配（401）/ 341 角色不符（403）——
  * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）；
  * live SSE 通道不设 per-subscriber 门禁（引擎共享重算 ctx.auth=null）——live×auth(type≠none) 组合
@@ -167,6 +168,13 @@ export class AtrEndpointError extends Error {
 function isProd(): boolean {
   return (globalThis as { __ATELIER_PROD__?: boolean }).__ATELIER_PROD__ === true;
 }
+
+/**
+ * 请求体上限缺省值（A2 硬化3）：1MiB。node-host.ts 桥侧同值单点复制（不跨模块开私有口——
+ * 与 isProd 的 isProd/introspect 双写同款纪律，两处注释互指），装配点经 createHandler({ maxBodyBytes })
+ * 与 createNodeServer/serve({ maxBodyBytes }) 各自可配；两道闸都设时取小者生效（分发器兜底校验恒在）。
+ */
+export const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
 /**
  * 输出面检查（§2.3/§3.7 单源）：POST 分发器与 live 推送前（live.ts）共用同一校验——两通道零语义差。
@@ -409,11 +417,17 @@ export class EndpointRegistry {
    * 同走 POST——输入必须过契约校验这条纪律不因动词分叉）；FS-7 加法通道：GET <mount>/<name>/live
    * → 声明 live 的 query 端点走 SSE 订阅（live.ts 引擎：失效-重算-推送），其余非 POST 维持 ATR-311。
    * 装配点（§3.2）：db / auth 一次性显式注入，无 DI 容器——装配代码在应用入口明文可见。
+   * A2 硬化3：maxBodyBytes = 请求体上限（缺省 1MiB），JSON 解析处校验，超限 413 ATR-346
+   * （不进 handler、不入 journal——与鉴权拦截同款"被拒之门前不触碰 handler"语义）；
+   * node-host 桥侧另有读体中途截断的同上限闸（更早、更省内存），本兜底覆盖直挂宿主/进程内调用。
    */
-  createHandler(opts: { mount?: string; db?: unknown; auth?: AuthReader } = {}): (req: Request) => Promise<Response> {
+  createHandler(
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number } = {}
+  ): (req: Request) => Promise<Response> {
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
     const db = opts.db; // 无库应用不传 = undefined（ctx.db 直通，诚实呈现）
     const readAuth = opts.auth;
+    const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     return async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
@@ -500,9 +514,25 @@ export class EndpointRegistry {
         }
       }
 
+      // ---- A2 硬化3：请求体上限（缺省 1MiB，maxBodyBytes 可配）——超限 413 ATR-346 ----
+      // content-length 声明值先快速拒绝（不读体）；实际字节在缓冲后再兜底校验（声明可缺失/失真）。
+      const overLimitError = (bytes: number): Response =>
+        errorResponse(
+          413,
+          endpointError(
+            "ATR-346",
+            `请求体超限：${bytes} 字节 > 上限 ${maxBodyBytes}（端点 ${name}）`,
+            `缩小请求体（分批/裁剪字段）；服务端上限由装配点调整：createHandler({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）。超限请求不进 handler、不入审计 journal`
+          )
+        );
+      const declaredLength = Number(req.headers.get("content-length"));
+      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) return overLimitError(declaredLength);
+
       let input: unknown;
       try {
-        input = await req.json();
+        const raw = await req.arrayBuffer();
+        if (raw.byteLength > maxBodyBytes) return overLimitError(raw.byteLength);
+        input = JSON.parse(new TextDecoder().decode(raw));
       } catch {
         return errorResponse(400, endpointError("ATR-312", `请求体不是合法 JSON`, "发送 application/json 体，例如 {\"id\": 1}"));
       }
