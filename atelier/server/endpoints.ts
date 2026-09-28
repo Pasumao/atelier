@@ -62,6 +62,16 @@ export type EndpointContext<TDb = unknown> = {
 /** live/emits 失效键语法（§4.1）：表级或业务键——读写两侧都显式可查，非法 = ATR-314 */
 const INVALIDATE_KEY_RE = /^(?:table:[A-Za-z0-9_]+|key:.+)$/;
 
+/**
+ * 「声明了 live」的统一判定（A2 安全收口批，硬化7）：true 或 { invalidate } 对象 = 声明 live；
+ * `live: false` = 显式声明**无** live（显式选择优于沉默缺省的同款纪律），不再是「配了 live 对象」。
+ * 四处判定点统一引用本谓词（register ATR-315 / addDefinition 喂入 / createHandler /live 通道 /
+ * introspect live 名单），摘要 list() 的既有口径（liveDeclared）与本谓词语义一致，零行为漂移。
+ */
+export function isLiveDeclared(def: Pick<EndpointDef, "live">): boolean {
+  return def.live === true || (def.live != null && typeof def.live === "object");
+}
+
 export type EndpointDef<TInput = Record<string, unknown>, TOutput = unknown, TDb = unknown> = {
   kind: EndpointKind;
   name: string;
@@ -304,9 +314,9 @@ export class EndpointRegistry {
     // 若放行组合，端点声明的 auth 会被 SSE 通道静默忽略（未认证客户端直接订阅）。引擎的共享重算模型
     // （coalesce/single-flight 按 (端点, input) 分组共享结果）与 per-subscriber 鉴权在结构上冲突——
     // per-auth 重算属设计扩展（见 live.ts 文件头），本处把"不支持"变成看得见的失败（fail-closed）。
-    // auth: { type: "none" } = 显式消警，与 live 组合放行（liveInvalidateKeys 的 live != null 口径一致，
-    // live:false 亦视同声明 live——与 addDefinition/handleLive 现行为一致）。
-    if (def.live != null && def.auth != null && def.auth.type !== "none") {
+    // auth: { type: "none" } = 显式消警，与 live 组合放行。判定用 isLiveDeclared（硬化7）：
+    // live:false = 显式声明无 live，不触发本拦截（A2 批前误伤——与 addDefinition/handleLive 同口径）。
+    if (isLiveDeclared(def) && def.auth != null && def.auth.type !== "none") {
       throw new AtrEndpointError(
         endpointError(
           "ATR-315",
@@ -318,7 +328,7 @@ export class EndpointRegistry {
     }
     // 内部存储收口为非泛型形态（分发按 name 取用，泛型只活在注册调用点的类型检查里）
     this.defs.set(def.name, def as EndpointDef);
-    if (def.kind === "query" && def.live != null) this.liveEngine.addDefinition(def as EndpointDef); // FS-7：live query 喂入引擎
+    if (def.kind === "query" && isLiveDeclared(def)) this.liveEngine.addDefinition(def as EndpointDef); // FS-7：live query 喂入引擎（live:false 不进——硬化7）
     return this;
   }
 
@@ -415,7 +425,7 @@ export class EndpointRegistry {
       if (req.method === "GET" && name.endsWith("/live")) {
         const base = name.slice(0, -"/live".length);
         const liveDef = base !== "" ? this.defs.get(base) : undefined;
-        if (liveDef && liveDef.kind === "query" && liveDef.live != null) {
+        if (liveDef && liveDef.kind === "query" && isLiveDeclared(liveDef)) { // live:false 通道关闭（硬化7）
           const sse = this.liveEngine.handleLive(req, liveDef);
           if (sse) return sse;
         }

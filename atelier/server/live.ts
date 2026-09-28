@@ -38,6 +38,7 @@ import { validateFlat, type AtrError } from "../runtime/contract.ts";
 import {
   checkEndpointOutput,
   endpointError,
+  isLiveDeclared,
   type AuthReader,
   type EndpointContext,
   type EndpointDef,
@@ -115,9 +116,10 @@ export class LiveEngine {
     this.backpressureLimit = opts.backpressureLimit ?? 32;
   }
 
-  /** 注册表 register() 时喂入 live query 定义（command 的 live 声明不进引擎——SSE 仅面向 query） */
+  /** 注册表 register() 时喂入 live query 定义（command 的 live 声明不进引擎——SSE 仅面向 query；
+   *  live:false = 显式无 live，同样不进——硬化7 与 endpoints.ts 同一 isLiveDeclared 口径） */
   addDefinition(def: EndpointDef): void {
-    if (def.kind === "query" && def.live != null) this.defs.set(def.name, def);
+    if (def.kind === "query" && isLiveDeclared(def)) this.defs.set(def.name, def);
   }
 
   /** createHandler 装配点（§3.2）调用：db 一次性显式注入（重复装配以最后一次为准——引擎随注册表单例） */
@@ -137,7 +139,7 @@ export class LiveEngine {
    * 由调用方回退 ATR-311。input 经 ?input=<JSON> 携带（§4.4 EventSource 拼接约定），缺省 = {}。
    */
   handleLive(req: Request, def: EndpointDef): Response | null {
-    if (def.kind !== "query" || def.live == null) return null;
+    if (def.kind !== "query" || !isLiveDeclared(def)) return null; // live:false = 显式无 live（硬化7）
 
     let parsed: unknown = {};
     const raw = new URL(req.url).searchParams.get("input");

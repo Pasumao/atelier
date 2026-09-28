@@ -24,6 +24,7 @@
  *   不存在（旧库）= ok:false 诚实降级，绝不假数据。
  */
 import type { EndpointDef, EndpointRegistry, EndpointSummary } from "./endpoints.ts";
+import { isLiveDeclared } from "./endpoints.ts";
 import { MIGRATION_JOURNAL_TAIL_LIMIT, migrateStatus } from "./migrate.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -164,7 +165,7 @@ export function serverStatusSnapshot(
   });
   const liveNames = registry.names().filter((name) => {
     const d = registry.get(name) as EndpointDef;
-    return d.kind === "query" && d.live != null;
+    return d.kind === "query" && isLiveDeclared(d); // live:false = 显式无 live（硬化7，与注册/引擎同口径）
   });
 
   let db: ServerStatusSnapshot["db"] = null;
