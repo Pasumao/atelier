@@ -247,6 +247,11 @@ M1 现状"只记成功写入"（310-320 注释口径）升级为**完整审计�
 - `timeoutMs`：装配层 `AbortSignal.timeout()` 组合进 ctx.signal；超时 = ATR-322（新，
   503 映射）。AI SDK 7 四级超时（total/step/chunk/tool）的同向简化。
 
+> **落地注记（2026-09-28，差距批 A1/A4）**：键持久化已随队列批就位——`atelier_idempotency`
+> 表 + `ctx.kv` 显式原语（get/set/setIfAbsent，TEXT JSON + TTL 惰性过期，jobs.ts §5.6）。
+> `idempotent` 元数据**保持零语义变化**（OpenAPI/客户端重试语义/机检三面不动）——持久化去重
+> 不自动生效，handler 显式 `ctx.kv.setIfAbsent(键, 结果)` 占领后再执行（显式可 grep 优于隐式拦截）。
+
 ### 3.7 prod 行为：剥离面定义〔定，明确化〕
 
 | 面 | dev | prod |
@@ -521,6 +526,26 @@ await ctx.db.tx(async (tx) => {
 > vendor 语义不自动获得，sync 不碰应用 src）；技能包 `atelier-mcp-tools` Server-face 段同口径
 > 一句。② 既有落地（M2-b `emits` 已入端点契约）。
 
+> **落地注记（2026-09-28，差距批 A1/A4——候选转落地）**：本节 sketch 兑现为
+> `atelier/server/jobs.ts` 单文件（零新依赖），`startJobs({ db, handlers, cron?, poll?,
+> lockTimeoutMs?, backoffMs? })` → `{ enqueue, stop, prune, kv, stats }`。实现要点：
+> ① 两张框架自管表惰性建表（`atelier_jobs` / `atelier_idempotency`——同迁移台账先例，不进应用
+> 迁移序列）；② 原子取出 = 单条 `UPDATE ... RETURNING`（SQLite ≥3.35；node 24.18 = 3.53.1 /
+> Bun 1.4.2 = 3.53.2 实机均支持），宿主 SQLite <3.35 自动降级两步法（SELECT 候选 → 守卫
+> UPDATE，0 行 = 被抢）——**两宿主差异锁死 jobs.ts 单文件**；③ 失败指数退避
+> `min(2^attempt × 1s, 60s)`（可注入曲线），超 `max_attempts` → `failed` + `last_error`
+> （2KB 截断）；④ recurring = cron 行即 jobs 行（`type=cron:<name>`），完成即重排（run_at =
+> 完成时刻 + everyMs，attempts 归零）——misfire 天然**追一次不补差**；⑤ `ctx.jobs.enqueue`
+> 经 `ctx.db` 同连接执行 → `ctx.db.tx(() => { 业务写; enqueue(...) })` 投递与业务写同事务原子
+> （§5.5 预留位关闭）；⑥ worker 轮询自适应（忙 50ms ↔ 空闲指数退避至 5s）；⑦ stale lock 回收
+> （超时 running → pending，attempts 保留）；⑧ A4 幂等键 = `ctx.kv` 显式原语（§3.6 注记）；
+> ⑨ 内省 server-status 增可选 `jobs` 段（未装配不出现，零假数据）；⑩ 错误码 ATR-350（jobs
+> 投递参数非法）/ ATR-351（幂等键参数非法）随批登记（§15）。诚实边界：**单机单进程**（worker
+> 串行、跨进程仅靠原子取出不重复投递，无公平性保证；SQLite 无 LISTEN/NOTIFY——enqueue 唤醒
+> 仅同进程即时）；**5 字段 cron 表达式未做**（everyMs recurring 覆盖定时场景）；review 时间轴
+> 接线后续批；MCP/CLI 工具族（jobs.* 工具/call 面）后续批。回归钉 = `tests/jobs.test.ts`
+> （22 用例）；bun 路径 Bun 1.4.2 实机冒烟通过。
+
 ### 5.7 种子与备份〔议：D-F17 / 观察位〕
 
 - `atelier migrate seed`：幂等种子命令——dev 体验件，S 级〔议〕。**已落地（M2-d，2026-09-19）**，
@@ -529,7 +554,9 @@ await ctx.db.tx(async (tx) => {
   UPSERT 语义，静态启发拦截裸 INSERT）+ `atelier_seeds` 状态表（checksum 体检 ATR-335，执行失败
   回滚 ATR-336），重复执行跳过已应用。
 - 容灾：文档位（Litestream VFS 为参照的备份指南：SQLite 单文件 = `atelier checkpoint` 之外
-  定期 `.backup` API/文件拷贝说明）；**不做**内建云复制（决策 19）。
+  定期 `.backup` API/文件拷贝说明）；**不做**内建云复制（决策 19）。A3 备份 CLI（差距调研 §2
+  候选）可挂 jobs recurring——`cron:backup` 一行声明即周期备份（差距批 A1 落地后的顺路件），
+  候选**本批不实现**，立项走 `BACKLOG.md`。
 
 ---
 
@@ -1002,7 +1029,8 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 | ATR-344 | 3xx 运行 | 限流窗口超配额（429 + Retry-After；rateLimit 显式装配、缺省不启用，in-memory v1） | §3.3（A2 批，已落地） |
 | ATR-345 | 3xx 运行 | 登录失败锁定（423；gen auth 产物明文 knob，in-memory v1） | §3.3/§6.1（A2 批，已落地） |
 | ATR-346 | 3xx 运行 | 请求体超上限（413；maxBodyBytes 可配，node-host 中途截断 + 分发器兜底） | §3.3（A2 批，已落地） |
-| ATR-35x | 3xx 运行 | 队列域（预留，P2+） | §5.6 |
+| ATR-350 | 3xx 运行 | jobs 投递参数非法（enqueue/cron：type 非法、payload 不可 JSON 序列化、字段越界、cron: 前缀保留）——调用点同步抛错 | §5.6（差距批 A1，已落地） |
+| ATR-351 | 3xx 运行 | 幂等键 KV 参数非法（key 空/超 512 字符、value 不可 JSON 序列化）——调用点同步抛错 | §5.6（差距批 A4，已落地） |
 | ATR-403 | 4xx 工具/dev 面 | dev 托管 server 面不可用（未托管/未就绪/热重启中/子进程连接被拒——代理以 HTTP 503 返回，fix 可执行） | §11.1（FS-7，已落地） |
 | 既有 | — | 310/311/312/313/320 端点、330 SQLite、301/305 模板、201/204 契约/token、401/402 MCP | 不动 |
 

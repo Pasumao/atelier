@@ -130,6 +130,8 @@ type AtrError = {
 | ATR-344 | 限流窗口超配额（429，`Retry-After` 头随行） | 等 `Retry-After` 秒数后重试；配额由装配点 `createHandler({ rateLimit: { windowMs, max } })` 显式声明（缺省不限流）；单进程内存态重启清零 |
 | ATR-345 | 登录失败锁定触发（423，gen auth 产物） | 等锁期过后重试（连续失败 5 次锁 15 分钟，产物明文常量可调；成功登录清零）；in-memory 重启清零 |
 | ATR-346 | 请求体超上限（413） | 缩小请求体或调装配上限 `createHandler({ maxBodyBytes })`（缺省 1MiB）；超限请求不进 handler、不入 journal |
+| ATR-350 | jobs 投递参数非法（`ctx.jobs.enqueue` / cron 声明：type 非法、payload 不可 JSON 序列化、字段越界、`cron:` 前缀为运行时保留） | 修正 enqueue/cron 参数：type 为 1~256 字符显式分发键、payload 须过 JSON round-trip、maxAttempts ≥ 1；自定义任务勿用 `cron:` 前缀（recurring 行由 `startJobs({ cron })` 管理） |
+| ATR-351 | 幂等键 KV 参数非法（key 空/超 512 字符、value 不可 JSON 序列化） | key 用稳定业务标识（如 `pay:<orderId>`）；value 改可 JSON 序列化纯数据（函数/循环引用不行）；去重纪律 = `ctx.kv.setIfAbsent(键, 结果)` 占领后再执行 |
 
 **4xx MCP 与 dev 面**
 
@@ -281,11 +283,15 @@ ATR-105）、`IMPORT_ALLOWLIST`（7 层 ERROR，对应 ATR-106）、`SERVER_AUTH
 - **种子**：`src/server/db/seeds/*.seed.sql`，每条语句幂等 UPSERT（H9/ATR-336）；`atelier migrate
   seed` 重复执行跳过已应用（`atelier_seeds` 状态表）。
 - **事务**：`ctx.db.tx(async (tx) => {...})` 包裹多写；journal 在事务提交后入账（审计与数据一致）。
-- **jobs 位（v1 口径，FS-DESIGN §5.6）**：**v1 无内建队列**——command 内联执行长任务，必须声明
-  `timeoutMs`（超时 ATR-322，handler 监听 `ctx.signal` 提前退出）。`src/server/jobs/` 是目录与
-  文档位（应用内 README 见模板），SQLite jobs 表 sketch 见 FS-DESIGN §5.6（P2+ 候选）；
-  `emits`/审计元数据已为将来 job 化预留兼容——command 契约不因同步/异步执行改变，执行位置是
-  部署细节不是契约细节。
+- **jobs 位（FS-DESIGN §5.6；2026-09-28 差距批 A1/A4 起队列已落地）**：`startJobs({ db,
+  handlers, cron? })`（vendor 面导出）装配单机队列 worker——`ctx.jobs.enqueue` 投递（tx 内投递
+  与业务写同事务原子）、recurring 定时 = `cron: [{ name, everyMs }]`（`cron:<name>` jobs 行，
+  完成即重排/misfire 追一次不补差）、`ctx.kv.setIfAbsent` 幂等去重显式原语（ATR-350/351 参数
+  面）；诚实边界 = 单机单进程、5 字段 cron 表达式未做、MCP/CLI 工具族后续批。无 jobs 装配的
+  应用沿用内联口径：command 内联执行长任务必须声明 `timeoutMs`（超时 ATR-322，handler 监听
+  `ctx.signal` 提前退出）；应用内用法文档 = `src/server/jobs/README.md`（init 模板自带）。
+  `emits`/审计元数据兼容纪律不变——command 契约不因同步/异步执行改变，执行位置是部署细节
+  不是契约细节。
 
 ### 8.4 边界守卫与 struct 八层（决策 20/21）
 
