@@ -549,3 +549,60 @@ describe("功能7：限流钩子位（rateLimit → 429 ATR-344 + Retry-After）
     }
   });
 });
+
+/* ================= 功能8：登录失败锁定钩子位（gen auth 产物，in-memory v1 纯新增） =================
+ * 现状：login 失败无锁定——同一标识可无限次试密码（配合硬化1 的 50-100ms/次，慢速爆破仍可行）。
+ * 修法 = gen auth 产物内落明文常量 knob（LOGIN_LOCKOUT_MAX_FAILURES=5 / LOGIN_LOCKOUT_MINUTES=15）：
+ * 同一登录标识连续失败达阈值即锁，锁定期内直接 423 ATR-345（不做 scrypt——锁定就是要省掉它）；
+ * 成功登录清零；锁定过期新一轮计数。诚实边界：单进程内存态重启清零。
+ */
+
+/** 生成 auth 产物并把明文锁定常量改写为测试值（验证「可改明文」的 knob 形态；产物 regen 语义不受影响） */
+async function genAuthWithLock(maxFailures: string, minutes: string): Promise<{ db: SqliteDb; handler: (req: Request) => Promise<Response>; authMod: Record<string, any> }> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-a2-lock-"));
+  genTmpDirs.push(root);
+  genAuth(root);
+  const epPath = path.join(root, "src", "server", "auth", "endpoints.ts");
+  const src = fs
+    .readFileSync(epPath, "utf8")
+    .replace("LOGIN_LOCKOUT_MAX_FAILURES = 5", `LOGIN_LOCKOUT_MAX_FAILURES = ${maxFailures}`)
+    .replace("LOGIN_LOCKOUT_MINUTES = 15", `LOGIN_LOCKOUT_MINUTES = ${minutes}`);
+  fs.writeFileSync(epPath, src);
+  const db = await openSqlite(":memory:");
+  await migrateUp(db, path.join(root, "src", "server", "db", "migrations"));
+  const epMod = (await import(pathToFileURL(epPath).href)) as { registerAuthEndpoints: (reg: EndpointRegistry) => void };
+  const authMod = (await import(pathToFileURL(path.join(root, "src", "server", "auth", "auth.ts")).href)) as Record<string, any>;
+  const reg = new EndpointRegistry();
+  epMod.registerAuthEndpoints(reg);
+  return { db, handler: reg.createHandler({ db, auth: authMod.createSessionReader(db) }), authMod };
+}
+
+describe("功能8：登录失败锁定钩子位（423 ATR-345）", () => {
+  it("红检：同一标识连续失败达阈值即锁——锁定期内正确密码也 423 ATR-345；锁定按标识隔离", async () => {
+    const { db, handler, authMod } = await genAuthWithLock("5", "15");
+    await authMod.createUser(db, "u1@test.dev", "right-password", "user");
+    await authMod.createUser(db, "u2@test.dev", "right-password", "user");
+    for (let i = 0; i < 5; i++) {
+      expect((await post(handler, "auth.login", { email: "u1@test.dev", password: "wrong" })).status).toBe(401);
+    }
+    const locked = await post(handler, "auth.login", { email: "u1@test.dev", password: "right-password" });
+    expect(locked.status).toBe(423); // 红态：无锁定 → 200（正确密码照常登录）
+    expect(((await locked.json()) as { code: string }).code).toBe("ATR-345");
+    // 按标识隔离：u2 不受 u1 的失败计数连累
+    expect((await post(handler, "auth.login", { email: "u2@test.dev", password: "right-password" })).status).toBe(200);
+    db.close();
+  });
+
+  it("红检：成功登录清零计数；锁定过期自动解锁（明文常量 knob 调短锁期验证）", async () => {
+    const { db, handler, authMod } = await genAuthWithLock("2", "0.01"); // 阈值 2、锁期 600ms
+    await authMod.createUser(db, "u3@test.dev", "right-password", "user");
+    expect((await post(handler, "auth.login", { email: "u3@test.dev", password: "wrong" })).status).toBe(401);
+    expect((await post(handler, "auth.login", { email: "u3@test.dev", password: "right-password" })).status).toBe(200); // 成功清零
+    expect((await post(handler, "auth.login", { email: "u3@test.dev", password: "wrong" })).status).toBe(401); // 计数未受上一轮影响（否则此处即锁）
+    expect((await post(handler, "auth.login", { email: "u3@test.dev", password: "wrong" })).status).toBe(401); // 触发锁定（记账后仍 401）
+    expect((await post(handler, "auth.login", { email: "u3@test.dev", password: "right-password" })).status).toBe(423); // 锁定期内（红态：200）
+    await new Promise((r) => setTimeout(r, 700)); // 锁期滑过
+    expect((await post(handler, "auth.login", { email: "u3@test.dev", password: "right-password" })).status).toBe(200); // 过期解锁
+    db.close();
+  });
+});
