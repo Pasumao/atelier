@@ -12,7 +12,8 @@
  * 321 live 重算失败（SSE error 事件，不断流——live.ts）/ 322 端点超时；2xx 契约域：215 输出契约违规
  * （开发者错误）/ 216 输出非 JSON-safe；SQLite 宿主面见 sqlite.ts ATR-330。
  * 安全域（A2 收口批）：346 请求体超上限（413，maxBodyBytes 可配）；
- * 344 限流窗口超配额（429，rateLimit 显式装配、缺省不启用）。
+ * 344 限流窗口超配额（429，rateLimit 显式装配、缺省不启用）；
+ * 345 登录失败锁定（423，gen auth 产物内实现——本模块头表随批登记同一分配面）。
  * 鉴权域（FS-M2(m2d) 加法，§6.2）：340 会话缺失/读取器未装配（401）/ 341 角色不符（403）——
  * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）；
  * live SSE 通道不设 per-subscriber 门禁（引擎共享重算 ctx.auth=null）——live×auth(type≠none) 组合

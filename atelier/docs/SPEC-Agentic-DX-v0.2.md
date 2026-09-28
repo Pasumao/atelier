@@ -127,6 +127,9 @@ type AtrError = {
 | ATR-336 | 种子语句不可重放（裸 `INSERT` 无 ON CONFLICT）或执行失败（整体回滚） | 每条语句改幂等 UPSERT（`INSERT OR REPLACE` / `ON CONFLICT DO UPDATE`） |
 | ATR-340 | 端点声明了 `auth` 但请求无有效会话（或装配点未接会话读取器）（401） | 先登录（`auth.login` 置 cookie）；未装配则 `createHandler({ auth: createSessionReader(db) })`；真正公开的端点显式 `auth: {type:"none"}` |
 | ATR-341 | 会话有效但角色不符端点 `auth: {type, role}` 声明（403） | 授予所需角色或修声明；行级判断在 handler 读 `ctx.auth` 显式做（禁隐式 RLS） |
+| ATR-344 | 限流窗口超配额（429，`Retry-After` 头随行） | 等 `Retry-After` 秒数后重试；配额由装配点 `createHandler({ rateLimit: { windowMs, max } })` 显式声明（缺省不限流）；单进程内存态重启清零 |
+| ATR-345 | 登录失败锁定触发（423，gen auth 产物） | 等锁期过后重试（连续失败 5 次锁 15 分钟，产物明文常量可调；成功登录清零）；in-memory 重启清零 |
+| ATR-346 | 请求体超上限（413） | 缩小请求体或调装配上限 `createHandler({ maxBodyBytes })`（缺省 1MiB）；超限请求不进 handler、不入 journal |
 
 **4xx MCP 与 dev 面**
 
