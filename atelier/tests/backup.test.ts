@@ -55,9 +55,9 @@ async function makeFixtureDb(rows = 2): Promise<{ root: string; dbFile: string }
   return { root, dbFile };
 }
 
-/** 跑 runner 子进程（die 全在装配面——进程级 exit code/输出即被验契约；cli-die.test.ts 同款） */
+/** 跑 runner 子进程（cli 分发的实参形态：`backup.mjs backup …`——die 全在装配面，进程级 exit code/输出即被验契约） */
 function run(args: string[]): { status: number; stdout: string; stderr: string } {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", windowsHide: true });
+  const r = spawnSync(process.execPath, [SCRIPT, "backup", ...args], { encoding: "utf8", windowsHide: true });
   return { status: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
@@ -177,8 +177,10 @@ d("差距批 A3：atelier db backup（VACUUM INTO 在线快照 + 自证行，FS-
 
   it("红证：缺 --out / 未知子命令 → usage 级 exit 2（坏输入客户端即拦）", async () => {
     const { root } = await makeFixtureDb(1);
-    expect(run(["--root", root]).status).toBe(2); // 缺 --out
-    expect(run(["--root", root]).stderr).toContain("usage: atelier db backup");
+    const missing = run(["--root", root]); // 缺 --out（必填实参缺失 = error+fix 两行，call.mjs 同款）
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("--out is required");
+    expect(missing.stderr).toContain("fix:");
     const cli = runCli(["bogus", "--root", root]); // cli.mjs db 命令组子命令守卫
     expect(cli.status).toBe(2);
     expect(cli.stderr).toContain("usage: atelier db backup");
