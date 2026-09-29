@@ -20,7 +20,7 @@
  *
  * Node >= 22 provides the native WebSocket client used here.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -141,11 +141,46 @@ export async function openTransientBrowser({ debugPort } = {}) {
     ],
     { stdio: "ignore" },
   );
+  // close = ws 关闭 + win32 树杀 + unref 延迟清理——三面全清后事件循环可自然清空（进程自然落出）。
+  // 幂等（二次调用 no-op，含 open 失败 catch 路径与消费方重复 close）；保持同步调用形态，
+  // fire-and-forget 消费方（capturePage finally / bench finally / destroyPersistentSession）不破坏。
+  let ws = null; // CDP WebSocket：close 先于主体可达（open 中途失败也要能关），主体内赋值
+  let closed = false;
+  // win32 树杀（bench.mjs killTree 先例同款 spawnSync 同步等待）：无头 Edge/Chrome 是
+  // crashpad/gpu/renderer 进程树，child.kill() 只杀直属进程。且 Edge 直属启动进程会让位真
+  // 浏览器后自退——child.pid 在 close 时多半已死，taskkill /T 以死根起步直接 not found、整树
+  // 漏杀（2026-09-29 bench E2E 实证 9346 残留）。故按 debug port 的 LISTENING 套接字反查真
+  // 浏览器 pid 再树杀（根活着 /T 才走得到子树）；反查不到（open 早败/尚未 bind）退回 child.pid
+  // 兜底。spawnSync 返回即整树已死，close 后接显式 exit 也不会把树杀赛跑进 exit 之后。
+  const killTreeWin32 = () => {
+    const pids = new Set();
+    if (child.pid) pids.add(child.pid);
+    try {
+      const { stdout } = spawnSync("netstat", ["-ano", "-p", "tcp"], { encoding: "utf8", timeout: 5000, maxBuffer: 10 * 1024 * 1024 });
+      // 数据行不随系统本地化（LISTENING 为英文态），只认 127.0.0.1 显式回环上的监听行
+      for (const m of String(stdout ?? "").matchAll(/^\s*TCP\s+127\.0\.0\.1:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/gm)) {
+        if (Number(m[1]) === port) pids.add(Number(m[2]));
+      }
+    } catch { /* netstat 失败仍有 child.pid 兜底 */ }
+    for (const pid of pids) {
+      try { spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" }); } catch { /* already gone */ }
+    }
+  };
   const close = () => {
-    try { child.kill(); } catch { /* already gone */ }
-    setTimeout(() => {
+    if (closed) return; // 幂等：ws 重复 close 会抛、浏览器已死再杀无意义
+    closed = true;
+    // ① 先关 CDP WebSocket：开放 ws 无限期吊住事件循环（bench 挂死主因——开放连接是活句柄，
+    //    不 close 进程永不落出）。对端随后被树杀，TCP 断连让关闭握手即刻收敛。
+    try { ws?.close(); } catch { /* already closed */ }
+    // ② 树杀浏览器（win32 见 killTreeWin32；非 win32 child.kill() 兜底——SIGTERM 下 Chromium 自行收树）
+    if (process.platform === "win32") killTreeWin32();
+    else try { child.kill(); } catch { /* already gone */ }
+    // ③ 一次性 profile 延迟删（等文件锁随进程死释放）：unref——进程活得久就照删，进程要退
+    //    绝不拦这 1.5s（快速退出方如 bench 留给 OS 清 temp，与既有语义同域）
+    const cleanupTimer = setTimeout(() => {
       try { fs.rmSync(userData, { recursive: true, force: true }); } catch { /* next time */ }
     }, 1500);
+    cleanupTimer.unref?.();
   };
   try {
     await waitEndpoint(`http://127.0.0.1:${port}/json/version`, 10000);
@@ -157,7 +192,7 @@ export async function openTransientBrowser({ debugPort } = {}) {
     if (!tabRes.ok) throw new Error(`/json/new returned HTTP ${tabRes.status}`);
     const tab = await tabRes.json();
     if (!tab.webSocketDebuggerUrl) throw new Error("target has no webSocketDebuggerUrl");
-    const ws = new WebSocket(tab.webSocketDebuggerUrl);
+    ws = new WebSocket(tab.webSocketDebuggerUrl);
     // 看门狗：ws 握手必须有时限——无界 onopen 等待曾让 screenshotInflight 永久挂起，
     // 级联卡死后续所有截图请求（dev 面级联超时）
     await Promise.race([
@@ -375,9 +410,11 @@ function touchPersistentIdle(session) {
 function registerExitCleanup() {
   if (exitHookInstalled) return;
   exitHookInstalled = true;
-  // 同步 best-effort：dev 进程退出不能留下孤儿无头浏览器（临时 profile 交给 OS 清）
+  // 同步 best-effort：dev 进程退出不能留下孤儿无头浏览器（临时 profile 交给 OS 清）。
+  // 走 close() 不走 child.kill()——后者只杀直属启动进程（win32 下它早已让位自退），
+  // 真浏览器树会挂死 PID 之下漏杀（vite 热重启/被杀场景同受害）。
   process.on("exit", () => {
-    if (persistentSession) { try { persistentSession.child.kill(); } catch { /* already gone */ } }
+    if (persistentSession) { try { persistentSession.close(); } catch { /* already gone */ } }
   });
 }
 
