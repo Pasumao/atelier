@@ -22,7 +22,11 @@
  *   ⑧ auth 拦截链：缺省 session fail-closed（401 ATR-340）/ none 显式开放 / role 403 ATR-341 /
  *      apikey 通道 + 会话优先 / readAuth 每请求恰一次；
  *   ⑨ node-host 桥：serve() 真实端口 FormData/Blob 上传→下载一轮（真 multipart 编码）；
- *      桥粗闸 max(maxBodyBytes, 20MB)——multipart 越过 JSON 桥闸、面精闸接管；JSON 桥闸不变。
+ *      桥粗闸 max(maxBodyBytes, 20MB)——multipart 越过 JSON 桥闸、面精闸接管；JSON 桥闸不变；
+ *   ⑩ 常量钉：UPLOADS_DEFAULT_MAX_BYTES = 20MB（独立于 JSON 1MiB）；
+ *   ⑪ 内省（MCP 工具族扩张批）：server-status uploads 段两态——装配 = faces 投影四字段（注册表
+ *      字母序）+ assets count/bytes 聚合（sha 去重真实语义）+ tail id 降序恰六字段（不含 path）
+ *      / 未装配 = 段整体缺省 / stats 读失败 = 段缺省（jobs/email 同款零假数据三纪律）。
  *
  * skip 策略：宿主无 node:sqlite → db 相关组诚实 skip（email.test.ts 同款 guard）。
  */
@@ -633,5 +637,108 @@ describe("node-host serve() 真实端口：FormData 上传→下载一轮 + 桥�
 describe("B1 常量钉：UPLOADS_DEFAULT_MAX_BYTES = 20MB（独立于 JSON 1MiB——node-host 同值单点复制互指）", () => {
   it("缺省上限常量 20 * 1024 * 1024", () => {
     expect(UPLOADS_DEFAULT_MAX_BYTES).toBe(20 * 1024 * 1024);
+  });
+});
+
+/* ================= ⑪ 内省：server-status uploads 段两态（MCP 工具族扩张批） ================= */
+
+describeSqlite("MCP批A 内省：server-status uploads 段两态（装配 / 未装配 / 读失败，零假数据）", () => {
+  /** 直取 server-status 快照 JSON（走 createHandler 保留路由——faces 投影接线一并被测） */
+  const getStatus = async (handler: (req: Request) => Promise<Response>) => {
+    const res = await handler(new Request("http://local.test/api/__atelier/server-status", { method: "GET" }));
+    expect(res.status).toBe(200);
+    return (await res.json()) as Record<string, unknown>;
+  };
+
+  it("装配 = faces 投影恰四字段（name 字母序）+ assets 聚合（sha 去重真实语义 count=2）+ tail id 降序恰六字段（不含 path）", async () => {
+    const db = await fixtureDb();
+    const reg = new EndpointRegistry();
+    reg.registerUpload(defineUpload({ name: "zeta", maxBytes: 1024 })); // accept/auth 未声明 → null / "session" 投影
+    reg.registerUpload(defineUpload({ name: "avatar", accept: ["image/"], auth: { type: "none" } }));
+    const face = createUploadsFace({ db, dir: fixtureDir() });
+    const handler = reg.createHandler({ db, uploads: face, mount: "/api" });
+    // 真上传两个不同内容文件 + 同内容（dataA）重传一次——内容寻址去重真实语义：台账 2 行非 3 行
+    //（avatar 面声明 accept:["image/"]——上传体照白名单用 image/png）
+    const dataA = new TextEncoder().encode("asset-one");
+    const dataB = new TextEncoder().encode("asset-two-longer");
+    const up = (filename: string, data: Uint8Array) =>
+      handler(new Request("http://local.test/api/upload/avatar", { method: "POST", headers: { "content-type": "multipart/form-data; boundary=b1test" }, body: multipartBody([{ name: "file", filename, contentType: "image/png", data }], "b1test") }));
+    expect((await up("a.png", dataA)).status).toBe(200);
+    expect((await up("b.png", dataB)).status).toBe(200);
+    expect((await up("a-again.png", dataA)).status).toBe(200); // 去重命中：同内容同 id 单行（响应名 = 首传名）
+
+    const uploads = (await getStatus(handler)).uploads as {
+      faces: Record<string, unknown>[];
+      assets: { count: number; bytes: number };
+      tail: Array<Record<string, unknown> & { id: number; name: string; sha256: string; createdAt: string }>;
+    };
+    expect(uploads).toBeDefined();
+    // faces：注册表 uploadsDefs 全表，name 字母序（与 uploadNames() 同序）；恰四字段
+    expect(uploads.faces.map((f) => f.name)).toEqual(["avatar", "zeta"]);
+    expect(Object.keys(uploads.faces[0]!).sort()).toEqual(["accept", "auth", "maxBytes", "name"]);
+    expect(uploads.faces[0]).toEqual({ name: "avatar", accept: ["image/"], maxBytes: null, auth: "none" });
+    // 缺省诚实投影：accept 未声明 = null（不编造缺省）/ maxBytes 未声明 = null（null = 用面缺省精闸）/
+    // auth 未声明 = "session"（决策 32 生效缺省的文档性投影）
+    expect(uploads.faces[1]).toEqual({ name: "zeta", accept: null, maxBytes: 1024, auth: "session" });
+    // assets：COUNT/SUM 聚合——sha 去重后 2 行（真实语义），bytes = 两行 size 之和
+    expect(uploads.assets).toEqual({ count: 2, bytes: dataA.byteLength + dataB.byteLength });
+    // tail：≤20 条 id 降序（新→旧）；恰六字段无 path（磁盘布局不外泄调试面）；createdAt = ISO
+    expect(uploads.tail).toHaveLength(2);
+    expect(uploads.tail[0]!.id).toBeGreaterThan(uploads.tail[1]!.id);
+    expect(Object.keys(uploads.tail[0]!).sort()).toEqual(["createdAt", "id", "mime", "name", "sha256", "size"]);
+    expect(uploads.tail.map((t) => t.name)).toEqual(["b.png", "a.png"]); // 新→旧；重传不更名不留新行
+    expect(uploads.tail[0]!.sha256).toBe(sha256Hex(dataB));
+    expect(uploads.tail[1]!.sha256).toBe(sha256Hex(dataA));
+    expect(typeof uploads.tail[0]!.createdAt).toBe("string"); // created_at(epoch ms) → ISO（email 段 ts 同款）
+    expect(Number.isNaN(Date.parse(uploads.tail[0]!.createdAt))).toBe(false);
+  });
+
+  it("装配但零上传：faces 在场 + assets {count:0,bytes:0} + tail []（未建表 = 零值事实非假数据；纯读不建表）", async () => {
+    const db = await fixtureDb();
+    const reg = new EndpointRegistry();
+    reg.registerUpload(defineUpload({ name: "idle", auth: { type: "none" } }));
+    const handler = reg.createHandler({ db, uploads: createUploadsFace({ db, dir: fixtureDir() }), mount: "/api" });
+    const uploads = (await getStatus(handler)).uploads as { faces: { name: string }[]; assets: { count: number; bytes: number }; tail: unknown[] };
+    expect(uploads.faces.map((f) => f.name)).toEqual(["idle"]);
+    expect(uploads.assets).toEqual({ count: 0, bytes: 0 });
+    expect(uploads.tail).toEqual([]);
+    // 纯读不建表（email.tail 同款纪律）：内省读出后表仍不存在
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'atelier_assets'").get()).toBeUndefined();
+  });
+
+  it("tail 有界：≤20 条（恰第 21 条起滚出快照——调试面有界呈现，全量走库直读）", async () => {
+    const db = await fixtureDb();
+    const reg = new EndpointRegistry();
+    reg.registerUpload(defineUpload({ name: "bulk", auth: { type: "none" } }));
+    const handler = reg.createHandler({ db, uploads: createUploadsFace({ db, dir: fixtureDir() }), mount: "/api" });
+    const post = (n: number) =>
+      handler(new Request(`http://local.test/api/upload/bulk`, { method: "POST", headers: { "content-type": "multipart/form-data; boundary=b1test" }, body: multipartBody([{ name: "file", filename: `f${n}.txt`, contentType: "text/plain", data: `内容-${n}` }], "b1test") }));
+    for (let n = 1; n <= 23; n++) expect((await post(n)).status).toBe(200);
+    const uploads = (await getStatus(handler)).uploads as { assets: { count: number }; tail: Array<{ id: number }> };
+    expect(uploads.assets.count).toBe(23); // 台账全量 23 行
+    expect(uploads.tail).toHaveLength(20); // 快照有界：最新 20 条
+    expect(uploads.tail[0]!.id).toBe(23); // 降序（新→旧）
+    expect(uploads.tail[19]!.id).toBe(4); // 第 21 条起滚出窗口
+  });
+
+  it("读失败 = 段缺省（stats 抛错 → uploads 键不出现——零假数据，jobs/email 同款纪律）", async () => {
+    const db = await fixtureDb();
+    const reg = new EndpointRegistry();
+    reg.registerUpload(defineUpload({ name: "u", auth: { type: "none" } }));
+    const real = createUploadsFace({ db, dir: fixtureDir() });
+    const broken = { ...real, stats() { throw new Error("simulated ledger failure"); } };
+    const handler = reg.createHandler({ db, uploads: broken, mount: "/api" });
+    const snap = await getStatus(handler);
+    expect("uploads" in snap).toBe(false);
+  });
+
+  it("未装配 uploads = 段整体缺省（键不出现）；既有负例不受影响——端点表零变化（新增段不是端点表项）", async () => {
+    const db = await fixtureDb();
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("q.plain", { handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({ db, mount: "/api" }); // 未传 uploads
+    const snap = await getStatus(handler);
+    expect("uploads" in snap).toBe(false);
+    expect((snap.endpoints as { name: string }[]).map((e) => e.name)).toEqual(["q.plain"]); // W9 既有负例照旧
   });
 });
