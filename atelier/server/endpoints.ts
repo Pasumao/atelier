@@ -18,6 +18,10 @@
  * 351 幂等键 KV 参数非法——调用点同步抛错，经本分发器的 AtrEndpointError 缺省 422 映射承接；
  * 鉴权域（FS-M2(m2d) 加法，§6.2）：340 会话缺失/读取器未装配（401）/ 341 角色不符（403）——
  * 只对声明 auth: { type }（type !== "none"）的端点拦截，未声明端点行为零变化（向后兼容）；
+ * A6 API key 最小切口（2026-09-28，决策 30）加 apikey 分支：auth.type:"apikey" = 机器客户端通道
+ * （人机双通道并存——会话优先，无会话才比对 createHandler({ apiKeys }) 静态 key，缺省不启用恒拒
+ * fail-closed；timingSafeEqual 恒时比较，长度不齐与等长 dummy 同形）；auth.type:"session" 等其余
+ * 类型不读 key 头（类型互斥——key 不能越权拿用户身份）；
  * live SSE 通道不设 per-subscriber 门禁（引擎共享重算 ctx.auth=null）——live×auth(type≠none) 组合
  * 在 register() 即以 ATR-315 拒绝（fail-closed，见 register 内注释），声明不可能被静默忽略。
  * 依赖注入（§3.2）：无 DI 容器——db / auth 由 createHandler 装配点一次性显式注入，装配代码明文可见。
@@ -28,7 +32,7 @@
  * 环形保留为无 db / persist:false / 落库失败 / 读回落时的兜底，增益层不是替代；
  * timeout 中止只停止等待，handler 自身须监听 ctx.signal 提前退出。
  */
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contract.ts";
 import { LiveEngine, type LiveEngineOptions } from "./live.ts";
 import { beginWriteCapture, endWriteCapture, type SqliteDb, type WriteCapture } from "./sqlite.ts";
@@ -233,6 +237,45 @@ function rateLimitResponse(retryAfterSec: number): Response {
   );
   res.headers.set("retry-after", String(retryAfterSec));
   return res;
+}
+
+/**
+ * API key 装配项（A6 最小切口，2026-09-28，决策 30）：机器客户端静态 key 比对——显式声明纪律，
+ * 缺省不启用（未装配时 auth.type:"apikey" 端点的 key 通道恒拒 fail-closed，与 rateLimit/statusToken
+ * 同款）。不建 key 管理面/数据库表/轮换系统（OAuth 全套仍归 FS-DESIGN §6.4 预留位）：key 无过期/
+ * 无吊销列表（重启即重读装配配置）、无 per-key 审计主体区分（principal = label ?? "api-key"，
+ * 装配级 label）、限流共用全局桶。诚实边界随装配点注释重申。
+ */
+export type ApiKeysOptions = {
+  /** 允许的静态 key 清单（机器客户端携 header 比对；非法项——非字符串/空串——恒不命中不抛） */
+  keys: string[];
+  /** key 头名（缺省 "x-api-key"）；端点 auth 声明的 header 字段可按端点覆盖（文档即真相同源，见分发拦截处） */
+  header?: string;
+  /** 装配级审计主体自报（journal principal 缺省 "api-key"；v1 无 per-key 区分） */
+  label?: string;
+};
+
+/**
+ * API key 恒时比较（A6，决策 30）：node:crypto timingSafeEqual 逐一比对**全部** keys（不提前返回——
+ * 不泄露命中序位），非法输入不抛恒 false。长度不齐也恒时：与目标 key **等长的全零 dummy** 跑一次
+ * 真实 timingSafeEqual（恒 false）——每个装配 key 恰好一次同长度比较，时间形态与命中路径同形，
+ * 不泄露装配 key 的长度侧信道。与 introspect.ts tokenEq（单对字符串先哈希定长再比）机制不同：
+ * 本函数面对 key 清单须逐 key 等形迭代，两处注释互指。
+ */
+export function apiKeyMatches(presented: unknown, keys: readonly unknown[]): boolean {
+  if (typeof presented !== "string") return false;
+  let hit = false;
+  for (const key of keys) {
+    if (typeof key !== "string" || key.length === 0) continue; // 非法装配项恒不命中（fail-closed，不抛）
+    const a = Buffer.from(presented, "utf8");
+    const b = Buffer.from(key, "utf8");
+    if (a.length === b.length) {
+      if (timingSafeEqual(a, b)) hit = true;
+    } else {
+      timingSafeEqual(Buffer.alloc(b.length), b); // 等长 dummy 烧同样一次比较（恒 false，返回值弃用）
+    }
+  }
+  return hit;
 }
 
 /** 框架内部抛错形态（同 runtime 惯例：message 带码前缀），四段式字段随行可结构化消费。
@@ -551,9 +594,13 @@ export class EndpointRegistry {
    * persist 缺省 = db 已装配即 true（开箱即得持久审计面）；persist:false 显式关闭回纯内存；
    * 无 db 恒内存（现状零变化）。maxRows = 行数基保留窗口（缺省 1 万，写时惰性裁最老）。
    * 落库失败由 journalPush 统一 console.warn 降级，不反噬 command 响应（命令审计面见 command-journal.ts）。
+   * A6 差距批（2026-09-28，决策 30）：apiKeys = { keys, header?, label? } 机器客户端静态 key 比对
+   * 装配项——auth.type:"apikey" 端点的 key 通道（缺省不启用 = 恒拒 fail-closed；会话优先双通道
+   * 并存；timingSafeEqual 恒时比较见 apiKeyMatches；诚实边界 = key 无过期/吊销/管理面，OAuth 全套
+   * 仍归 FS-DESIGN §6.4 预留位）。
    */
   createHandler(
-    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; jobs?: JobsHandle; version?: string | null; journal?: CommandJournalPersistOptions } = {}
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; apiKeys?: ApiKeysOptions; jobs?: JobsHandle; version?: string | null; journal?: CommandJournalPersistOptions } = {}
   ): (req: Request) => Promise<Response> {
     const startedAtMs = performance.now(); // B4 健康面 uptime 起点（装配时刻 = handler 体诞生时刻）
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
@@ -565,6 +612,9 @@ export class EndpointRegistry {
         ? createCommandJournalSink(db as SqliteDb, { maxRows: opts.journal?.maxRows })
         : null;
     const readAuth = opts.auth;
+    // A6（决策 30）：API key 装配项（缺省不启用——显式声明纪律；auth.type:"apikey" 端点的 key
+    // 通道只在装配后开放，会话通道不受本装配影响——人机双通道并存，见分发拦截处）。
+    const apiKeys = opts.apiKeys;
     const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     const statusToken = opts.statusToken; // A2 硬化5：server-status 门禁（未设 = 行为零变化）
     // A2 功能7：限流（缺省不启用——显式声明纪律；buckets 随本 handler 单例，重启即清零）
@@ -649,25 +699,69 @@ export class EndpointRegistry {
       const authRequired = authMeta != null && authMeta.type !== "none";
       let gatedAuth: AuthInfo | null = null;
       if (authRequired) {
-        gatedAuth = readAuth ? readAuth(req) : null;
-        if (gatedAuth == null) {
-          // 读取器未装配（装配点开发者遗漏）与请求无会话（调用方问题）同码 ATR-340（401），fix 分流：
-          return errorResponse(
-            401,
-            readAuth
-              ? endpointError(
+        if (authMeta.type === "apikey") {
+          // ---- A6 API key 最小切口（2026-09-28，决策 30）：机器客户端通道，人机双通道并存 ----
+          // 会话优先：readAuth 照常在此调用一次并复用进 ctx（总调用次数纪律不变），有效会话直接走
+          // 会话身份（与 type:"session" 端点同语义——人机同权限时人先行，会话是更强身份）；无会话才
+          // 落到 key 比对。key 通道缺省不启用：未装配 apiKeys = 恒拒 fail-closed（不静默全开）。
+          // 头名解析：端点 auth 声明 header（文档即真相同源——export-openapi 同式投影）优先于
+          // 装配 apiKeys.header，再落到缺省 "x-api-key"。
+          const metaHeader = (authMeta as { header?: unknown }).header;
+          const keyHeader = typeof metaHeader === "string" && metaHeader !== "" ? metaHeader : (apiKeys?.header ?? "x-api-key");
+          const sessionAuth = readAuth ? readAuth(req) : null;
+          if (sessionAuth != null) {
+            gatedAuth = sessionAuth;
+          } else if (apiKeys == null) {
+            // fail-closed：key 通道未装配（装配点开发者遗漏）——机器客户端恒拒，fix 指向装配点
+            return errorResponse(
+              401,
+              endpointError(
+                "ATR-340",
+                `端点 ${name} 要求 apikey 鉴权，但 createHandler 未装配 apiKeys（机器客户端通道缺省不启用）`,
+                `装配点显式接线：createHandler({ apiKeys: { keys: [...] } })（缺省头 ${keyHeader}，可用 header 字段自定义；人用会话 cookie 通道不受影响）；该端点确属免鉴权时显式声明 auth: { type: "none" }（§6.2）`,
+                [name]
+              )
+            );
+          } else {
+            const presented = req.headers.get(keyHeader);
+            if (presented == null || !apiKeyMatches(presented, apiKeys.keys)) {
+              // 错 key 与缺头同码同文案（不区分呈现——不给探测者额外信息差）
+              return errorResponse(
+                401,
+                endpointError(
                   "ATR-340",
-                  `端点 ${name} 要求 ${authMeta.type} 鉴权，请求未携带有效会话`,
-                  `先建立会话再调用（gen auth 产物 = POST auth.login，成功响应 Set-Cookie 会话 cookie，携 cookie 重试）；该端点确属免鉴权时显式声明 auth: { type: "none" }（显式选择优于沉默缺省，§6.2）`,
+                  `端点 ${name} 要求 apikey 鉴权，请求未携带有效 API key（header ${keyHeader}）`,
+                  `机器客户端携 ${keyHeader} 头重试（key 由装配点 createHandler({ apiKeys }) 分发）；人用会话 cookie 通道不受影响（先建立会话再调用 = POST auth.login）`,
                   [name]
                 )
-              : endpointError(
-                  "ATR-340",
-                  `端点 ${name} 声明了 auth: { type: "${authMeta.type}" }，但 createHandler 未装配 auth 会话读取器`,
-                  `装配点显式接线：createHandler({ db, auth: createSessionReader(db) })（gen auth 产物 auth.ts 提供读取器工厂）；该端点确属免鉴权时改为 auth: { type: "none" }`,
-                  [name]
-                )
-          );
+              );
+            }
+            // apikey 身份（AuthInfo 同构投影）：principal = 装配级 label ?? "api-key"——journal 审计
+            // 主体随之（无 per-key 区分，诚实边界见 ApiKeysOptions）；无角色面（声明 role 的端点
+            // 对 key 调用走下方 ATR-341 恒拒——v1 不做 per-key 角色）。
+            gatedAuth = { type: "apikey", principal: apiKeys.label ?? "api-key" };
+          }
+        } else {
+          gatedAuth = readAuth ? readAuth(req) : null;
+          if (gatedAuth == null) {
+            // 读取器未装配（装配点开发者遗漏）与请求无会话（调用方问题）同码 ATR-340（401），fix 分流：
+            return errorResponse(
+              401,
+              readAuth
+                ? endpointError(
+                    "ATR-340",
+                    `端点 ${name} 要求 ${authMeta.type} 鉴权，请求未携带有效会话`,
+                    `先建立会话再调用（gen auth 产物 = POST auth.login，成功响应 Set-Cookie 会话 cookie，携 cookie 重试）；该端点确属免鉴权时显式声明 auth: { type: "none" }（显式选择优于沉默缺省，§6.2）`,
+                    [name]
+                  )
+                : endpointError(
+                    "ATR-340",
+                    `端点 ${name} 声明了 auth: { type: "${authMeta.type}" }，但 createHandler 未装配 auth 会话读取器`,
+                    `装配点显式接线：createHandler({ db, auth: createSessionReader(db) })（gen auth 产物 auth.ts 提供读取器工厂）；该端点确属免鉴权时改为 auth: { type: "none" }`,
+                    [name]
+                  )
+            );
+          }
         }
         const wantRole = (authMeta as { role?: unknown }).role;
         if (typeof wantRole === "string" && gatedAuth.role !== wantRole) {
