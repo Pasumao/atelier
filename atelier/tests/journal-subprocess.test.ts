@@ -35,9 +35,9 @@
  *      introspectResponse 返 null 后穿到 405 守卫——以代码为准如实断言，不按挂账原文猜 404），
  *      同进程 POST 端点仍 200（证隐身是路由隐身，不是进程死）。
  *
- * 诚实边界：bun 宿主桥不在本文件（sqlite.ts 同款挂账，本机无 bun）；journal 为单进程内存环形
- * （server 重启清零——跨重启历史归 dev 面 audit.jsonl 时间轴，introspect.ts 头注），本测试只证
- * 单进程生命周期内的路由可查性；auth 会话主体链（login → ctx.auth.principal → journal principal）
+ * 诚实边界：bun 宿主桥不在本文件（sqlite.ts 同款挂账，本机无 bun）；B5（决策 29）起 command
+ * journal 持久化为追加事件表——第二用例的全新子进程断言已随之反转为「重启不灭」golden 镜像
+ * （introspect.ts 头注）；auth 会话主体链（login → ctx.auth.principal → journal principal）
  * 不在本夹具（M7 已闭）。skip 策略：宿主 node < 23.6（无默认 type stripping，子进程跑不了 .ts
  * fixture）→ 整组诚实 skip（build-gate/openapi-golden 同款）。纪律（§14.2）：全部 127.0.0.1 +
  * listen port 0；用例收尾 stop() 杀子进程，afterAll 兜底收尸后才删临时目录（Windows 孤儿进程零
@@ -387,9 +387,17 @@ d("FS-M4 挂账关闭：journal 子进程内省（真实 server 子进程 → GE
       const migName = migrationName(root);
       const srv = await startJournalServer(root, "journal-server.ts");
       try {
-        // 全新子进程：command journal 为空（内存环形——重启清零的诚实边界顺带钉住）
+        // B5（决策 29，2026-09-28）：持久化后本段成为「重启不灭」的真实子进程 golden 镜像——本文件
+        // 为有序 golden 链，前一用例的 journal.put/journal.explode 已落共享库的 atelier_command_journal；
+        // 全新子进程的 server-status journal 段改读持久表尾（改前旧断言 = toEqual([])「内存环形重启
+        // 清零」——B5 后语义反转：重启清零恰是要修的差距），仍见前一子进程入的账
         const snap = (await getJson(statusUrl(srv.port))).json;
-        expect(snap.journal).toEqual([]);
+        expect(snap.journal.map((e: { name: string; status: string }) => [e.name, e.status])).toEqual(
+          expect.arrayContaining([
+            ["journal.put", "ok"],
+            ["journal.explode", "failed"],
+          ])
+        );
 
         const db = snap.db;
         expect(db).not.toBeNull();

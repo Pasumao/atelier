@@ -73,8 +73,10 @@ interface RawStatement {
 /* ---------------- 写捕获槽（FS-7 live 失效广播的写侧自动表名启发式，FS-DESIGN §4.1"薄层即可"） ----------------
  * 原理：prepare(sql) 时轻量正则提取写目标表（INSERT INTO / REPLACE INTO / UPDATE / DELETE FROM），
  * run() 真执行时才记入当前活跃捕获槽（prepare 而未 run 不算写）；exec(sql) 同口径扫多语句。
- * endpoints.ts 分发器在 command 分发期间 beginWriteCapture() 开槽，journal 入账后 endWriteCapture()
- * 取表名合成 table:<name> 失效键交给 live 引擎广播（显式 emits 声明优先——有 emits 时捕获结果被忽略）。
+ * endpoints.ts 分发器在 command 分发期间 beginWriteCapture() 开槽，收槽后取表名合成 table:<name>
+ * 失效键交给 live 引擎广播（显式 emits 声明优先——有 emits 时捕获结果被忽略）；B5（决策 29）起
+ * 收槽**先于** journal 入账——command journal 的持久化 INSERT 经同一句柄，槽若仍开着会把
+ * atelier_command_journal 混进失效键（顺序注记见 endpoints.ts，红检 tests/journal-persist.test.ts）。
  * 诚实边界（宁多勿漏）：并发分发交叉时写记录并入**所有**活跃槽——多触发一次幂等重算无害，
  * 漏发失效才是 bug；正则不识别 [方括号]/schema 限定名等冷门拼写——这些场景请用显式 emits 声明。 */
 

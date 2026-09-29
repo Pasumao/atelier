@@ -23,7 +23,9 @@
  * 依赖注入（§3.2）：无 DI 容器——db / auth 由 createHandler 装配点一次性显式注入，装配代码明文可见。
  * v2 边界（诚实）：gen auth 产物（会话原语/cookie/端点骨架）归 FS-5 生成器，本模块只做装配层拦截；
  * live 为全量引擎（FS-7，live.ts 协作对象：SSE 失效-重算-推送——单进程内存订阅、重连全量重算，
- * 诚实边界随 live.ts 文件头）；注册表与 journal 为单进程内存态（多实例/落盘归后续）；
+ * 诚实边界随 live.ts 文件头）；注册表为单进程内存态；command journal 自 B5 差距批（2026-09-28，
+ * 决策 29）起为「内存环形 + 追加事件表」双层——db 已装配即持久（command-journal.ts 单源），内存
+ * 环形保留为无 db / persist:false / 落库失败 / 读回落时的兜底，增益层不是替代；
  * timeout 中止只停止等待，handler 自身须监听 ctx.signal 提前退出。
  */
 import { createHash } from "node:crypto";
@@ -32,6 +34,7 @@ import { LiveEngine, type LiveEngineOptions } from "./live.ts";
 import { beginWriteCapture, endWriteCapture, type SqliteDb, type WriteCapture } from "./sqlite.ts";
 import { INTROSPECT_NAME, introspectResponse } from "./introspect.ts";
 import { HEALTH_NAME, healthResponse } from "./health.ts";
+import { createCommandJournalSink, type CommandJournalPersistOptions, type CommandJournalSink } from "./command-journal.ts";
 import type { BoundJobs, JobsHandle, KvView } from "./jobs.ts"; // 仅类型——运行时单向依赖 jobs.ts → endpoints.ts，零环
 
 export type EndpointKind = "query" | "command";
@@ -391,6 +394,13 @@ export class EndpointRegistry {
   private defs = new Map<string, EndpointDef>();
   private journalBuf: EndpointJournalEntry[] = [];
   readonly journalLimit: number;
+  /**
+   * B5（决策 29）：command journal 持久写口槽位——createHandler 装配 db 且未显式关闭时持有
+   * （command-journal.ts 工厂产物）；null = 纯内存（无 db / persist:false）。注册表单槽位：
+   * 同 registry 多次 createHandler 以最后一次装配为准（重启语义 = 新实例新 registry，正常装配
+   * 不触发）。journalPush 是唯一消费点（kind 守卫 + 落库失败降级都在那里收口）。
+   */
+  private journalSink: CommandJournalSink | null = null;
   /** FS-7 live 引擎（协作对象）：SSE 订阅/失效重算/推送；内省位 subscriberCount()（§10.1 数据源） */
   readonly liveEngine: LiveEngine;
 
@@ -482,8 +492,21 @@ export class EndpointRegistry {
   private journalPush(entry: EndpointJournalEntry): void {
     // P1-6 脱敏收口：journal 唯一写入口（POST 分发与 live 引擎 host 钩子都经此）——
     // 在 append 前对 input 做递归敏感键脱敏，server-status/review/MCP 全部消费面同源受保护。
-    this.journalBuf.push({ ...entry, input: redactSensitiveInput(entry.input) });
+    // B5（决策 29）：脱敏后的条目就是持久化单源——内存与持久表各写一份（增益层不是替代），
+    // 持久层不二次实现脱敏。
+    const stored: EndpointJournalEntry = { ...entry, input: redactSensitiveInput(entry.input) };
+    this.journalBuf.push(stored);
     while (this.journalBuf.length > this.journalLimit) this.journalBuf.shift();
+    // kind 守卫：只 command 条目入表——live 引擎的 query 重算失败条目（ATR-321）是诊断非命令
+    // 审计，留内存环形（表名与 status CHECK 语义都是 command 域，见 command-journal.ts 头注）。
+    // 落库失败 = console.warn 降级不抛（审计不挡业务：该条只存内存环形，绝不反噬 command 响应）。
+    if (entry.kind === "command" && this.journalSink != null) {
+      try {
+        this.journalSink.append(stored);
+      } catch (e) {
+        console.warn(`[atelier] command journal 落库失败（降级：条目仅存内存环形，不反噬 command 响应）: ${(e as Error)?.message ?? String(e)}`);
+      }
+    }
   }
 
   /** 失败/成功条目的公共字段装配：notes 非空才携带（条目形状诚实最小化） */
@@ -524,13 +547,23 @@ export class EndpointRegistry {
    * （可选位诚实呈现，行为零变化）。
    * B4 差距批（2026-09-28）：version = 健康面装配点自报版本（可选，缺省 null——语义与边界见
    * health.ts）；startedAtMs 在本装配点记一处（performance.now()）作 uptimeMs 的 monotonic 起点。
+   * B5 差距批（2026-09-28，决策 29）：journal = { persist?, maxRows? }——command journal 持久化。
+   * persist 缺省 = db 已装配即 true（开箱即得持久审计面）；persist:false 显式关闭回纯内存；
+   * 无 db 恒内存（现状零变化）。maxRows = 行数基保留窗口（缺省 1 万，写时惰性裁最老）。
+   * 落库失败由 journalPush 统一 console.warn 降级，不反噬 command 响应（命令审计面见 command-journal.ts）。
    */
   createHandler(
-    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; jobs?: JobsHandle; version?: string | null } = {}
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; jobs?: JobsHandle; version?: string | null; journal?: CommandJournalPersistOptions } = {}
   ): (req: Request) => Promise<Response> {
     const startedAtMs = performance.now(); // B4 健康面 uptime 起点（装配时刻 = handler 体诞生时刻）
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
     const db = opts.db; // 无库应用不传 = undefined（ctx.db 直通，诚实呈现）
+    // B5（决策 29）：journal 持久写口装配（persist 缺省 = db 已装配即 true；显式关闭/无 db = 纯内存）。
+    // 惰性建表在首条 command 入账时发生（旧库零迁移获得该表）；落库失败降级在 journalPush 收口。
+    this.journalSink =
+      db != null && opts.journal?.persist !== false
+        ? createCommandJournalSink(db as SqliteDb, { maxRows: opts.journal?.maxRows })
+        : null;
     const readAuth = opts.auth;
     const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     const statusToken = opts.statusToken; // A2 硬化5：server-status 门禁（未设 = 行为零变化）
@@ -736,10 +769,16 @@ export class EndpointRegistry {
         }
 
         if (def.kind === "command") {
-          this.journalPush(this.journalEntry(def, payload, "ok", principal, durMs(), notes));
-          // ---- FS-7 失效广播（§4.2，journal 入账后）：键 = 显式 emits 优先，否则写侧自动表名捕获合成 table:<name> ----
+          // ---- B5（决策 29）收槽先于 journal 入账：持久化写经同一装配句柄，而 sqlite.ts 捕获槽
+          //      把写记录并入**所有**活跃槽——若入账时本 command 的槽仍开着，atelier_command_journal
+          //      的 INSERT 会被捕获进自家槽、混入自动失效键（keys 恒多一条 table:atelier_command_journal
+          //      污染广播面）。收槽 = 纯收集无副作用（finally 兜底对 null 判空幂等，失败路径不受影响）；
+          //      失效广播仍在 journal 入账之后（§4.2 语义只动收槽时刻、不动广播时刻）。红检：
+          //      tests/journal-persist.test.ts 收槽顺序用例（onCommandSuccess 键面断言）。 ----
           const captured = capture ? endWriteCapture(capture) : [];
           capture = null;
+          this.journalPush(this.journalEntry(def, payload, "ok", principal, durMs(), notes));
+          // ---- FS-7 失效广播（§4.2，journal 入账后）：键 = 显式 emits 优先，否则写侧自动表名捕获合成 table:<name> ----
           const keys = def.emits ?? captured.map((t) => `table:${t}`);
           if (keys.length > 0) this.liveEngine.onCommandSuccess(def.name, keys);
         }

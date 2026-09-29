@@ -21,7 +21,9 @@
  *   ⑦ 落库失败降级：坏句柄注入 → command 响应仍 2xx + console.warn + 内存环形照常（审计不挡业务）；
  *   ⑧ error 列截断：超 2KB 失败摘要降级为 code + 截断 message（JSON 恒合法，不落半截串）；
  *   ⑨ 列形状镜像钉：id/ts/endpoint/principal/dur_ms/status/payload/error/notes（notes 列 =
- *      内存条目 notes 位的持久镜像——introspect 形状兼容红线的载体，见模块头注）。
+ *      内存条目 notes 位的持久镜像——introspect 形状兼容红线的载体，见模块头注）；
+ *   ⑩ 收槽先于入账：持久化 INSERT 不混入本 command 的自动失效键（写捕获槽顺序注记，
+ *      endpoints.ts/sqlite.ts/command-journal.ts 三处注释互指）。
  *
  * 诚实边界：live 引擎的 query 重算失败条目（ATR-321）是诊断非命令审计，持久层只收 command
  * 条目（留在内存环形）；notes 不持久化则 introspect 形状兼容破缺（journal-subprocess ①钉
@@ -290,8 +292,32 @@ describeSqlite("command journal 持久化（B5 差距批，决策 29：追加事
     const sql = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(COMMAND_JOURNAL_TABLE) as { sql: string }).sql;
     expect(sql).toContain("AUTOINCREMENT");
     expect(sql).toContain("CHECK(status IN ('ok','failed'))");
-    // 框架自管表：不进应用迁移序列（atelier_migrations 无行——迁移序列零感知）
-    expect(db.prepare("SELECT COUNT(*) AS n FROM atelier_migrations").get()).toBeUndefined(); // 状态表也未建（无迁移发生）
+    // 框架自管表：不进应用迁移序列——sqlite_master 实查（直接 SELECT COUNT(*) 不存在的表会抛
+    // "no such table"，红检版此断言写法有误已修正）：atelier_migrations 状态表未建 = 迁移序列零感知
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'atelier_migrations'").get()).toBeUndefined();
+    db.close();
+  });
+
+  it("收槽先于入账（B5 顺序注记）：持久化 INSERT 不混入本 command 的自动失效键——写捕获槽不收自家账", async () => {
+    const db = await openSqlite(":memory:");
+    db.exec("CREATE TABLE memo (id INTEGER PRIMARY KEY, text TEXT NOT NULL)");
+    const reg = new EndpointRegistry();
+    reg.register(
+      defineCommand("memo.write", {
+        handler: async (input: { text: string }, ctx) => {
+          (ctx.db as SqliteDb).prepare("INSERT INTO memo (text) VALUES (?)").run(input.text); // 真写库 → 自动表名启发式有物可捕
+          return { ok: true };
+        },
+      })
+    );
+    const spy = vi.spyOn(reg.liveEngine, "onCommandSuccess"); // 默认透传原实现——只观测广播键面
+    const handler = reg.createHandler({ db });
+    expect((await post(handler, "memo.write", { text: "x" })).status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const keys = spy.mock.calls[0]![1] as string[];
+    expect(keys).toContain("table:memo"); // 自动表名启发式照常工作（捕获槽语义不变）
+    expect(keys).not.toContain("table:atelier_command_journal"); // 收槽先于入账：框架自写不混入失效键
+    expect(journalRows(db)).toHaveLength(1); // 持久化照常发生（断言有实义：写发生了，只是不在槽活跃期）
     db.close();
   });
 });
