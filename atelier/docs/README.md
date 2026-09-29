@@ -16,6 +16,7 @@
 | `FS-DESIGN.md` | 全站化细化设计：决策 17-23 之下的实现级规格（端点 v2/live/迁移器/生成器/守卫/MCP 工具族/OpenAPI）+ 前沿概念穷尽评估表 + 拍板清单 D-F11+ | v0.1 · 实现级规格全部落地（FS-1~11 销账，落地注记见各 §） |
 | `SKILLS-PLAN.md` | Agent Skills 包规格：八包设计原则 / 行数预算 / 校验门禁 | 已落地转规格（8 包在 `atelier/skills/`；行数预算为 `check-skills.mjs` 硬门禁规格源） |
 | `RELEASE-CHECKLIST.md` | 发布检查单：npm publish 前本地可验项 + 发布日外部动作两段式 | 1.0.0（2026-09-27）· ① 段 12 道全过在档；② 段 9 项待发布日 |
+| `RELEASE-1.1.0-DESIGN.md` | 1.1.0 版本批设计书：101 提交版本化 + health version 注入 + strict 终检首战（任务书 W-A~E / 修改文件清单 18 项 / 三分支执行策略） | 2026-09-29 定稿 · 批次收口后随仓库整理归档（FULLSTACK-DESIGN 先例） |
 
 ## 调研证据（`research/`）
 
