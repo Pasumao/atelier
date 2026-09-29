@@ -27,6 +27,11 @@
  * 依赖注入（§3.2）：无 DI 容器——db / auth 由 createHandler 装配点一次性显式注入，装配代码明文可见。
  * B3 差距批（2026-09-28，决策 31）加 email 装配位：ctx.email = { send }（email.ts 单源——显式
  * transport 接口 + 投递记账，框架不内建真实发送；本模块只做装配层透传与 introspect 段接线）。
+ * B1 差距批（2026-09-28，决策 32）加上传/资产面：uploads = createUploadsFace({ db, dir }) 产物
+ * 装配项（uploads.ts 单源——解析/存储/记账/下载；本模块只做兄弟注册表 registerUpload 收口 + 路由
+ * 分发 + gateAuth 鉴权单源复用；上传面不入端点表——introspect 端点表形状零变化）；路由
+ * POST <mount>/upload/<name> + GET <mount>/assets/<id>；multipart 桥面粗闸见 node-host.ts
+ * （max(maxBodyBytes, 20MB)），定义精闸在上传面（413 ATR-346 同码）。
  * v2 边界（诚实）：gen auth 产物（会话原语/cookie/端点骨架）归 FS-5 生成器，本模块只做装配层拦截；
  * live 为全量引擎（FS-7，live.ts 协作对象：SSE 失效-重算-推送——单进程内存订阅、重连全量重算，
  * 诚实边界随 live.ts 文件头）；注册表为单进程内存态；command journal 自 B5 差距批（2026-09-28，
@@ -43,6 +48,7 @@ import { HEALTH_NAME, healthResponse } from "./health.ts";
 import { createCommandJournalSink, type CommandJournalPersistOptions, type CommandJournalSink } from "./command-journal.ts";
 import type { BoundJobs, JobsHandle, KvView } from "./jobs.ts"; // 仅类型——运行时单向依赖 jobs.ts → endpoints.ts，零环
 import type { BoundEmail, EmailRecorder } from "./email.ts"; // 仅类型——运行时单向依赖 email.ts → endpoints.ts（redactSensitiveInput 单源），零环
+import type { UploadDef, UploadsFace } from "./uploads.ts"; // 仅类型——运行时单向依赖 uploads.ts → endpoints.ts（endpointError/foldProdMessage 单源），零环（B1 差距批，决策 32）
 
 export type EndpointKind = "query" | "command";
 
@@ -444,8 +450,119 @@ export function redactSensitiveInput(input: unknown, seen: Set<object> = new Set
 
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]*$/;
 
+/**
+ * 鉴权拦截单源（B1 差距批收口：原分发器内联拦截链提为函数——端点分发与上传面路由**同一链**复用，
+ * 两处消息/码位零漂移）。语义（§6.2）：auth.type:"apikey" = 机器客户端通道（会话优先 + 静态 key
+ * 恒时比对，缺省不启用恒拒 fail-closed——决策 30）；其余 type（≠"none"）= 会话通道（读取器未装配
+ * 与无会话同码 ATR-340，fix 分流）；role 声明不符 → ATR-341。auth.type:"none" 不进本函数（调用方
+ * 判定后跳过——显式消警语义不变）。kindLabel = 消息主语（"端点" | "上传面"）——端点侧取 "端点"
+ * 时消息与收口前逐字节一致（行为零变化红线）。
+ */
+type AuthGate = { ok: true; auth: AuthInfo } | { ok: false; response: Response };
+
+function gateAuth(kindLabel: string, name: string, authMeta: EndpointAuthMeta, readAuth: AuthReader | undefined, apiKeys: ApiKeysOptions | undefined, req: Request): AuthGate {
+  let identity: AuthInfo | null;
+  if (authMeta.type === "apikey") {
+    // ---- A6 API key 最小切口（2026-09-28，决策 30）：机器客户端通道，人机双通道并存 ----
+    // 会话优先：readAuth 照常调用一次并复用进 ctx（总调用次数纪律不变），有效会话直接走
+    // 会话身份（与 type:"session" 端点同语义——人机同权限时人先行，会话是更强身份）；无会话才
+    // 落到 key 比对。key 通道缺省不启用：未装配 apiKeys = 恒拒 fail-closed（不静默全开）。
+    // 头名解析：端点 auth 声明 header（文档即真相同源——export-openapi 同式投影）优先于
+    // 装配 apiKeys.header，再落到缺省 "x-api-key"。
+    const metaHeader = (authMeta as { header?: unknown }).header;
+    const keyHeader = typeof metaHeader === "string" && metaHeader !== "" ? metaHeader : (apiKeys?.header ?? "x-api-key");
+    const sessionAuth = readAuth ? readAuth(req) : null;
+    if (sessionAuth != null) {
+      identity = sessionAuth; // 会话是更强身份——落到底部共享 role 检查（与收口前控制流同构）
+    } else if (apiKeys == null) {
+      // fail-closed：key 通道未装配（装配点开发者遗漏）——机器客户端恒拒，fix 指向装配点
+      return {
+        ok: false,
+        response: errorResponse(
+          401,
+          endpointError(
+            "ATR-340",
+            `${kindLabel} ${name} 要求 apikey 鉴权，但 createHandler 未装配 apiKeys（机器客户端通道缺省不启用）`,
+            `装配点显式接线：createHandler({ apiKeys: { keys: [...] } })（缺省头 ${keyHeader}，可用 header 字段自定义；人用会话 cookie 通道不受影响）；该${kindLabel}确属免鉴权时显式声明 auth: { type: "none" }（§6.2）`,
+            [name]
+          )
+        ),
+      };
+    } else {
+      const presented = req.headers.get(keyHeader);
+      if (presented == null || !apiKeyMatches(presented, apiKeys.keys)) {
+        // 错 key 与缺头同码同文案（不区分呈现——不给探测者额外信息差）
+        return {
+          ok: false,
+          response: errorResponse(
+            401,
+            endpointError(
+              "ATR-340",
+              `${kindLabel} ${name} 要求 apikey 鉴权，请求未携带有效 API key（header ${keyHeader}）`,
+              `机器客户端携 ${keyHeader} 头重试（key 由装配点 createHandler({ apiKeys }) 分发）；人用会话 cookie 通道不受影响（先建立会话再调用 = POST auth.login）`,
+              [name]
+            )
+          ),
+        };
+      }
+      // apikey 身份（AuthInfo 同构投影）：principal = 装配级 label ?? "api-key"——journal 审计
+      // 主体随之（无 per-key 区分，诚实边界见 ApiKeysOptions）；无角色面（声明 role 的端点
+      // 对 key 身份走底部共享 ATR-341 恒拒——v1 不做 per-key 角色）。
+      identity = { type: "apikey", principal: apiKeys.label ?? "api-key" };
+    }
+  } else {
+    identity = readAuth ? readAuth(req) : null;
+    if (identity == null) {
+      // 读取器未装配（装配点开发者遗漏）与请求无会话（调用方问题）同码 ATR-340（401），fix 分流：
+      return {
+        ok: false,
+        response: errorResponse(
+          401,
+          readAuth
+            ? endpointError(
+                "ATR-340",
+                `${kindLabel} ${name} 要求 ${authMeta.type} 鉴权，请求未携带有效会话`,
+                `先建立会话再调用（gen auth 产物 = POST auth.login，成功响应 Set-Cookie 会话 cookie，携 cookie 重试）；该${kindLabel}确属免鉴权时显式声明 auth: { type: "none" }（显式选择优于沉默缺省，§6.2）`,
+                [name]
+              )
+            : endpointError(
+                "ATR-340",
+                `${kindLabel} ${name} 声明了 auth: { type: "${authMeta.type}" }，但 createHandler 未装配 auth 会话读取器`,
+                `装配点显式接线：createHandler({ db, auth: createSessionReader(db) })（gen auth 产物 auth.ts 提供读取器工厂）；该${kindLabel}确属免鉴权时改为 auth: { type: "none" }`,
+                [name]
+              )
+        ),
+      };
+    }
+  }
+  // ---- 共享 role 检查（会话/apikey 两身份同过此门——与收口前「下方 ATR-341」位置同构） ----
+  const wantRole = (authMeta as { role?: unknown }).role;
+  if (typeof wantRole === "string" && identity.role !== wantRole) {
+    const actual = typeof identity.role === "string" ? identity.role : "（无角色）";
+    return {
+      ok: false,
+      response: errorResponse(
+        403,
+        endpointError(
+          "ATR-341",
+          `${kindLabel} ${name} 要求角色 ${wantRole}，会话主体 ${identity.principal ?? "（匿名）"} 的角色是 ${actual}`,
+          `为该主体授予 ${wantRole} 角色（应用侧用户数据，行级判断在 handler 内读 ctx.auth 显式做——RLS 式隐式策略不做，§6.2），或修正 auth: { type, role } 声明`,
+          [name]
+        )
+      ),
+    };
+  }
+  return { ok: true, auth: identity };
+}
+
 export class EndpointRegistry {
   private defs = new Map<string, EndpointDef>();
+  /**
+   * B1 差距批（2026-09-28，决策 32）：上传面**兄弟注册表**——不混入端点表（list()/names()/
+   * introspect 端点表形状零变化；api-diff/OpenAPI 投影/契约层零触碰）。定义经 defineUpload
+   * 构造、registerUpload 注册（命名/重名/参数校验同端点「注册期显式失败」纪律，ATR-313 同码）。
+   */
+  private uploadsDefs = new Map<string, UploadDef>();
   private journalBuf: EndpointJournalEntry[] = [];
   readonly journalLimit: number;
   /**
@@ -511,6 +628,38 @@ export class EndpointRegistry {
 
   names(): string[] {
     return [...this.defs.keys()].sort();
+  }
+
+  /**
+   * 上传面显式注册（B1 差距批，决策 32；reg.register 的兄弟形态）：命名同端点 NAME_RE、重名/
+   * maxBytes/accept 参数非法 = ATR-313（端点注册冲突或命名非法同码——「注册冲突或命名非法」
+   * 同一槽位，消息主语「上传面」）。auth 校验不做（端点同款——形状由消费方 gateAuth 消费）。
+   */
+  registerUpload(def: UploadDef): this {
+    if (typeof def?.name !== "string" || !NAME_RE.test(def.name)) {
+      throw new AtrEndpointError(endpointError("ATR-313", `上传面名非法：${String(def?.name)}`, "上传面名只允许字母开头的 [A-Za-z0-9_.-]（与端点同名文法——URL 路径拼接的安全前提）"));
+    }
+    if (this.uploadsDefs.has(def.name)) {
+      throw new AtrEndpointError(endpointError("ATR-313", `上传面重复注册：${def.name}`, `换名或先移除；已注册上传面：${this.uploadNames().join(", ") || "（无）"}`, this.uploadNames()));
+    }
+    if (def.maxBytes != null && (!Number.isFinite(def.maxBytes) || def.maxBytes <= 0)) {
+      throw new AtrEndpointError(endpointError("ATR-313", `上传面 ${def.name} maxBytes 非法：${String(def.maxBytes)}（须为正数）`, "以字节数声明单请求上限（缺省 20MB = 20971520，独立于端点面 JSON maxBodyBytes）"));
+    }
+    if (def.accept != null && (!Array.isArray(def.accept) || def.accept.some((a) => typeof a !== "string" || a.trim() === ""))) {
+      throw new AtrEndpointError(endpointError("ATR-313", `上传面 ${def.name} accept 非法（须为非空字符串数组）`, `mime 白名单前缀语义："image/" 前缀 / "image/*" 通配 / "image/png" 精确；不限类型时省略 accept 字段`));
+    }
+    this.uploadsDefs.set(def.name, def);
+    return this;
+  }
+
+  /** 上传面定义读取（分发器按名取用；缺省 = undefined → 404 ATR-310 未知上传面） */
+  upload(name: string): UploadDef | undefined {
+    return this.uploadsDefs.get(name);
+  }
+
+  /** 已注册上传面名（排序；与端点 names() 分列——端点表零混入） */
+  uploadNames(): string[] {
+    return [...this.uploadsDefs.keys()].sort();
   }
 
   /** 契约摘要（MCP endpoint.list 的数据源，FS-6 复用）：v2 加 output/失效键/timeout/idempotent 位 */
@@ -613,9 +762,15 @@ export class EndpointRegistry {
    * 显式 transport 接口 + 内建可验证的投递记账（框架不内建真实发送，mock 为内建唯一 transport）；
    * ctx.email = { send } 绑定视图（记账经 ctx.db 同连接，tx 原子性见 EndpointContext.email）；
    * 未装配 = ctx.email 不存在（行为零变化），introspect email 段同样缺省（零假数据）。
+   * B1 差距批（2026-09-28，决策 32）：uploads = createUploadsFace({ db, dir }) 产物（uploads.ts）
+   * 装配项——上传/资产面路由分发（POST <mount>/upload/<name> + GET <mount>/assets/<id>）；
+   * 面未装配时这两族路由诚实 404 ATR-310 指路装配（不落回「未知端点/改 POST」误导文案）；
+   * 上传定义经 reg.registerUpload 注册（兄弟注册表不入端点表），鉴权经 gateAuth 单源（缺省
+   * session fail-closed），定义精闸（maxBytes）在面内——JSON maxBodyBytes 闸对上传路由不生效
+   * （multipart 独立上限，桥面粗闸见 node-host.ts）。
    */
   createHandler(
-    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; apiKeys?: ApiKeysOptions; jobs?: JobsHandle; email?: EmailRecorder; version?: string | null; journal?: CommandJournalPersistOptions } = {}
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; apiKeys?: ApiKeysOptions; jobs?: JobsHandle; email?: EmailRecorder; version?: string | null; journal?: CommandJournalPersistOptions; uploads?: UploadsFace } = {}
   ): (req: Request) => Promise<Response> {
     const startedAtMs = performance.now(); // B4 健康面 uptime 起点（装配时刻 = handler 体诞生时刻）
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
@@ -644,6 +799,10 @@ export class EndpointRegistry {
     // db 句柄——应用以同一句柄装配 createHandler({ db }) 与 createEmailRecorder({ db }) 即得 tx 原子性）
     const emailHandle = opts.email;
     const ctxEmail: BoundEmail | undefined = emailHandle != null ? { send: (msg) => emailHandle.send(msg) } : undefined;
+    // B1 差距批（决策 32）：上传/资产面（uploads.ts 单源——解析/存储/记账/下载）；未装配 =
+    // 路由诚实 404 指路装配（见下方路由块）。鉴权在分发器 gateAuth（缺省 session fail-closed），
+    // 定义精闸在面内——本模块只做注册表与路由分派。
+    const uploadsFace = opts.uploads;
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     return async (req: Request): Promise<Response> => {
       // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
@@ -701,6 +860,61 @@ export class EndpointRegistry {
         return healthResponse({ db, version: opts.version ?? null, startedAtMs });
       }
 
+      // ---- B1 差距批（2026-09-28，决策 32）：上传/资产面路由（兄弟注册表——不入端点表，
+      //      introspect 端点表形状零变化）。POST <mount>/upload/<name> + GET <mount>/assets/<id>。
+      //      端点名文法不含 "/"，upload//assets/ 前缀与端点名空间天然不相交（assets 限数字 id、
+      //      upload 限 NAME_RE 名，不匹配的形态照旧落既有 404/405 路径——端点面零扰动）。
+      //      面未装配 = 诚实 404 ATR-310 指路装配（落回既有路径会把 GET 资产误报成 405「改
+      //      POST」、把上传路由报成「未知端点」——都误导指路）。限流闸（本函数最前）对上传/
+      //      下载同样计数（上传是最贵的请求形态——闸位单一不分路由豁免）。 ----
+      const uploadRoute = name.startsWith("upload/") ? name.slice("upload/".length) : null;
+      if (uploadRoute != null) {
+        if (uploadsFace == null) {
+          return errorResponse(
+            404,
+            endpointError(
+              "ATR-310",
+              `上传/资产面未装配：${url.pathname}`,
+              "装配点显式接线：createHandler({ db, uploads: createUploadsFace({ db, dir }) })（uploads.ts 决策 32）；上传定义经 reg.registerUpload(defineUpload({ name, accept?, maxBytes?, auth? })) 注册（兄弟注册表，不入端点表）"
+            )
+          );
+        }
+        if (req.method !== "POST") {
+          return errorResponse(405, endpointError("ATR-311", `上传面只接受 POST：${req.method} ${url.pathname}`, `改为 POST ${mount || ""}/upload/${uploadRoute}，multipart/form-data 单文件字段体`));
+        }
+        const upDef = this.uploadsDefs.get(uploadRoute);
+        if (!upDef) {
+          return errorResponse(404, endpointError("ATR-310", `未知上传面：${uploadRoute}`, `用以下已注册上传面之一：${this.uploadNames().join(", ") || "（无）"}`, this.uploadNames()));
+        }
+        // 鉴权拦截链单源复用（gateAuth）：**缺省 session**（上传是写面——落盘+记账，未声明 =
+        // fail-closed 要求会话，与端点「未声明 = 开放」有意差异）；auth: { type: "none" } = 显式
+        // 消警开放，不进 gateAuth（与端点判定同款——显式选择优于沉默缺省，决策 32）。拦截在面内
+        // 任何落盘之前——被拒之门前不触碰存储（与端点「不进 handler」同款语义）。
+        const upAuth = (upDef.auth ?? { type: "session" }) as EndpointAuthMeta;
+        if (upAuth.type !== "none") {
+          const gate = gateAuth("上传面", uploadRoute, upAuth, readAuth, apiKeys, req);
+          if (!gate.ok) return gate.response;
+        }
+        return uploadsFace.handleUpload({ req, def: upDef, mount: mount || "" });
+      }
+      const assetRoute = /^assets\/(\d+)$/.exec(name)?.[1] ?? null;
+      if (assetRoute != null) {
+        if (uploadsFace == null) {
+          return errorResponse(
+            404,
+            endpointError(
+              "ATR-310",
+              `上传/资产面未装配：${url.pathname}`,
+              "装配点显式接线：createHandler({ db, uploads: createUploadsFace({ db, dir }) })（uploads.ts 决策 32）；上传定义经 reg.registerUpload(defineUpload({ name, accept?, maxBytes?, auth? })) 注册（兄弟注册表，不入端点表）"
+            )
+          );
+        }
+        if (req.method !== "GET") {
+          return errorResponse(405, endpointError("ATR-311", `资产面只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/assets/${assetRoute}（内容寻址不可变——响应带 Cache-Control: immutable）`));
+        }
+        return uploadsFace.handleDownload({ id: assetRoute, mount: mount || "" });
+      }
+
       if (req.method !== "POST") {
         return errorResponse(405, endpointError("ATR-311", `端点只接受 POST：${req.method} ${url.pathname}`, `改为 POST ${mount}/${name}，JSON 体 = 契约输入`, this.names()));
       }
@@ -714,87 +928,15 @@ export class EndpointRegistry {
       // 调用时机都维持原状（仍在下方 ctx 装配处调用一次）——行为零变化。拦截在 handler 之前，
       // journal 不记账（journal 语义 = "分发穿过 handler 之后"，§3.5——被拒之门的请求未触达 handler）。
       // 声明了 auth 的端点：readAuth 在此处调用一次并复用进 ctx（总调用次数与旧路径相同）。
+      // B1 差距批：拦截链提为模块级 gateAuth 单源（上传面路由同链复用——两处消息/码位零漂移，
+      // 端点侧 kindLabel="端点" 时消息逐字节一致）。
       const authMeta = def.auth;
       const authRequired = authMeta != null && authMeta.type !== "none";
       let gatedAuth: AuthInfo | null = null;
       if (authRequired) {
-        if (authMeta.type === "apikey") {
-          // ---- A6 API key 最小切口（2026-09-28，决策 30）：机器客户端通道，人机双通道并存 ----
-          // 会话优先：readAuth 照常在此调用一次并复用进 ctx（总调用次数纪律不变），有效会话直接走
-          // 会话身份（与 type:"session" 端点同语义——人机同权限时人先行，会话是更强身份）；无会话才
-          // 落到 key 比对。key 通道缺省不启用：未装配 apiKeys = 恒拒 fail-closed（不静默全开）。
-          // 头名解析：端点 auth 声明 header（文档即真相同源——export-openapi 同式投影）优先于
-          // 装配 apiKeys.header，再落到缺省 "x-api-key"。
-          const metaHeader = (authMeta as { header?: unknown }).header;
-          const keyHeader = typeof metaHeader === "string" && metaHeader !== "" ? metaHeader : (apiKeys?.header ?? "x-api-key");
-          const sessionAuth = readAuth ? readAuth(req) : null;
-          if (sessionAuth != null) {
-            gatedAuth = sessionAuth;
-          } else if (apiKeys == null) {
-            // fail-closed：key 通道未装配（装配点开发者遗漏）——机器客户端恒拒，fix 指向装配点
-            return errorResponse(
-              401,
-              endpointError(
-                "ATR-340",
-                `端点 ${name} 要求 apikey 鉴权，但 createHandler 未装配 apiKeys（机器客户端通道缺省不启用）`,
-                `装配点显式接线：createHandler({ apiKeys: { keys: [...] } })（缺省头 ${keyHeader}，可用 header 字段自定义；人用会话 cookie 通道不受影响）；该端点确属免鉴权时显式声明 auth: { type: "none" }（§6.2）`,
-                [name]
-              )
-            );
-          } else {
-            const presented = req.headers.get(keyHeader);
-            if (presented == null || !apiKeyMatches(presented, apiKeys.keys)) {
-              // 错 key 与缺头同码同文案（不区分呈现——不给探测者额外信息差）
-              return errorResponse(
-                401,
-                endpointError(
-                  "ATR-340",
-                  `端点 ${name} 要求 apikey 鉴权，请求未携带有效 API key（header ${keyHeader}）`,
-                  `机器客户端携 ${keyHeader} 头重试（key 由装配点 createHandler({ apiKeys }) 分发）；人用会话 cookie 通道不受影响（先建立会话再调用 = POST auth.login）`,
-                  [name]
-                )
-              );
-            }
-            // apikey 身份（AuthInfo 同构投影）：principal = 装配级 label ?? "api-key"——journal 审计
-            // 主体随之（无 per-key 区分，诚实边界见 ApiKeysOptions）；无角色面（声明 role 的端点
-            // 对 key 调用走下方 ATR-341 恒拒——v1 不做 per-key 角色）。
-            gatedAuth = { type: "apikey", principal: apiKeys.label ?? "api-key" };
-          }
-        } else {
-          gatedAuth = readAuth ? readAuth(req) : null;
-          if (gatedAuth == null) {
-            // 读取器未装配（装配点开发者遗漏）与请求无会话（调用方问题）同码 ATR-340（401），fix 分流：
-            return errorResponse(
-              401,
-              readAuth
-                ? endpointError(
-                    "ATR-340",
-                    `端点 ${name} 要求 ${authMeta.type} 鉴权，请求未携带有效会话`,
-                    `先建立会话再调用（gen auth 产物 = POST auth.login，成功响应 Set-Cookie 会话 cookie，携 cookie 重试）；该端点确属免鉴权时显式声明 auth: { type: "none" }（显式选择优于沉默缺省，§6.2）`,
-                    [name]
-                  )
-                : endpointError(
-                    "ATR-340",
-                    `端点 ${name} 声明了 auth: { type: "${authMeta.type}" }，但 createHandler 未装配 auth 会话读取器`,
-                    `装配点显式接线：createHandler({ db, auth: createSessionReader(db) })（gen auth 产物 auth.ts 提供读取器工厂）；该端点确属免鉴权时改为 auth: { type: "none" }`,
-                    [name]
-                  )
-            );
-          }
-        }
-        const wantRole = (authMeta as { role?: unknown }).role;
-        if (typeof wantRole === "string" && gatedAuth.role !== wantRole) {
-          const actual = typeof gatedAuth.role === "string" ? gatedAuth.role : "（无角色）";
-          return errorResponse(
-            403,
-            endpointError(
-              "ATR-341",
-              `端点 ${name} 要求角色 ${wantRole}，会话主体 ${gatedAuth.principal ?? "（匿名）"} 的角色是 ${actual}`,
-              `为该主体授予 ${wantRole} 角色（应用侧用户数据，行级判断在 handler 内读 ctx.auth 显式做——RLS 式隐式策略不做，§6.2），或修正端点 auth: { type, role } 声明`,
-              [name]
-            )
-          );
-        }
+        const gate = gateAuth("端点", name, authMeta, readAuth, apiKeys, req);
+        if (!gate.ok) return gate.response;
+        gatedAuth = gate.auth;
       }
 
       // ---- A2 硬化3：请求体上限（缺省 1MiB，maxBodyBytes 可配）——超限 413 ATR-346 ----

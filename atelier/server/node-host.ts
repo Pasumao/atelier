@@ -41,13 +41,25 @@ export type NodeHostOptions = {
    * 请求体上限字节（A2 硬化3）：读体**中途截断**（不等读完整再拒——超限即停，残余不再进 JS），
    * 桥直答 413 ATR-346。缺省 1MiB（endpoints.ts DEFAULT_MAX_BODY_BYTES 同值单点复制——不跨模块
    * 开私有口，与 isProd 双写同款纪律，两处注释互指）；createHandler({ maxBodyBytes }) 是另一道
-   * 兜底闸（JSON 解析处），两道都设时取小者生效。
+   * 兜底闸（JSON 解析处），两道都设时取小者生效。B1（决策 32）：multipart/form-data（上传面
+   * 流量）按 max(maxBodyBytes, 20MB) 放行——JSON 全局闸不受影响，两道闸语义见下方常量注释。
    */
   maxBodyBytes?: number;
 };
 
 /** 请求体上限缺省值（A2 硬化3，与 endpoints.ts DEFAULT_MAX_BODY_BYTES 互指同值） */
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * 上传 multipart 桥面放行上限（B1 差距批，2026-09-28，决策 32）：uploads.ts UPLOADS_DEFAULT_MAX_BYTES
+ * 同值单点复制（本桥零 server 依赖不开 import——与 DEFAULT_MAX_BODY_BYTES 双写同款纪律，两处注释互指）。
+ * 两道闸语义（决策 32）：本桥 = **粗闸**（读体中途截断，只保证内存上界——multipart 请求放行到
+ * max(maxBodyBytes, 本值)，JSON 全局闸不动）；上传面 = **精闸**（defineUpload maxBytes 按定义生效，
+ * 缺省同值，413 ATR-346）。与 A2「两道都设取小者」不冲突：A2 管同一资源（JSON 体）的两道闸，
+ * B1 是不同资源（multipart 独立上限）——粗闸 ≥ 精闸缺省恒成立；定义 maxBytes > 20MB 的部署须
+ * 同步上调 createNodeServer/serve({ maxBodyBytes })（v1 不单开桥配置位——诚实边界）。
+ */
+const DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 
 /** Web 标准 handler 形态（endpoints.ts createHandler 产出的签名——桥不关心 handler 内部） */
 export type WebHandler = (req: Request) => Promise<Response>;
@@ -75,7 +87,13 @@ async function dispatch(
 ): Promise<void> {
   try {
     const maxBodyBytes = opts?.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
-    const read = await readBody(nodeReq, maxBodyBytes);
+    // B1（决策 32）粗闸分派：multipart/form-data（上传面流量）放行到 max(装配上限, 20MB)——
+    // JSON 全局闸不动（端点面兜底闸在分发器内自行校验）。按头判定而非路由（本桥零 server 依赖，
+    // 不识别上传注册面）——错报 multipart 的 JSON 请求至多得放行到 20MB 桥闸，仍被分发器
+    // maxBodyBytes 兜底拦住，语义闭合。
+    const isMultipart = /^multipart\/form-data/i.test(String(nodeReq.headers["content-type"] ?? ""));
+    const cap = isMultipart ? Math.max(maxBodyBytes, DEFAULT_UPLOAD_MAX_BYTES) : maxBodyBytes;
+    const read = await readBody(nodeReq, cap);
     if (read.overLimit) {
       // A2 硬化3：读体已中途截断（残余不再进 JS）——桥直答 413 ATR-346（四段式与 endpoints 同款线型）。
       // 超限是客户端问题，不入 handler。收尾纪律：**drain 后再断**——若此刻直接 destroy，客户端仍在
@@ -85,9 +103,11 @@ async function dispatch(
       // 防恶意慢发把连接吊死——那时客户端拿不拿得到 413 已无所谓。
       const body413 = JSON.stringify({
         code: "ATR-346",
-        message: `请求体超限：读入 ${read.seenBytes} 字节后超过桥上限 ${maxBodyBytes}（读体中途截断）`,
+        message: `请求体超限：读入 ${read.seenBytes} 字节后超过桥上限 ${cap}（读体中途截断）`,
         context: { component: "atelier-node-host" },
-        fix: `缩小请求体；上限可配：createNodeServer/serve({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）`,
+        fix: isMultipart
+          ? `缩小上传文件；multipart 桥面放行上限 = max(maxBodyBytes, 20MB)（决策 32 粗闸），上传面定义精闸（defineUpload maxBytes）在其内生效；更大面上调须同步 createNodeServer/serve({ maxBodyBytes })`
+          : `缩小请求体；上限可配：createNodeServer/serve({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）`,
       });
       nodeRes.writeHead(413, { "content-type": "application/json; charset=utf-8", "connection": "close" });
       nodeRes.end(body413);
