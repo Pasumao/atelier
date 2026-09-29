@@ -73,11 +73,28 @@ for (let i = 0; i < ${closeCalls}; i++) await s.close();
 console.log("PROBE_CLOSED");
 `;
 
-/** 按 atelier-shot 一次性 profile 标记清扫无头 Edge（dev-screenshot spawn 的实例 cmdline 必带
+/** 按 atelier-shot 一次性 profile 标记枚举无头 Edge（dev-screenshot spawn 的实例 cmdline 必带
  *  --user-data-dir=<tmp>/atelier-shot-*，用户日常 Edge 不带——按标记打，绝不误伤）。红态下
  *  close() 的 child.kill() 已杀死直属 Edge 启动进程、真实浏览器挂在死 PID 之下，taskkill /T
  *  从探针侧/浏览器 pid 侧都够不到（死中间节点断链，2026-09-29 红检实证）——只认 cmdline 标记
  *  才是完备收尸。全仓无第二处测试 spawn 真浏览器（dev-face-security 等仅文本机检），清扫安全。 */
+function shotBrowserPids(): Set<number> {
+  const pids = new Set<number>();
+  if (process.platform !== "win32") return pids;
+  const ps =
+    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
+    "Where-Object { $_.CommandLine -match 'atelier-shot' } | " +
+    "ForEach-Object { $_.ProcessId }";
+  try {
+    const r = spawnSync("powershell", ["-NoProfile", "-Command", ps], { encoding: "utf8", timeout: 15000 });
+    for (const line of String(r.stdout ?? "").split(/\r?\n/)) {
+      const n = Number(line.trim());
+      if (Number.isInteger(n) && n > 0) pids.add(n);
+    }
+  } catch { /* best effort */ }
+  return pids;
+}
+
 function sweepShotBrowsers(): void {
   if (process.platform !== "win32") return;
   const ps =
@@ -112,8 +129,9 @@ async function runProbe(closeCalls: number) {
 
 d("dev-screenshot openTransientBrowser().close() 事件循环收口", () => {
   it(
-    "close() 后探针子进程自退 exit 0 且浏览器 pid 无残留（ws 关闭/树杀/unref 三洞合一行为钉）",
+    "close() 后探针子进程自退 exit 0 且无头浏览器整树无残留（ws 关闭/树杀/unref 三洞合一行为钉）",
     async () => {
+      const baseline = shotBrowserPids(); // 基线差分：环境存量孤儿不计入断言
       const { code, out, err } = await runProbe(1);
       const ctx = `probe stdout: ${out.trim() || "(none)"}\nprobe stderr: ${err.trim() || "(none)"}`;
       expect(
@@ -122,13 +140,23 @@ d("dev-screenshot openTransientBrowser().close() 事件循环收口", () => {
       ).toBe(0);
       expect(out, ctx).toContain("PROBE_CLOSED");
 
-      // 树杀钉：close() 返回后浏览器直属进程必须已死（win32 taskkill /T /F 同步等待；pid 复用
-      // 窗口极小，3s 轮询兜底——探针 exit 0 而浏览器活着 = 树杀缺失的孤儿前兆）
+      // 树杀钉（按 atelier-shot profile 标记做基线差分）：PROBE_OPEN 上报的 pid 是直属启动
+      // 进程——Edge 启动器会让位真浏览器后自退（2026-09-29 bench E2E 实证），断言它已死是
+      // 空转；「close() 之后标记实例数相对基线归零」才是树杀的真命题（基线差分让断言对环境
+      // 里的存量孤儿免疫）。全仓无第二处测试 spawn 真浏览器（dev-face-security 等仅文本机检）。
       const pid = Number(out.match(/PROBE_OPEN pid=(\d+)/)?.[1]);
       expect(pid, `probe did not report browser pid\n${ctx}`).toBeGreaterThan(0);
-      const alive = async () => { try { process.kill(pid, 0); return true; } catch { return false; } };
-      for (let i = 0; i < 30 && (await alive()); i++) await new Promise((r) => setTimeout(r, 100));
-      expect(await alive(), `browser pid ${pid} still alive after close() — tree-kill missing\n${ctx}`).toBe(false);
+      const newShotPids = async (baseline: Set<number>) => {
+        const now = shotBrowserPids();
+        for (const b of baseline) now.delete(b);
+        return now;
+      };
+      for (let i = 0; i < 30 && (await newShotPids(baseline)).size > 0; i++) await new Promise((r) => setTimeout(r, 100));
+      const leftover = await newShotPids(baseline);
+      expect(
+        leftover.size,
+        `${leftover.size} headless browser process(es) still alive after close() — tree-kill missing (pids: ${[...leftover].join(",")}; launcher ${pid})\n${ctx}`,
+      ).toBe(0);
     },
     TIMEOUT_MS + 15_000,
   );
