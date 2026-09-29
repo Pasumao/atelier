@@ -130,3 +130,80 @@ describe("数据契约 table()（FS-DESIGN §5.1，FS-M2(m2b)）", () => {
     });
   });
 });
+
+describe("fts 全文搜索声明（B6，FS-DESIGN §5.1/§5.2；FTS5 external-content）", () => {
+  const articles = table(
+    "articles",
+    {
+      id: { type: "integer", primaryKey: true },
+      title: { type: "text", notNull: true },
+      body: { type: "text", notNull: true },
+    },
+    { fts: { columns: ["title", "body"] } }
+  );
+
+  it("构造期硬错：fts 列不存在 / 列非 text / 复合主键 / text 主键——契约错误炸在定义处（对齐既有报错文风）", () => {
+    const cols = { id: { type: "integer", primaryKey: true }, body: { type: "text", notNull: true } };
+    expect(() => table("t", cols, { fts: { columns: ["ghost"] } })).toThrow(/未知列/);
+    expect(() => table("t", { id: { type: "integer", primaryKey: true }, n: { type: "integer" } }, { fts: { columns: ["n"] } })).toThrow(
+      /只允许 text/
+    );
+    expect(() =>
+      table(
+        "t",
+        { a: { type: "integer", primaryKey: true }, b: { type: "integer", primaryKey: true }, body: { type: "text", notNull: true } },
+        { fts: { columns: ["body"] } }
+      )
+    ).toThrow(/单列 integer 主键/);
+    expect(() =>
+      table("t", { slug: { type: "text", primaryKey: true }, body: { type: "text", notNull: true } }, { fts: { columns: ["body"] } })
+    ).toThrow(/单列 integer 主键/);
+    // fts 自身形状（对齐「拼错约束名必须硬错」纪律）
+    expect(() => table("t", cols, { fts: { columns: [] } })).toThrow(/至少需要一列/);
+    expect(() => table("t", cols, { fts: { columns: ["body", "body"] } })).toThrow(/重复/);
+    expect(() => table("t", cols, { fts: { columns: ["body"], tokenize: "trigram" } as never })).toThrow(/未知键/);
+    expect(() => table("t", cols, { fts: "body" } as never)).toThrow(/必须是对象/);
+  });
+
+  it("TableDef.fts 透传：声明方携带 { columns }，未声明的表无 fts 键（形状冻结不破）", () => {
+    expect(articles.fts).toEqual({ columns: ["title", "body"] });
+    expect("fts" in messages).toBe(false);
+    expect(JSON.parse(JSON.stringify(articles)).fts).toEqual({ columns: ["title", "body"] });
+  });
+
+  it("createTableSql：主表 DDL 后追加 FTS5 external-content 虚表 + 同步触发器三元组（ai 直插 / ad 特殊 delete 命令 / au 先 delete 后插）", () => {
+    expect(createTableSql(articles)).toBe(
+      [
+        "CREATE TABLE IF NOT EXISTS articles (",
+        "  id INTEGER PRIMARY KEY NOT NULL,",
+        "  title TEXT NOT NULL,",
+        "  body TEXT NOT NULL",
+        ");",
+        "CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(title, body, content='articles', content_rowid='id');",
+        "CREATE TRIGGER IF NOT EXISTS articles_fts_ai AFTER INSERT ON articles BEGIN",
+        "  INSERT INTO articles_fts(rowid, title, body) VALUES (new.id, new.title, new.body);",
+        "END;",
+        "CREATE TRIGGER IF NOT EXISTS articles_fts_ad AFTER DELETE ON articles BEGIN",
+        "  INSERT INTO articles_fts(articles_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);",
+        "END;",
+        "CREATE TRIGGER IF NOT EXISTS articles_fts_au AFTER UPDATE ON articles BEGIN",
+        "  INSERT INTO articles_fts(articles_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);",
+        "  INSERT INTO articles_fts(rowid, title, body) VALUES (new.id, new.title, new.body);",
+        "END;",
+      ].join("\n")
+    );
+  });
+
+  it("dropTableSql：fts 表先 DROP TRIGGER ×3 再 DROP 虚表最后主表（触发器先删）；无 fts 表仍是单行 DROP", () => {
+    expect(dropTableSql(articles)).toBe(
+      [
+        "DROP TRIGGER IF EXISTS articles_fts_ai;",
+        "DROP TRIGGER IF EXISTS articles_fts_ad;",
+        "DROP TRIGGER IF EXISTS articles_fts_au;",
+        "DROP TABLE IF EXISTS articles_fts;",
+        "DROP TABLE IF EXISTS articles;",
+      ].join("\n")
+    );
+    expect(dropTableSql(messages)).toBe("DROP TABLE IF EXISTS messages;");
+  });
+});
