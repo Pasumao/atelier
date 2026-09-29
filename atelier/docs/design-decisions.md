@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-29**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5）；未决项 2 条见文末。
+> 已决 **0-30**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -446,6 +446,14 @@
 - **脱敏与语义单源**：journalPush 是 journal 唯一写入口——W2 批递归脱敏产物（P1-6）直接落库，持久层**不二次实现脱敏**；只 command 条目入表（query 永不入账语义不变）；ok/failed 两态同源入账（D-F12 失败入账语义延伸到持久层）；列形状 = 内存条目 `EndpointJournalEntry` 的持久镜像，投影互逆（`server/command-journal.ts` 单源，两处注释互指）。
 - 取舍：**落库失败不反噬 command 响应**（console.warn 降级不抛——审计不挡业务，该条只存内存环形，不掩盖原始 command 结果）；error 列超 2KB 降级为 code + 截断 message 摘要（JSON 恒合法，不落半截串）；live 引擎 query 重算失败条目（ATR-321）属诊断非命令审计，**留内存**不入表；ok 路径写捕获槽**收槽先于 journal 入账**（持久化 INSERT 经同一装配句柄，sqlite.ts 捕获槽把写记录并入所有活跃槽——槽若仍开着会把框架表混进本 command 的自动失效键；顺序调整有红检用例钉住）；prod 语义不变（journal 照写——审计是安全语义非 dev 语义，§3.7；server-status 调试面 prod 隐身不变，表在库内可经备份/SQL 审计直达）；不引入 jsonl 追加文件方案（§3.5 原候选——单机形态 db 内表即可，与迁移 journal 同构零新概念，且天然共享 `atelier db backup` 备份面）。
 - 时间：2026-09-28（差距批 B5）。
+
+## 决策 30：API key 最小切口——机器客户端静态 key 装配项（差距批 A6）
+
+- **定论**：「应用作为 OAuth 资源服务器暴露给 agent」（FS-DESIGN §6.4 预留位，Better Auth MCP 插件实证的需求位）的最小先行切口 = **API key/token 授权**，形态为**静态 key 比对装配项**——机器客户端（CI/agent/MCP 工具链）访问数据服务层， OAuth 全套（授权码流/token 签发与刷新/scope 面）**不做**，仍归 §6.4 远期预留位；**不建 key 管理面、不建数据库表、不建轮换系统**（key 即装配配置，重启重读；与「框架不内嵌 LLM」同款的最小原语纪律——分发/保管/轮换是应用运营侧的事）。与 CORS 的关系 = **维持同源姿态不做 CORS 配置面**（B8 口径：无第二方浏览器消费者则不做；做了 API key 后机器客户端是非浏览器通道，同源姿态不受影响）。
+- **机制**：`createHandler({ apiKeys?: { keys, header?, label? } })`——**缺省不启用**（与 rateLimit/statusToken 同款显式声明纪律）：未装配时 `auth.type:"apikey"` 端点的 key 通道**恒拒 fail-closed**（不静默全开）。装配后机器客户端携 `<header>`（缺省 `x-api-key`；端点 auth 声明的 `header` 字段可按端点覆盖装配缺省——与 OpenAPI 投影同式，文档即真相同源）访问 `auth: { type: "apikey" }` 声明的端点。**会话 cookie 通道不受影响（人机双通道并存）**：apikey 端点上有效会话照常通行且**会话优先**（readAuth 链不动、人机同权限时人先行——会话是更强身份）；反向互斥 = `auth.type:"session"` 等其余类型**不读 key 头**（key 不能越权拿用户身份）。key 比对恒时比较：node:crypto `timingSafeEqual` 逐一比完全部 keys（不提前返回，不泄命中序位），长度不齐与目标 key 等长全零 dummy 跑同形一次比较（不泄长度侧信道）；错 key 与缺头同码同文案（ATR-340，不呈现信息差）。apikey 身份 = `{ type: "apikey", principal: label ?? "api-key" }`（与 session 身份 AuthInfo 同构，journal 审计主体随之）。
+- **OpenAPI 投影**：`auth: { type: "apikey" }` 端点在 `atelier export openapi` 产出 securitySchemes **`apiKeyAuth`**（`type: apiKey, in: header, name = 端点 auth 声明 header ?? x-api-key`）+ 各端点 security 引用——方案名与 auth.type 解耦（OpenAPI 社区惯例位名；同应用全部 apikey 端点共用一位，header 以首个声明定名），description 恒明示「实际头名以装配点为准」。文档消费面可读，机器客户端可循文档接线（session cookie 名对拍教训的文档即真相纪律：导出器读不到装配配置，端点 auth 声明的 header 是文档侧镜像位，两处一致性为开发者纪律，description 兜底声明权威——v1 无机检对拍）。
+- 诚实边界：key **无过期、无吊销列表**（换 key = 改装配重启）、**无 per-key 审计主体区分**（principal = 装配级 label ?? "api-key"）、**限流共用全局桶**（key 不单独计桶）、apikey 身份**无角色面**（声明 role 的 apikey 端点对 key 调用恒 403 ATR-341——per-key 角色面远期随 OAuth scope 归 §6.4）。测试钉：`tests/apikey.test.ts`（14 用例：fail-closed/会话优先/类型互斥/自定义头/恒时比较单元/introspect authType 联动）+ `tests/openapi.test.ts`（apiKeyAuth 投影；session/oauth 投影零变化 golden 对照）。
+- 时间：2026-09-28（差距批 A6）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。

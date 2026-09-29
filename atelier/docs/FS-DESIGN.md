@@ -87,7 +87,7 @@ enum/min/max/pattern，禁 $ref/oneOf）服务三域，**不新增第二套 sche
 export const chatAsk = defineCommand("chat.ask", {
   contract: chatInputSchema,        // 输入契约（已有；FlatSchema 单写 = 输入，形态不变）
   output: chatMessageSchema,        // 〔议〕输出契约（§2.3）：客户端类型 + 运行时输出校验 + OpenAPI 响应 schema 三用
-  auth: { type: "session" },        // 已有：鉴权声明位（FS-5 gen auth 与机检消费）
+  auth: { type: "session" },        // 鉴权声明位：session | apikey（A6 决策 30，机器客户端通道）| oauth（§6.4 预留）| none（显式消警）
   idempotent: true,                 // 〔议〕幂等元数据（§3.6）：客户端重试语义 + OpenAPI 文档位
   timeoutMs: 10_000,                // 〔议〕超时元数据（§3.6）：AbortSignal 注入依据
   cache: "none",                    // 〔议〕缓存语义显式声明（默认 none；"private" 等档位 B 队，位先固化——
@@ -195,7 +195,7 @@ export type EndpointContext<TDb = SqliteDb> = {
 | 请求体非法 JSON | 400 | ATR-312（既有） | |
 | 请求体超上限 | 413 | ATR-346（A2 批） | `createHandler({ maxBodyBytes })` 可配（缺省 1MiB）；node-host 桥读体**中途截断**在前（超限残余不进 JS）；不进 handler、不入 journal |
 | handler 抛 `AtrEndpointError` | 自带 | 自带 code | **新增约定**：`AtrEndpointError` 可携带 `status`（401/403/404/409…），映射表缺省 422 |
-| 鉴权未通过（gen auth 拦截） | 401/403 | ATR-340/341 | §6 |
+| 鉴权未通过（gen auth 拦截 / apikey 比对〔A6 决策 30〕） | 401/403 | ATR-340/341 | §6 |
 | server-status token 门禁未过 | 401 | ATR-340（A2 批沿用） | `createHandler({ statusToken })` 显式装配后该路由要求 `x-atelier-token` 头（dev 面 token 机制同口径）；未设 = 行为零变化；prod 隐身优先于 token 判定 |
 | 限流窗口超配额 | 429 | ATR-344（A2 批） | `createHandler({ rateLimit })` 显式装配（缺省不启用）；`Retry-After` 头随行；单进程内存态重启清零 |
 | 登录失败锁定（gen auth 产物） | 423 | ATR-345（A2 批） | 同一标识连续失败 N 次锁 M 分钟（产物明文常量 knob）；in-memory 重启清零 |
@@ -647,6 +647,9 @@ src/server/auth/
 - 端点 `auth: {type, role?}` 声明 → 装配层自动拦截（未通过 = ATR-340/341，§3.3）；
   handler 内无需重复检查（但可读 `ctx.auth` 做行级判断——RLS 式隐式策略**明确不做**，
   Supabase 教训：权限必须显式可 grep）。
+- 机器客户端通道 = API key（A6 最小切口，2026-09-28 决策 30）：`auth: { type: "apikey" }` 端点
+  经 `createHandler({ apiKeys })` 静态 key 比对放行（会话优先双通道并存；auth type 清单 =
+  session | apikey | oauth〔§6.4 预留〕| none；机制与诚实边界见 §6.4 落地注记）。
 - 机检：`SERVER_AUTH_MISSING`（WARN）——写表 command 无 auth 声明时提示（不阻断：本地单机
   应用可无鉴权，但必须是**显式选择**——`auth: {type:"none"}` 显式声明可消警，"沉默缺省"
   才是 agent 高错区）。
@@ -666,6 +669,20 @@ atelier gen auth --regen → 产物 diff（git diff 呈现）→ 用户/agent �
 "应用作为 OAuth 资源服务器暴露给 agent"（Better Auth MCP 插件实证的需求位，决策 18 已留）：
 auth 元数据 `type` 命名空间预留 `oauth`；端点契约的 OpenAPI 投影预留 securitySchemes 段。
 P2+ 远期，规范先行。
+
+> **落地注记（2026-09-28，差距批 A6——最小先行切口已落地，决策 30）**：OAuth 全套的先行切口 =
+> **API key 静态比对装配项**（机器客户端访问数据服务层）：`createHandler({ apiKeys: { keys,
+> header?, label? } })` 缺省不启用（显式声明纪律，未装配时 `auth.type:"apikey"` 端点 key 通道恒拒
+> fail-closed）；装配后携 `<header>`（缺省 `x-api-key`）访问 `auth: { type: "apikey" }` 端点，
+> **人机双通道并存**（会话优先——apikey 端点上有效会话照常通行，readAuth 链不动；反向类型互斥 =
+> session 端点不读 key 头）。key 比对恒时（timingSafeEqual 逐 key 等形比较，长度不齐不泄侧信道）。
+> OpenAPI 投影：apikey 端点产出 securitySchemes `apiKeyAuth`（apiKey/header 位，name = 端点 auth
+> 声明 header ?? 缺省 x-api-key，description 明示装配点为头名权威）+ security 引用。**诚实边界**：
+> 本注记只收口最小切口——OAuth 全套（授权码流/token 签发刷新/scope 面）维持远期预留位；
+> **key 管理面/数据库表/轮换系统不做**（key = 装配配置，无过期/无吊销列表，换 key 改配置重启）；
+> **CORS 显式配置面不做**（B8 口径：机器客户端是非浏览器通道，同源姿态不变）；无 per-key 审计
+> 主体区分（principal = label ?? "api-key"）与角色面（声明 role 的 apikey 端点对 key 恒 403）；
+> 限流共用全局桶。回归钉 = `tests/apikey.test.ts` + `tests/openapi.test.ts`。
 
 ---
 
@@ -948,7 +965,8 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 
 - `atelier export openapi [--out openapi.json]`：端点注册表 → openapi-3.0.3 文档；schema 走
   §2.4 投影器（与 MCP inputSchema 同管线）；`restful: true` 端点映射 GET（§3.4）；auth 元数据
-  映射 securitySchemes（§6.4 位）；`idempotent/timeoutMs` 进扩展字段（`x-atelier-*`）。
+  映射 securitySchemes（session → cookie 位 / apikey → `apiKeyAuth` header 位〔A6 决策 30〕/
+  oauth 预留占位——§6.4 位）；`idempotent/timeoutMs` 进扩展字段（`x-atelier-*`）。
 - **范围克制**：只导出**端点面**（组件/数据契约不进 OpenAPI——它们有自己的消费面：注册表/
   MCP/机检；贪多必失真）。
 - **golden 判据**：用导出文档生成的请求打真实 dev server 全端点通（文档即真相的机检）。
