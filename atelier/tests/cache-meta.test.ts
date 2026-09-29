@@ -3,9 +3,10 @@
  *   · 形状 cache?: "none" | { visibility: "private" | "public"; maxAge: number }——未声明 = 零变化
  *     （响应不发 Cache-Control 头）；无隐式默认（缺 maxAge = 定义期硬错，不给默认值——显式优于
  *     隐式正是本决策的存在理由）。
- *   · 只许 query 端点声明：command 带 cache（写端点缓存语义自相矛盾）/ live query 带 cache
- *     （SSE 通道有自己的头语义）→ 注册期硬错（ATR-313，registerUpload 参数校验同码先例——
- *     「契约错误炸在定义处」文风对齐 assertInvalidateKeys/ATR-315）。
+ *   · 对象档（真实缓存声明）只许 query 端点：command 带对象档（写端点缓存语义自相矛盾）/
+ *     live query 带对象档（SSE 通道有自己的头语义）→ 注册期硬错（ATR-313，registerUpload 参数
+ *     校验同码先例——「契约错误炸在定义处」文风对齐 assertInvalidateKeys/ATR-315）；"none"
+ *     显式零档全端点可声明（位先固化形状保持，「不缓存」声明无语义矛盾）。
  *   · public × auth(≠none) 互斥：共享缓存缓存鉴权响应 = 泄露面，注册期显式拒绝；private 任意 auth 可。
  *   · 分发：声明对象档的 query 端点 200 响应带 Cache-Control: private|public, max-age=N；
  *     ATR 结构化错误路径不加缓存头（错误响应不该被缓存）；未声明与 "none" 显式零档均无头。
@@ -18,15 +19,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { AtrEndpointError, defineCommand, defineQuery, EndpointRegistry, endpointError } from "../server/endpoints";
+import type { AtrError } from "../runtime/contract";
 import { introspectResponse } from "../server/introspect";
 import { buildOpenApi, scanOpenApiEndpoints } from "../gen/export-openapi.mjs";
 
-/** 取 AtrEndpointError（定义期硬错的断言替身——与 server-v2/apikey 同款取错形态） */
-function atrOf(fn: () => unknown): { code: string; message: string; fix: string } {
+/** 取 AtrEndpointError 内嵌的四段式 AtrError（注册期抛错形态——err.atr 才是结构化错误本体） */
+function atrOf(fn: () => unknown): AtrError {
   try {
     fn();
   } catch (e) {
-    return e as never;
+    if (e instanceof AtrEndpointError) return e.atr;
+    throw e;
   }
   throw new Error("期望定义期硬错，实际未抛");
 }
@@ -36,7 +39,7 @@ function post(handler: (req: Request) => Promise<Response>, name: string): Promi
 }
 
 describe("cache 定义期硬错（A5 决策 33：契约错误炸在定义处——register() 注册期 ATR-313）", () => {
-  it("command 带 cache → 硬错（写端点缓存响应语义自相矛盾）", () => {
+  it("command 带 cache（对象档）→ 硬错（写端点缓存语义自相矛盾）；\"none\" 零档全端点可声明（位先固化形状保持）", () => {
     const reg = new EndpointRegistry();
     const err = atrOf(() =>
       reg.register(defineCommand("chat.send", { cache: { visibility: "private", maxAge: 30 }, handler: () => ({ ok: true }) }))
@@ -44,6 +47,10 @@ describe("cache 定义期硬错（A5 决策 33：契约错误炸在定义处—�
     expect(err.code).toBe("ATR-313");
     expect(err.message).toContain("chat.send");
     expect(err.message).toContain("command");
+    // 「不缓存」是无缓存声明非缓存声明，无语义矛盾——server-v2 基线用例钉住 command 上 "none" 合法
+    expect(() =>
+      new EndpointRegistry().register(defineCommand("chat.send.none", { cache: "none", handler: () => ({ ok: true }) }))
+    ).not.toThrow();
   });
 
   it("live query 带 cache → 硬错（SSE 通道有自己的头语义）；live:false = 显式无 live 不触发", () => {

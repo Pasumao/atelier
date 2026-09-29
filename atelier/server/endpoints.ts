@@ -32,6 +32,15 @@
  * 分发 + gateAuth 鉴权单源复用；上传面不入端点表——introspect 端点表形状零变化）；路由
  * POST <mount>/upload/<name> + GET <mount>/assets/<id>；multipart 桥面粗闸见 node-host.ts
  * （max(maxBodyBytes, 20MB)），定义精闸在上传面（413 ATR-346 同码）。
+ * A5 差距批（2026-09-29，决策 33）加 cache 元数据档位：cache?: "none" | { visibility, maxAge }——
+ * FS-DESIGN §2.2「位先固化」的兑现。对象档（真实缓存声明）只许 query 端点（command 带 = 写端点
+ * 缓存语义自相矛盾；live query 带 = SSE 通道有自己的头语义）——register() 定义期硬错
+ * （assertCacheMeta，ATR-313 同码先例见 registerUpload）；"none" 显式零档全端点可声明（「不缓存」
+ * 是无缓存声明非缓存声明，位先固化形状保持）；visibility:"public" × auth(≠"none")
+ * 互斥（共享缓存缓存鉴权响应 = 泄露面，fail-closed）；对象档 maxAge 必须非负整数、无隐式默认
+ * （缺 maxAge 就是错——Next 缓存语义三年三变的教训：引入缓存必须一步到位显式契约化）。分发
+ * 成功路径对声明对象档的 query 端点注入 Cache-Control: private|public, max-age=N（错误路径
+ * errorResponse 不加——错误响应不该被缓存）；"none" 与未声明 = 零变化（无 Cache-Control 头）。
  * v2 边界（诚实）：gen auth 产物（会话原语/cookie/端点骨架）归 FS-5 生成器，本模块只做装配层拦截；
  * live 为全量引擎（FS-7，live.ts 协作对象：SSE 失效-重算-推送——单进程内存订阅、重连全量重算，
  * 诚实边界随 live.ts 文件头）；注册表为单进程内存态；command journal 自 B5 差距批（2026-09-28，
@@ -54,6 +63,18 @@ export type EndpointKind = "query" | "command";
 
 /** 鉴权声明位（决策 18：元数据先固化形状，gen auth 产物与机检/MCP 消费归 FS-5/FS-6） */
 export type EndpointAuthMeta = { type: string } & Record<string, unknown>;
+
+/**
+ * 缓存语义声明位（差距批 A5，决策 33——FS-DESIGN §2.2「位先固化」的兑现）：
+ * `"none"` = 显式零档（声明「此端点不缓存」——传输语义与未声明相同、声明进内省/OpenAPI；
+ * 全端点可声明，「不缓存」是无缓存声明非缓存声明）；
+ * 对象档 = `{ visibility: "private" | "public"; maxAge: 非负整数秒 }`（真实缓存声明，只许
+ * query 端点——register() 定义期硬错见 assertCacheMeta），分发成功路径据此注入
+ * `Cache-Control: private|public, max-age=N`。未声明 = 零变化（不发 Cache-Control）；
+ * **无隐式默认**（缺 maxAge 就是错，不给默认值——显式优于隐式正是本决策的存在理由，
+ * §2.2/§16 对表 Next 缓存语义三年三变的教训）。
+ */
+export type EndpointCacheMeta = "none" | { visibility: "private" | "public"; maxAge: number };
 
 /** 会话主体信息（§3.2）：gen auth 装配的会话读取器产出；无 auth 应用 = null */
 export type AuthInfo = { type: string; principal?: string } & Record<string, unknown>;
@@ -132,8 +153,8 @@ export type EndpointDef<TInput = Record<string, unknown>, TOutput = unknown, TDb
   emits?: string[];
   /** 幂等元数据（§3.6）：客户端重试语义 + OpenAPI 文档位；服务端去重存储 v1 不做 */
   idempotent?: boolean;
-  /** 缓存语义显式声明（§2.2）：v1 只固化 "none" 一档——引入缓存时必须显式契约化，无隐式默认 */
-  cache?: "none";
+  /** 缓存语义显式声明（§2.2，差距批 A5 决策 33）：档位形状与定义期硬错规则见 EndpointCacheMeta */
+  cache?: EndpointCacheMeta;
   auth?: EndpointAuthMeta;
   handler: (input: TInput, ctx: EndpointContext<TDb>) => TOutput | Promise<TOutput>;
 };
@@ -185,6 +206,8 @@ export type EndpointSummary = {
   emits?: string[];
   timeoutMs?: number;
   idempotent?: boolean;
+  /** 缓存档位（A5 决策 33 MCP/introspect 消费位）：声明了才出现（未声明无键——形状冻结纯加法） */
+  cache?: EndpointCacheMeta;
   authType?: string;
   /** 角色声明（§6.2 MCP 消费位）：auth: { type, role } 声明了 role 时携带（agent 可查"哪些端点要什么身份"） */
   authRole?: string;
@@ -419,6 +442,102 @@ function assertInvalidateKeys(keys: unknown, owner: string): void {
   }
 }
 
+/**
+ * 缓存档位定义期校验（差距批 A5，决策 33——FS-DESIGN §2.2「位先固化」的兑现）。定义期 =
+ * register() 注册期显式失败（ATR-313——registerUpload maxBytes/accept 参数校验同码先例，
+ * 不另开新码），报错文风对齐 assertInvalidateKeys/ATR-315：「契约错误炸在定义处」：
+ *   ① 显式零档 "none" 全端点可声明（command/live 亦然——「此端点不缓存」是无缓存声明非缓存
+ *      声明，无语义矛盾；位先固化形状保持，server-v2 基线用例钉住）；
+ *   ② 对象档（真实缓存声明）只许非 live 的 query 端点——command 带 = 写端点缓存响应语义
+ *      自相矛盾；live query 带 = SSE 通道有自己的头语义（缓存头对推送无意义，且 live×cache
+ *      组合会把「订阅即重算」的实时语义与「可缓存」声明并置误导消费方）；live:false = 显式
+ *      无 live（isLiveDeclared 同口径，与 ATR-315 一致）不触发；
+ *   ③ visibility:"public" × auth(≠"none") 互斥——public 允许共享缓存（CDN/代理）暂存响应，
+ *      鉴权端点的响应是按主体变化的私有数据，被共享缓存命中 = 跨主体泄露面，fail-closed；
+ *      private（仅浏览器/私有缓存）任意 auth 可；public × auth:none（显式消警）可；
+ *   ④ 对象档形状 = { visibility: "private" | "public", maxAge: 非负整数秒 }——visibility 只认
+ *      两值；maxAge **无隐式默认**（缺 maxAge 就是错，不给默认值——显式优于隐式正是本决策的
+ *      存在理由）；未知键收紧硬错（db.ts table() opts 同款纪律，静默忽略元数据键 = 声明被吞）。
+ */
+function assertCacheMeta(def: EndpointDef): void {
+  const cache = def.cache;
+  if (cache == null) return; // 未声明 = 零变化（分发器不发 Cache-Control，内省/OpenAPI 无键）
+  if (cache === "none") return; // 显式零档：传输语义与未声明相同（无 Cache-Control），声明进内省/OpenAPI
+  if (def.kind === "command") {
+    throw new AtrEndpointError(
+      endpointError(
+        "ATR-313",
+        `端点 ${def.name} 是 command，却声明 cache——写端点缓存响应语义自相矛盾`,
+        "移除该 command 的 cache 声明（写端点不缓存）；确需缓存头的是读取面时，改用 query 端点声明"
+      )
+    );
+  }
+  if (isLiveDeclared(def)) {
+    throw new AtrEndpointError(
+      endpointError(
+        "ATR-313",
+        `端点 ${def.name} 同时声明 live 与 cache——live SSE 通道有自己的头语义，Cache-Control 不适用`,
+        "二选一：需要缓存头则移除 live 声明，改普通 query 端点经 POST 直调；需要 SSE 失效推送则移除 cache 声明"
+      )
+    );
+  }
+  if (typeof cache !== "object" || Array.isArray(cache)) {
+    throw new AtrEndpointError(
+      endpointError(
+        "ATR-313",
+        `端点 ${def.name} 的 cache 档位非法：${String(JSON.stringify(cache) ?? cache)}（只认 "none" 或 { visibility, maxAge } 对象）`,
+        `写成 cache: "none" 或 cache: { visibility: "private" | "public", maxAge: <非负整数秒> }`
+      )
+    );
+  }
+  const unknownKeys = Object.keys(cache).filter((k) => k !== "visibility" && k !== "maxAge");
+  if (unknownKeys.length > 0) {
+    throw new AtrEndpointError(
+      endpointError(
+        "ATR-313",
+        `端点 ${def.name} 的 cache 声明含未知键：${unknownKeys.join(", ")}（对象档只认 visibility/maxAge 两键）`,
+        "修正 cache: { visibility: \"private\" | \"public\", maxAge: <非负整数秒> }——v1 不做 stale-while-revalidate 等扩展指令（要了再加，无隐式默认）"
+      )
+    );
+  }
+  if (cache.visibility !== "private" && cache.visibility !== "public") {
+    throw new AtrEndpointError(
+      endpointError(
+        "ATR-313",
+        `端点 ${def.name} 的 cache.visibility 非法：${String(cache.visibility)}（只认 "private" | "public"）`,
+        '写成 visibility: "private"（仅浏览器/私有缓存可存）或 visibility: "public"（共享缓存可存，且不得声明 auth ≠ none）'
+      )
+    );
+  }
+  if (cache.maxAge === undefined) {
+    throw new AtrEndpointError(
+      endpointError(
+        "ATR-313",
+        `端点 ${def.name} 的 cache 声明缺 maxAge（无隐式默认——显式优于隐式正是本决策的存在理由）`,
+        "补 maxAge: <非负整数秒>（缓存多久，秒）；0 = 显式零秒（禁缓存邻域）也须写明"
+      )
+    );
+  }
+  if (!Number.isInteger(cache.maxAge) || cache.maxAge < 0) {
+    throw new AtrEndpointError(
+      endpointError(
+        "ATR-313",
+        `端点 ${def.name} 的 cache.maxAge 非法：${String(cache.maxAge)}（须为非负整数秒）`,
+        "写成非负整数字面量（如 30、60）；负数/小数/非数值均非法——Cache-Control 的 max-age 指令只接受非负整数秒"
+      )
+    );
+  }
+  if (cache.visibility === "public" && def.auth != null && def.auth.type !== "none") {
+    throw new AtrEndpointError(
+      endpointError(
+        "ATR-313",
+        `端点 ${def.name} 同时声明 cache.visibility: "public" 与 auth: { type: "${def.auth.type}" }——public 允许共享缓存（CDN/代理）暂存响应，鉴权端点的响应按主体变化，被共享缓存命中 = 跨主体泄露面`,
+        '三选一：改 visibility: "private"（仅浏览器私有缓存）；该端点确属全员可缓存时显式声明 auth: { type: "none" }；或移除 cache 声明'
+      )
+    );
+  }
+}
+
 /** 超时竞速哨兵：Promise.race 输家判定用（区别于 handler 自身抛出的任何错误） */
 const TIMEOUT_BREACH = Symbol("atelier-endpoint-timeout");
 
@@ -595,6 +714,12 @@ export class EndpointRegistry {
     if (def.emits != null) {
       assertInvalidateKeys(def.emits, `端点 ${def.name} emits`);
     }
+    // ---- cache 档位定义期硬错（A5 差距批，决策 33；规则全量见 assertCacheMeta 注释）：
+    //      对象档（真实缓存声明）只许非 live 的 query 端点；public×auth(≠none) 泄露面互斥；
+    //      对象档形状（visibility 两值 + maxAge 非负整数无隐式默认 + 未知键收紧）——注册期
+    //      显式失败（ATR-313），声明不可能被静默忽略。"none" 显式零档全端点可声明（位先固化
+    //      形状保持——server-v2 基线用例钉住 command 上 "none" 合法，且「不缓存」声明无语义矛盾） ----
+    assertCacheMeta(def as EndpointDef);
     // ---- live×鉴权 fail-closed（P1-5，ATR-315）：live SSE 通道与端点级鉴权声明互斥，注册期显式拒绝 ----
     // GET /live 路由不经过 POST 通道的 readAuth 门禁，且 live 引擎重算 ctx.auth=null（live.ts 诚实边界）：
     // 若放行组合，端点声明的 auth 会被 SSE 通道静默忽略（未认证客户端直接订阅）。引擎的共享重算模型
@@ -679,6 +804,7 @@ export class EndpointRegistry {
         ...(d.emits ? { emits: [...d.emits] } : {}),
         ...(d.timeoutMs != null ? { timeoutMs: d.timeoutMs } : {}),
         ...(d.idempotent != null ? { idempotent: d.idempotent } : {}),
+        ...(d.cache != null ? { cache: d.cache } : {}),
         ...(d.auth ? { authType: d.auth.type } : {}),
         ...(d.auth != null && typeof (d.auth as { role?: unknown }).role === "string"
           ? { authRole: (d.auth as { role?: unknown }).role as string }
@@ -1044,6 +1170,13 @@ export class EndpointRegistry {
           "x-atelier-endpoint": def.name,
           "x-atelier-endpoint-kind": def.kind,
         });
+        // ---- cache 档位（A5 差距批，决策 33）：声明对象档的 query 端点 200 响应注入 Cache-Control ----
+        // 只在分发成功路径注入（错误路径 errorResponse 不加——ATR 结构化错误不该被缓存）；
+        // "none" 与未声明 = 无头（显式零档与沉默缺省同传输语义，声明差异只进内省/OpenAPI）；
+        // live+cache 组合已被注册期拒绝（ATR-313）——SSE 推送路径不涉。
+        if (def.kind === "query" && def.cache != null && typeof def.cache === "object") {
+          okHeaders.set("cache-control", `${def.cache.visibility}, max-age=${def.cache.maxAge}`);
+        }
         for (const c of setCookies) okHeaders.append("set-cookie", c);
         return new Response(JSON.stringify(result ?? null), { status: 200, headers: okHeaders });
       } catch (e) {
