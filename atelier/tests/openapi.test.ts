@@ -392,6 +392,32 @@ describe("export openapi 端到端（§13：paths / x-atelier / restful / 注记
     expect(doc.paths["/api/browse.list"].get.security).toEqual([{ oauth: [] }]);
   });
 
+  it("securitySchemes：apikey → apiKeyAuth header 位（name = 端点 auth 声明 header ?? 缺省 x-api-key）+ security 引用；session/oauth 投影零变化（A6 决策 30）", () => {
+    const root = makeApp();
+    w(
+      root,
+      "src/server/endpoints/robot.ts",
+      `export const robotPull = defineQuery("robot.pull", {
+  auth: { type: "apikey" },
+  handler: () => ({}),
+});
+export const robotPush = defineCommand("robot.push", {
+  auth: { type: "apikey", header: "x-robot-key" },
+  handler: () => ({}),
+});
+`
+    );
+    const { doc } = buildOpenApi(root);
+    // apiKeyAuth 位：首声明定名（robot.pull 无 header 字段 → 缺省 x-api-key）；description 明示装配点为实际头名权威
+    expect(doc.components.securitySchemes.apiKeyAuth).toMatchObject({ type: "apiKey", in: "header", name: "x-api-key" });
+    expect(doc.components.securitySchemes.apiKeyAuth.description).toContain("createHandler({ apiKeys: { header } })");
+    expect(doc.paths["/api/robot.pull"].post.security).toEqual([{ apiKeyAuth: [] }]);
+    expect(doc.paths["/api/robot.push"].post.security).toEqual([{ apiKeyAuth: [] }]);
+    // session/oauth 投影现状零变化（golden 对照）
+    expect(doc.components.securitySchemes.session).toMatchObject({ type: "apiKey", in: "cookie", name: "session" });
+    expect(doc.components.securitySchemes.oauth).toBeUndefined();
+  });
+
   it("范围克制（§13）：components.schemas 只含端点引用的契约常量（unusedSchema 不进）；未声明契约端点无 requestBody", () => {
     const { doc, schemaIdents } = buildOpenApi(makeApp());
     expect(schemaIdents).toEqual(["chatInputSchema", "chatMessageSchema", "listInputSchema"]);
@@ -426,7 +452,7 @@ describe("export openapi 端到端（§13：paths / x-atelier / restful / 注记
       w(root, "src/server/endpoints/extra.ts", `export const extraCall = define${kind}("extra.call", ${def});\n`);
       return root;
     };
-    expect(() => buildOpenApi(mk("Query", `{ auth: { type: "apikey" }, handler: async () => ({}) }`))).toThrow(/不支持的 auth 类型/);
+    expect(() => buildOpenApi(mk("Query", `{ auth: { type: "mtls" }, handler: async () => ({}) }`))).toThrow(/不支持的 auth 类型/);
     expect(() => buildOpenApi(mk("Command", `{ contract: chatInputSchema, restful: true, handler: async () => ({}) }`))).toThrow(/restful/);
     expect(() => buildOpenApi(mk("Query", `{ timeoutMs: "soon", handler: async () => ({}) }`))).toThrow(/数字字面量/);
   });
