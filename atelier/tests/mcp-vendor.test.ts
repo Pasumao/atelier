@@ -9,7 +9,7 @@
  *      + gen/gen-endpoint.mjs（impact 的传递 import）+ compiler/project-json.mjs +
  *      compiler/extract-schema.mjs（决策 26 schema 提取器）全部落位，
  *      且既有 vendor 语义（dev 面六件 / src/runtime / src/vendor/atelier）不回退；
- *   c. 从应用内 vendored 路径动态 import <app>/mcp/http.mjs——独立 deps 实例驱动 tools/list（36 工具）
+ *   c. 从应用内 vendored 路径动态 import <app>/mcp/http.mjs——独立 deps 实例驱动 tools/list（40 工具）
  *      与 ping；加打 structure.map 真执行（证明 vendored ../scripts/struct.mjs 相对解析生效）；
  *      devUrl 指向必死端口（:9 discard）——tools/list / ping / 本地工具全程不 fetch 即铁证；
  *   d. 机械闭包核对：从 mcp/http.mjs 走相对 import 传递闭包，可达集合必须与 vendor 名单
@@ -129,7 +129,7 @@ describe("M7 vendor 批：vendored 应用 MCP HTTP 直连（候选池挂账销�
     expect(fs.existsSync(path.join(APP, "src", "vendor", "atelier", "server", "index.ts"))).toBe(true);
   });
 
-  it("c. 应用内 vendored http.mjs 动态 import 自成一体：tools/list=36 + ping + structure.map 真执行（devUrl 必死端口不出网）", async () => {
+  it("c. 应用内 vendored http.mjs 动态 import 自成一体：tools/list=40 + ping + structure.map 真执行（devUrl 必死端口不出网）", async () => {
     const mod: any = await import(pathToFileURL(path.join(APP, "mcp", "http.mjs")).href);
     const d = deps();
 
@@ -138,7 +138,7 @@ describe("M7 vendor 批：vendored 应用 MCP HTTP 直连（候选池挂账销�
     const parsedList = JSON.parse(list.body);
     expect(parsedList.ok).toBe(true);
     const names: string[] = parsedList.result.tools.map((t: any) => t.name);
-    expect(names.length).toBe(36);
+    expect(names.length).toBe(40);
     expect(names).toContain("tasks.get");
 
     const ping = (await mod.handleMcpHttp(mcpRequest("ping", {}), d)) as any;
@@ -188,6 +188,6 @@ describe("M7 vendor 批：vendored 应用 MCP HTTP 直连（候选池挂账销�
     const mod: any = await import(pathToFileURL(path.join(APP, "mcp", "http.mjs")).href + `?after-sync=${Date.now()}`);
     const out = (await mod.handleMcpHttp(mcpRequest("tools/list", {}), deps())) as any;
     expect(out.status).toBe(200);
-    expect(JSON.parse(out.body).result.tools.length).toBe(36);
+    expect(JSON.parse(out.body).result.tools.length).toBe(40);
   });
 });

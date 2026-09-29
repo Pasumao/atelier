@@ -112,7 +112,7 @@ describe("FS-M6① HTTP 直连：Mcp-Method/Mcp-Name 头路由（SEP-2243，无�
     expect(parsed.ok).toBe(true);
     expect(parsed._meta.protocolVersion).toBe("2026-07-28");
     const names = parsed.result.tools.map((t: any) => t.name);
-    expect(names.length).toBe(36); // 33 + tasks.get/update/cancel
+    expect(names.length).toBe(40); // 33 + tasks.get/update/cancel + jobs.status/email.log/uploads.status/server.health
     expect(names).toContain("tasks.get");
   });
 
@@ -125,7 +125,7 @@ describe("FS-M6① HTTP 直连：Mcp-Method/Mcp-Name 头路由（SEP-2243，无�
     expect(parsed.ok).toBe(true);
     expect(parsed.result.serverInfo.name).toBe("atelier");
     expect(parsed.result.protocolVersion).toBe("2026-07-28");
-    expect(parsed.result.tools.length).toBe(36);
+    expect(parsed.result.tools.length).toBe(40);
   });
 
   it("tools/call：Mcp-Name 头路由真执行（本地工具 docs.search）", async () => {

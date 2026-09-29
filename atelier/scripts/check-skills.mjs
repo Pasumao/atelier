@@ -46,7 +46,7 @@ const FLAGS = new Set([
   "--target", "--name", "--no-ai", "--open", "--root", "--out", "--stdout", "--quiet",
   "--keep", "--app", "--port", "--no-dsh", "--no-agents", "--no-mcp",
 ]);
-const TOOL_PREFIXES = /^(?:registry|tokens|state|ui|docs|checkpoint|test|snapshot|diff|audit|feedback|structure|endpoint|db|server)\./;
+const TOOL_PREFIXES = /^(?:registry|tokens|state|ui|docs|checkpoint|test|snapshot|diff|audit|feedback|structure|endpoint|db|server|jobs|email|uploads)\./;
 const RUNTIME_API = new Set([
   "component", "$state", "$derived", "$effect", "html", "streamValue", "optimisticList",
   "store", "validateFlat", "validateUnknown", "expect", "verify", "initTokens",

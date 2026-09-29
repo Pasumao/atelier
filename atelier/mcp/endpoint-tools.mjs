@@ -1,11 +1,15 @@
 /**
  * endpoint-tools.mjs — FS-6 L3 MCP 全栈工具族实现（FS-DESIGN §10.1，净增 8 工具，
- * 对 Next `/_next/mcp` 8 工具做超集对表）。
+ * 对 Next `/_next/mcp` 8 工具做超集对表；四面扩张批 +4：jobs.status / email.log /
+ * uploads.status / server.health——覆盖 jobs/uploads/email/health 四个新 server 面）。
  *
  * 数据源分两类（诚实边界）：
- *   live 组（7 个）消费应用 dev 面 GET /__atelier/server-status（§10.3；host 由 dev 托管线
+ *   live 组（10 个）消费应用 dev 面 GET /__atelier/server-status（§10.3；host 由 dev 托管线
  *   提供，本模块只按数据源契约消费）；dev face 不在 → 四段式结构化错误（fix 指路 pnpm dev），
- *   绝不静默空结果。
+ *   绝不静默空结果。段级缺省（jobs/email/uploads 未装配 = 键不出现）→ 诚实 null + 装配指路
+ *   note（dbMigrations 同款纪律），绝不编造空结果。
+ *   直连组（server.health）GET <mount>/__atelier/health 探活——不经 server-status；非 200 是
+ *   数据（health.ts orchestrator 报警语义），传输层不通才四段式。
  *   静态组（endpoint.impact）复用 gen/impact.mjs impactReport——两跳链路原样，不依赖 dev 面。
  *
  * 投影红线（§2.4）：endpoint.contract 的 JSON Schema 投影 import compiler/project-json.mjs
@@ -29,6 +33,10 @@ export const FS6_TOOLS = new Set([
   "server.introspect",
   "endpoint.call",
   "endpoint.journal",
+  "jobs.status",
+  "email.log",
+  "uploads.status",
+  "server.health",
 ]);
 
 /** 四段式错误工厂（server.mjs toolError 同款形态：ATR 码解析进 e.atr，宿主可结构化消费） */
@@ -188,6 +196,72 @@ function endpointJournal(status, args) {
   };
 }
 
+/* ---------- 四面扩张批（jobs/email/uploads 段投影 + health 探活；缺省诚实返回 = dbMigrations 同款） ---------- */
+
+function jobsStatus(status) {
+  // server-status jobs 段（server/jobs.ts JobsStats：counts 四态计数 + recent 尾部 ~20 条）原样投影
+  if (status.jobs == null) {
+    return {
+      jobs: null,
+      note: "未装配 jobs 面（createHandler({ jobs })）——装配后本工具报告队列计数与尾部",
+      source: SERVER_STATUS_PATH,
+    };
+  }
+  return { jobs: status.jobs, source: SERVER_STATUS_PATH };
+}
+
+function emailLog(status) {
+  const email = status.email;
+  if (email == null) {
+    return {
+      email: null,
+      note: "未装配 email 面（createHandler({ email })，决策 31）——装配后本工具报告投递记账尾部",
+      source: SERVER_STATUS_PATH,
+    };
+  }
+  return {
+    count: email.length,
+    // failed 过滤取值源 = server/email.ts EmailLogEntry.status（"ok" | "failed"——send 抛错/拒绝 = failed）
+    failed: email.filter((e) => e?.status === "failed").length,
+    entries: email,
+    note: "dev 面 tail 有界（~20 条）——全量台账走 atelier_email_log SQL 直读",
+    source: SERVER_STATUS_PATH,
+  };
+}
+
+function uploadsStatus(status) {
+  if (status.uploads == null) {
+    return {
+      uploads: null,
+      note: "未装配 uploads 面（createHandler({ uploads })，决策 32）——装配后本工具报告注册表与资产台账",
+      source: SERVER_STATUS_PATH,
+    };
+  }
+  // 透传不投影：字段级再投影会让本工具与 A 分支 uploads 段契约形成漂移面——透传把漂移面压到零
+  return { ...status.uploads, source: SERVER_STATUS_PATH };
+}
+
+async function serverHealth(args, { devUrl, devToken }) {
+  // mount 清洗与 endpointCall 同式：剥首尾斜杠再补前缀（"/degraded/" → "/degraded"）
+  const mountPath = "/" + String(args?.mount ?? "/api").replace(/^\/+|\/+$/g, "");
+  const t0 = Date.now();
+  const r = await fetch(`${devUrl}${mountPath}/__atelier/health`, {
+    headers: { "x-atelier-token": devToken }, // health 本身无 token 门（server/health.ts），带头无害——endpoint.call 先例
+    signal: AbortSignal.timeout(10000),
+  }).catch((e) => {
+    throw toolError(
+      `ATR-4xx-dev: server.health unreachable at ${devUrl} (${e.cause?.code ?? e.name})`,
+      "启动应用 dev server（应用目录 pnpm dev）后再试；或设 ATELIER_DEV_URL 指向运行中的 dev 面",
+    );
+  });
+  const text = await r.text();
+  let body;
+  try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  // 非 200 是数据不抛（health.ts 口径：探活的语义就是非 200 可报警——orchestrator 靠状态码，
+  // db 探活失败 = 503 + ok:false 是健康面的事实呈现）；传输层不通才走上方四段式
+  return { ok: r.ok, status: r.status, durMs: Date.now() - t0, body };
+}
+
 /** 端点名 = 注册表标识符（字母开头 + 字母数字.-）；挡路径注入/查询串拼接 */
 const EP_NAME_RE = /^[A-Za-z][\w.-]*$/;
 
@@ -222,6 +296,7 @@ async function endpointCall(args, { devUrl, devToken }) {
 /** server.mjs callTool 的 FS-6 分流入口 */
 export async function callEndpointTool(name, args, { devUrl, devToken, projectRoot }) {
   if (name === "endpoint.impact") return endpointImpact(projectRoot, args?.contractKey);
+  if (name === "server.health") return serverHealth(args, { devUrl, devToken }); // 直探 server 面健康端点——不经 server-status
   const status = await fetchServerStatus(devUrl, devToken);
   switch (name) {
     case "endpoint.list": return endpointList(status);
@@ -231,6 +306,9 @@ export async function callEndpointTool(name, args, { devUrl, devToken, projectRo
     case "server.introspect": return serverIntrospect(status);
     case "endpoint.journal": return endpointJournal(status, args);
     case "endpoint.call": return endpointCall(args, { devUrl, devToken });
+    case "jobs.status": return jobsStatus(status);
+    case "email.log": return emailLog(status);
+    case "uploads.status": return uploadsStatus(status);
     default:
       throw toolError(`ATR-404: unknown tool "${name}"`, "pick a tool from tools/list output");
   }
