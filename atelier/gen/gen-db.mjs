@@ -5,7 +5,8 @@
  * 读 <root>/src/server/db/schema.ts，生成三类产物（§5.2 表）：
  *   a. src/generated/db/tables.ts        每表行类型 + 表元数据规范命名导出（显式 import schema.ts）
  *   b. src/generated/db/crud.ts          每表 4 个薄函数 GetByPk/Insert/Update/Delete + 分页二原语
- *                                        ListPaged/Count（B7，无 opt-in 全 PK 表无条件生成；SQL 内联可读、全参数化）
+ *                                        ListPaged/Count（B7，无 opt-in 全 PK 表无条件生成）+ 全文搜索
+ *                                        二原语 FtsSearch/FtsCount（B6，仅 opts.fts 表生成；SQL 内联可读、全参数化）
  *   c. src/server/db/migrations/NNN_<table>.{up,down}.sql  建表/删表迁移骨架（**追加式**：
  *      只为尚无迁移的表生成，编号 = 现有最大 NNN+1 递增；已存在迁移文件永不重写，§5.4）
  *   d. src/server/db/seeds/001_example.seed.sql  种子目录 + 示例骨架（D-F17，FS-M2(m2d) 加法；
@@ -251,6 +252,7 @@ export function parseSchema(src, sourceName = "schema.ts") {
       columns[key] = col;
     }
     let indexes;
+    let fts;
     if (args.length === 3) {
       const opts = parseObjectLiteral(args[2], `表 ${name} 的选项`);
       indexes = Array.isArray(opts.indexes) ? opts.indexes : [];
@@ -259,9 +261,15 @@ export function parseSchema(src, sourceName = "schema.ts") {
           die(`表 ${name} 的索引定义不完整（需要 name + 非空 columns）`, "对齐 §5.1 indexes 形态");
         }
       }
+      // fts（B6）：parseLiteral 已解析为纯值对象，形状/列存在性/text 类型/单列 integer 主键
+      // 全部交由下方 defineTable 回灌复验（契约校验单一真相源，不在解析器里另立一套口径）
+      fts = opts.fts;
     }
-    // 回灌 table() 复验：未知键/enum 同质/索引列存在性/主键缺失等全按 db.ts 口径硬错
-    const def = defineTable(name, columns, indexes != null ? { indexes } : {});
+    // 回灌 table() 复验：未知键/enum 同质/索引列存在性/主键缺失/fts 形状等全按 db.ts 口径硬错
+    const def = defineTable(name, columns, {
+      ...(indexes != null ? { indexes } : {}),
+      ...(fts != null ? { fts } : {}),
+    });
     if (def.primaryKey.length === 0) {
       die(`表 ${name} 无主键`, "生成 CRUD 需要主键；确无主键的表请走手写 SQL 通道（ctx.db.prepare 直用，§5.3）");
     }
@@ -349,7 +357,7 @@ function renderTables(tables, schemaFile, vendorDbFile, outFile) {
 function renderCrud(tables, vendorSqliteFile, outFile) {
   const relVendor = relImport(outFile, vendorSqliteFile);
   const lines = [];
-  lines.push("// @atelier-generated (gen db) — 极薄参数化 CRUD + 分页二原语（§5.2：四原语 + ListPaged/Count 量级，SQL 字面量内联可读）。");
+  lines.push("// @atelier-generated (gen db) — 极薄参数化 CRUD + 分页二原语 + 全文搜索二原语（§5.2：四原语 + ListPaged/Count（B7，全 PK 表）+ FtsSearch/FtsCount（B6，仅 fts 表）量级，SQL 字面量内联可读）。");
   lines.push("// 红线（决策 19）：全参数化、零值拼接——值一律 ? 绑定；UPDATE 的 SET 列名来自下方生成时允许清单");
   lines.push("// （contract 定义，非运行时输入）。手写 SQL（join/聚合）一等公民：ctx.db.prepare 直用（§5.3）。");
   lines.push(`import type { SqliteDb, SqliteRunResult } from "${relVendor}";`);
@@ -417,6 +425,38 @@ function renderCrud(tables, vendorSqliteFile, outFile) {
     lines.push(`  return (db.prepare("SELECT COUNT(*) AS n FROM ${t.name}").get() as { n: number }).n;`);
     lines.push("}");
     lines.push("");
+    // 全文搜索二原语（B6，仅 opts.fts 表生成）：external-content 虚表 <t>_fts 由触发器同步
+    // （DDL 单源在 server/db.ts createTableSql/dropTableSql），这里只投影查询面。
+    if (t.fts) {
+      const ft = `${t.name}_fts`;
+      const pkCol = pkCols[0];
+      // 列名必须表名限定：external-content 虚表暴露同名列，裸列名在 JOIN 里 ambiguous
+      // （真 node:sqlite 对拍抓出后修正）；仍保持显式列清单风格（对齐四原语）。
+      const selQualified = cols.map((k) => `${t.name}.${k}`).join(", ");
+      const baseSql = `SELECT ${selQualified} FROM ${t.name} JOIN ${ft} ON ${t.name}.${pkCol} = ${ft}.rowid WHERE ${ft} MATCH ? ORDER BY bm25(${ft})`;
+      lines.push("/**");
+      lines.push(` * 全文搜索（B6）：主表 JOIN ${ft}（rowid 直连），bm25 相关度升序（更负 = 更相关）。`);
+      lines.push(" * query 是 FTS5 MATCH 语法：应用侧负责转义与前缀 * 拼接；query 全程 ? 绑定零拼接（决策 19），");
+      lines.push(" * MATCH 语法错误诚实冒泡为 SQLite 异常。默认 unicode61 分词器：按空格/标点切词，连续中文串 =");
+      lines.push(" * 整串单 token（不按字切）——整串/前缀 * 查询可命中、中段子串不命中；需真分词请应用侧预处理");
+      lines.push(" * 或手改迁移加 tokenize 选项（诚实边界见 FS-DESIGN §5.2）。limit/offset 守卫与 ListPaged（B7）");
+      lines.push(" * 同款：非负整数硬错；不传 = 全量命中（分页显式传）。");
+      lines.push(" */");
+      lines.push(`const ${fn}FtsSql = "${baseSql}";`);
+      lines.push(`export function ${fn}FtsSearch(db: Pick<SqliteDb, "prepare">, query: string, opts: { limit?: number; offset?: number } = {}): ${Pascal}Row[] {`);
+      lines.push(`  if ((opts.limit !== undefined && (!Number.isInteger(opts.limit) || opts.limit < 0)) || (opts.offset !== undefined && (!Number.isInteger(opts.offset) || opts.offset < 0))) throw new Error("${fn}FtsSearch：limit/offset 必须是非负整数（与 ListPaged 同款守卫，B7）；不传 = 全量命中，分页显式传");`);
+      lines.push(`  if (opts.limit === undefined && opts.offset !== undefined) throw new Error("${fn}FtsSearch：offset 必须与 limit 同传（无 limit 的 offset 无分页窗口，拒绝静默忽略）");`);
+      lines.push("  if (opts.limit === undefined) {");
+      lines.push(`    return db.prepare(${fn}FtsSql).all(query) as ${Pascal}Row[];`);
+      lines.push("  }");
+      lines.push(`  return db.prepare(\`\${${fn}FtsSql} LIMIT ? OFFSET ?\`).all(query, opts.limit, opts.offset ?? 0) as ${Pascal}Row[];`);
+      lines.push("}");
+      lines.push("");
+      lines.push(`export function ${fn}FtsCount(db: Pick<SqliteDb, "prepare">, query: string): number {`);
+      lines.push(`  return (db.prepare("SELECT COUNT(*) AS n FROM ${ft} WHERE ${ft} MATCH ?").get(query) as { n: number }).n;`);
+      lines.push("}");
+      lines.push("");
+    }
   }
   return lines.join("\n").replace(/\n+$/, "\n");
 }

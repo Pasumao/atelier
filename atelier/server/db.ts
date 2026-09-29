@@ -33,6 +33,13 @@ export type ColumnDef = {
 
 export type IndexDef = { name: string; columns: string[]; unique?: boolean };
 
+/**
+ * FTS5 全文搜索声明（B6，opts.fts）：external-content 模式——虚表 `<t>_fts` 以 content='<t>'
+ * 免双写存储、content_rowid='<pk>' 直连主表 rowid 别名（故仅支持单列 integer 主键的表），
+ * 同步触发器三元组 `<t>_fts_ai/_ad/_au` 由 createTableSql/dropTableSql 按 DDL 单源产出。
+ */
+export type FtsDef = { columns: string[] };
+
 /** table() 产物：数据契约单源（gen-db 的解析对象与 MCP db.schema 的数据源同此形状） */
 export type TableDef = {
   name: string;
@@ -40,6 +47,8 @@ export type TableDef = {
   /** 主键列序（声明序）；无显式主键的 rowid 表为 []（该类表不生成 CRUD——见 gen-db） */
   primaryKey: string[];
   indexes: IndexDef[];
+  /** FTS5 全文搜索声明（B6，opts.fts 透传；未声明则无此键——产物形状纯加法） */
+  fts?: FtsDef;
   /** FlatSchema 投影：端点 output 契约可直接引用表列子集（pick）——数据契约与端点契约同规范单源 */
   rowSchema: FlatSchema;
 };
@@ -63,16 +72,23 @@ function flatFieldType(col: ColumnDef): "number" | "string" {
 
 /**
  * 扁平表定义（数据契约单源入口）。列定义必须是普通对象字面量（§2.1 纪律）；
- * primaryKey 隐含 notNull（rowSchema 层）；enum 透传进 rowSchema。
- * 构造期即校验（标识符白名单/类型全集/未知键/enum 同质/references 形状）——契约错误
- * 炸在定义处，不留给运行时或生成器。
+ * primaryKey 隐含 notNull（rowSchema 层）；enum 透传进 rowSchema；
+ * opts.fts 声明 FTS5 全文搜索（B6：external-content 虚表 + 触发器同步，仅 text 列 +
+ * 单列 integer 主键表——校验见下）。
+ * 构造期即校验（标识符白名单/类型全集/未知键/enum 同质/references 形状/opts 键/fts 形状）——
+ * 契约错误炸在定义处，不留给运行时或生成器。
  */
 export function table(
   name: string,
   columns: Record<string, ColumnDef>,
-  opts: { indexes?: IndexDef[] } = {}
+  opts: { indexes?: IndexDef[]; fts?: { columns: string[] } } = {}
 ): TableDef {
   assertIdent("表", name);
+  for (const k of Object.keys(opts)) {
+    if (k !== "indexes" && k !== "fts") {
+      throw new Error(`数据契约错误：表 ${name} 有未知选项 ${k}（允许：indexes/fts——拼错约束名必须硬错）`);
+    }
+  }
   const keys = Object.keys(columns);
   if (keys.length === 0) {
     throw new Error(`数据契约错误：表 ${name} 至少需要一列`);
@@ -127,11 +143,53 @@ export function table(
       }
     }
   }
+  let fts: FtsDef | undefined;
+  if (opts.fts != null) {
+    if (typeof opts.fts !== "object" || Array.isArray(opts.fts)) {
+      throw new Error(`数据契约错误：表 ${name} 的 fts 必须是对象（{ columns: string[] }）`);
+    }
+    for (const k of Object.keys(opts.fts)) {
+      if (k !== "columns") {
+        throw new Error(`数据契约错误：表 ${name} 的 fts 有未知键 ${k}（允许：columns——拼错约束名必须硬错）`);
+      }
+    }
+    if (!Array.isArray(opts.fts.columns) || opts.fts.columns.length === 0) {
+      throw new Error(`数据契约错误：表 ${name} 的 fts 至少需要一列（FTS5 虚表无列不可用）`);
+    }
+    const seen = new Set<string>();
+    for (const c of opts.fts.columns) {
+      if (!(c in columns)) {
+        throw new Error(`数据契约错误：表 ${name} fts 引用未知列 ${c}`);
+      }
+      if (columns[c].type !== "text") {
+        throw new Error(`数据契约错误：表 ${name} fts 列 ${c} 类型非法：只允许 text（实际 ${columns[c].type}——FTS5 索引的是文本列）`);
+      }
+      if (seen.has(c)) {
+        throw new Error(`数据契约错误：表 ${name} fts 列重复：${c}`);
+      }
+      seen.add(c);
+    }
+    // FTS5 external-content 的 content_rowid 需要 rowid 别名列——单列 INTEGER PRIMARY KEY。
+    // 复合主键/无主键/text 主键表暂不支持 fts（诚实硬错指路，不静默产出跑不起来的 DDL）。
+    if (primaryKey.length !== 1 || columns[primaryKey[0]].type !== "integer") {
+      const actual =
+        primaryKey.length === 0
+          ? "无主键"
+          : primaryKey.length > 1
+            ? `复合主键 ${primaryKey.join("/")}`
+            : `${columns[primaryKey[0]].type} 主键 ${primaryKey[0]}`;
+      throw new Error(
+        `数据契约错误：表 ${name} 开启 fts 要求单列 integer 主键（FTS5 external-content 以 content_rowid 直连主表 rowid 别名；实际：${actual}）——复合主键/text 主键表暂不支持 fts，请去掉 fts 或走手写 SQL 通道（ctx.db.prepare 直用，§5.3）`
+      );
+    }
+    fts = { columns: [...opts.fts.columns] };
+  }
   return {
     name,
     columns,
     primaryKey,
     indexes,
+    ...(fts ? { fts } : {}),
     rowSchema: { type: "object", reqProps, ...(Object.keys(optProps).length > 0 ? { optProps } : {}) },
   };
 }
@@ -170,6 +228,12 @@ const SQL_TYPE: Record<SqlColumnType, string> = { integer: "INTEGER", text: "TEX
  * cascade 不隐式（§5.1）：绝不产出 ON DELETE CASCADE——需要级联在迁移 SQL 里显式写。
  * primaryKey 列一律补 NOT NULL（不依赖 SQLite 对非 INTEGER PRIMARY KEY 的历史可空怪癖）；
  * 单列整型主键仍是 rowid 别名（INSERT 省略即自增）。
+ * fts（B6）：声明 opts.fts 的表在主表/索引之后追加 FTS5 external-content 三件套——
+ * `CREATE VIRTUAL TABLE <t>_fts USING fts5(<cols>, content='<t>', content_rowid='<pk>')`
+ * 免双写存储（索引在虚表、行值留主表，读时经 rowid 直连）+ 同步触发器三元组
+ * `<t>_fts_ai`（AFTER INSERT 直插）/`_ad`（AFTER DELETE 走 `<t>_fts(<t>_fts,...) VALUES('delete',...)`
+ * 特殊 delete 命令）/`_au`（AFTER UPDATE 先 delete 后插）；虚表列名/触发器体里的 new./old.
+ * 引用同样只来自契约列名，不破参数化红线。
  */
 export function createTableSql(def: TableDef): string {
   const lines: string[] = [];
@@ -192,6 +256,18 @@ export function createTableSql(def: TableDef): string {
   for (const idx of def.indexes) {
     sql += `\nCREATE ${idx.unique ? "UNIQUE " : ""}INDEX IF NOT EXISTS ${idx.name} ON ${def.name} (${idx.columns.join(", ")});`;
   }
+  if (def.fts) {
+    const ft = `${def.name}_fts`;
+    const pk = def.primaryKey[0];
+    const colList = def.fts.columns.join(", ");
+    const insCols = `rowid, ${colList}`;
+    const newVals = [`new.${pk}`, ...def.fts.columns.map((c) => `new.${c}`)].join(", ");
+    const oldVals = [`old.${pk}`, ...def.fts.columns.map((c) => `old.${c}`)].join(", ");
+    sql += `\nCREATE VIRTUAL TABLE IF NOT EXISTS ${ft} USING fts5(${colList}, content='${def.name}', content_rowid='${pk}');`;
+    sql += `\nCREATE TRIGGER IF NOT EXISTS ${ft}_ai AFTER INSERT ON ${def.name} BEGIN\n  INSERT INTO ${ft}(${insCols}) VALUES (${newVals});\nEND;`;
+    sql += `\nCREATE TRIGGER IF NOT EXISTS ${ft}_ad AFTER DELETE ON ${def.name} BEGIN\n  INSERT INTO ${ft}(${ft}, ${insCols}) VALUES ('delete', ${oldVals});\nEND;`;
+    sql += `\nCREATE TRIGGER IF NOT EXISTS ${ft}_au AFTER UPDATE ON ${def.name} BEGIN\n  INSERT INTO ${ft}(${ft}, ${insCols}) VALUES ('delete', ${oldVals});\n  INSERT INTO ${ft}(${insCols}) VALUES (${newVals});\nEND;`;
+  }
   return sql;
 }
 
@@ -200,7 +276,17 @@ export function createTableSql(def: TableDef): string {
  * 红线注记同 createTableSql（标识符只来自契约定义）；cascade 不隐式（§5.1）：
  * DROP 不带级联语义——启用 PRAGMA foreign_keys 且存在子表引用时，由迁移作者显式安排
  * 删除顺序或级联语句（gen-db 的 down 骨架按编号逆序回滚，子表先于父表）。
+ * fts（B6）：声明 fts 的表先 DROP TRIGGER ×3（触发器先删）再 DROP 虚表，最后主表——
+ * external-content 虚表不会随主表自动消失，顺序颠倒会留下悬空索引。
  */
 export function dropTableSql(def: TableDef): string {
-  return `DROP TABLE IF EXISTS ${def.name};`;
+  if (!def.fts) return `DROP TABLE IF EXISTS ${def.name};`;
+  const ft = `${def.name}_fts`;
+  return [
+    `DROP TRIGGER IF EXISTS ${ft}_ai;`,
+    `DROP TRIGGER IF EXISTS ${ft}_ad;`,
+    `DROP TRIGGER IF EXISTS ${ft}_au;`,
+    `DROP TABLE IF EXISTS ${ft};`,
+    `DROP TABLE IF EXISTS ${def.name};`,
+  ].join("\n");
 }

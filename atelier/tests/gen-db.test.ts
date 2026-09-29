@@ -301,9 +301,10 @@ describe("gen db fts 全文搜索（B6）：opts 解析透传 + crud 投影 + �
       'export function articlesFtsSearch(db: Pick<SqliteDb, "prepare">, query: string, opts: { limit?: number; offset?: number } = {}): ArticlesRow[] {'
     );
     expect(text).toContain('export function articlesFtsCount(db: Pick<SqliteDb, "prepare">, query: string): number {');
-    // 查询形状：主表 JOIN 虚表 + MATCH ? + bm25 排序；query/LIMIT/OFFSET 全 ? 绑定（零值拼接红线）
+    // 查询形状：主表 JOIN 虚表 + MATCH ? + bm25 排序；列名表名限定（external-content 虚表
+    // 暴露同名列，裸列名 JOIN ambiguous——运行时对拍抓出后修正）；query/LIMIT/OFFSET 全 ? 绑定
     expect(text).toContain(
-      "SELECT id, title, body FROM articles JOIN articles_fts ON articles.id = articles_fts.rowid WHERE articles_fts MATCH ? ORDER BY bm25(articles_fts)"
+      "SELECT articles.id, articles.title, articles.body FROM articles JOIN articles_fts ON articles.id = articles_fts.rowid WHERE articles_fts MATCH ? ORDER BY bm25(articles_fts)"
     );
     expect(text).toContain("LIMIT ? OFFSET ?");
     expect(text).toContain("SELECT COUNT(*) AS n FROM articles_fts WHERE articles_fts MATCH ?");
