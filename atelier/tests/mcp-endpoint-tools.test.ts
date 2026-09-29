@@ -64,6 +64,29 @@ const SERVER_STATUS = {
     },
   ],
   live: { subscriberCount: 3, endpoints: ["chat.ask"] },
+  // jobs 段（形状 = server/jobs.ts JobsStats：counts 四态计数 + recent 尾部行，ts = epoch ms 数字，
+  // durMs 仅终态行非 null——stats() 映射同源）
+  jobs: {
+    counts: { pending: 2, running: 1, done: 7, failed: 1 },
+    recent: [
+      { id: 12, type: "email.send", queue: "default", status: "pending", attempts: 0, durMs: null, ts: 1759150000000 },
+      { id: 13, type: "report.build", queue: "default", status: "done", attempts: 1, durMs: 42, ts: 1759150001000 },
+      { id: 14, type: "report.build", queue: "default", status: "failed", attempts: 3, durMs: 120, ts: 1759150002000 },
+    ],
+  },
+  // email 段（形状 = server/email.ts EmailLogEntry 的调试面投影 EmailStatusEntry：恰六字段
+  // id/ts(ISO 串)/transport/to/subject/status，不含 payload/error——introspect.ts 同源）
+  email: [
+    { id: 1, ts: "2026-09-29T08:00:00.000Z", transport: "mock", to: "u1@example.com", subject: "第 1 封", status: "ok" },
+    { id: 2, ts: "2026-09-29T08:01:00.000Z", transport: "mock", to: "u2@example.com", subject: "重置密码", status: "failed" },
+  ],
+  // uploads 段（形状 = 分支 A 钉死契约：faces 资产注册 / assets 台账聚合 / tail ≤20 条 id 降序恰六字段无 path；
+  // 仅 createHandler({ uploads }) 装配后出现）
+  uploads: {
+    faces: [{ name: "avatar", accept: ["image/png"], maxBytes: 1048576, auth: "session" }],
+    assets: { count: 42, bytes: 1048576 },
+    tail: [{ id: 7, name: "upload", mime: "image/png", size: 1234, sha256: "deadbeef", createdAt: "2026-09-29T12:00:00.000Z" }],
+  },
 };
 
 /* ---------- 静态链 fixture（impact.mjs 消费的 grep 级事实） ---------- */
@@ -147,6 +170,20 @@ function fakeHandler(req: http.IncomingMessage, res: http.ServerResponse) {
   if (req.method === "GET" && urlPath === "/__atelier/server-status") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(SERVER_STATUS));
+    return;
+  }
+  // server.health 探活桩（health.ts 三事实形状：ok/uptimeMs/db/version 恒恰四键）：
+  // 缺省 mount=/api → 200 健康；/degraded mount → 503 db:error（非 200 是数据，orchestrator 报警语义）
+  if (req.method === "GET" && urlPath === "/api/__atelier/health") {
+    hits.push({ method: "GET", urlPath, body: null });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, uptimeMs: 12345, db: "ok", version: null }));
+    return;
+  }
+  if (req.method === "GET" && urlPath === "/degraded/__atelier/health") {
+    hits.push({ method: "GET", urlPath, body: null });
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: false, uptimeMs: 1, db: "error", version: null }));
     return;
   }
   if (req.method === "POST") {
@@ -382,10 +419,98 @@ describe("FS-6 dev face 不在：四段式结构化错误（绝不静默空结�
   });
 });
 
+/* ---------- MCP 扩张批 B：jobs/email/uploads/health 四面四工具（36→40） ---------- */
+
+describe("MCP 批B 四工具·段在场（canned server-status 三段 + health 探活桩）", () => {
+  it("jobs.status：jobs 段投影（counts 四态 + recent 尾部原样）", async () => {
+    const res = (await callTool("jobs.status")) as any;
+    expect(res.jobs).toEqual(SERVER_STATUS.jobs);
+    expect(res.jobs.counts).toEqual({ pending: 2, running: 1, done: 7, failed: 1 });
+    expect(res.jobs.recent[2]).toMatchObject({ id: 14, status: "failed", durMs: 120 });
+    expect(res.source).toBe("/__atelier/server-status");
+    expect(res.note).toBeUndefined(); // 在场 = 无缺省 note
+  });
+
+  it("email.log：count/failed/entries 投影（failed 过滤 = status:'failed'，取值源 EmailLogEntry 'ok'|'failed'）", async () => {
+    const res = (await callTool("email.log")) as any;
+    expect(res.count).toBe(2);
+    expect(res.failed).toBe(1);
+    expect(res.entries).toEqual(SERVER_STATUS.email);
+    expect(Object.keys(res.entries[0]).sort()).toEqual(["id", "status", "subject", "to", "transport", "ts"]); // 恰六字段
+    expect(String(res.note)).toContain("atelier_email_log"); // 全量台账指路 SQL 直读
+  });
+
+  it("uploads.status：段透传（faces/assets/tail 原样，零字段级再投影）", async () => {
+    const res = (await callTool("uploads.status")) as any;
+    expect(res.faces).toEqual(SERVER_STATUS.uploads.faces);
+    expect(res.assets).toEqual({ count: 42, bytes: 1048576 });
+    expect(res.tail).toEqual(SERVER_STATUS.uploads.tail);
+    expect("path" in res.tail[0]).toBe(false); // 契约钉：恰六字段无 path
+    expect(res.source).toBe("/__atelier/server-status");
+  });
+
+  it("server.health：GET <mount|/api>/__atelier/health——200 返回 ok/status/durMs/body；非 200 是数据不抛（health.ts 口径）", async () => {
+    hits.length = 0;
+    const res = (await callTool("server.health")) as any;
+    expect(res).toMatchObject({ ok: true, status: 200, body: { ok: true, uptimeMs: 12345, db: "ok", version: null } });
+    expect(typeof res.durMs).toBe("number");
+    expect(hits[0]).toMatchObject({ method: "GET", urlPath: "/api/__atelier/health" }); // mount 缺省 /api
+    const degraded = (await callTool("server.health", { mount: "/degraded/" })) as any; // 尾斜杠经 mount 清洗
+    expect(degraded.ok).toBe(false);
+    expect(degraded.status).toBe(503); // 非 200 原样作数据返回——绝不抛
+    expect(degraded.body).toMatchObject({ ok: false, db: "error" });
+    expect(hits[1]).toMatchObject({ method: "GET", urlPath: "/degraded/__atelier/health" });
+  });
+});
+
+describe("MCP 批B 四工具·段缺省（三段全缺裸 face——缺省诚实返回，db.migrations 同款）", () => {
+  it("jobs/email/uploads 段缺省 → null + 装配指路 note，绝不编造空结果", async () => {
+    const bare = http.createServer((req, res) => {
+      const urlPath = (req.url ?? "").split("?")[0];
+      if (req.method === "GET" && urlPath === "/__atelier/server-status") {
+        const { jobs: _j, email: _e, uploads: _u, ...rest } = SERVER_STATUS; // 三段全缺 = 键不出现（契约：未装配 = 段缺省）
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(rest));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    await new Promise<void>((r) => bare.listen(0, "127.0.0.1", r));
+    const port = (bare.address() as { port: number }).port;
+    const { callEndpointTool } = await import("../mcp/endpoint-tools.mjs");
+    const ctx = { devUrl: `http://127.0.0.1:${port}`, devToken: "", projectRoot: APP_ROOT };
+    try {
+      const j = (await callEndpointTool("jobs.status", {}, ctx)) as any;
+      expect(j.jobs).toBeNull();
+      expect(String(j.note)).toContain("createHandler({ jobs })");
+      const e = (await callEndpointTool("email.log", {}, ctx)) as any;
+      expect(e.email).toBeNull();
+      expect(String(e.note)).toContain("createHandler({ email })");
+      const u = (await callEndpointTool("uploads.status", {}, ctx)) as any;
+      expect(u.uploads).toBeNull();
+      expect(String(u.note)).toContain("createHandler({ uploads })");
+    } finally {
+      await new Promise<void>((r) => bare.close(() => r()));
+    }
+  });
+
+  it("server.health 传输层不通 → ATR-4xx-dev（fix 指路 pnpm dev）——健康面自己不可达才报错", async () => {
+    const dead = http.createServer();
+    await new Promise<void>((r) => dead.listen(0, "127.0.0.1", r));
+    const deadPort = (dead.address() as { port: number }).port;
+    await new Promise<void>((r) => dead.close(() => r())); // 拿一个确定无监听的端口
+    const { callEndpointTool } = await import("../mcp/endpoint-tools.mjs");
+    await expect(
+      callEndpointTool("server.health", {}, { devUrl: `http://127.0.0.1:${deadPort}`, devToken: "", projectRoot: APP_ROOT }),
+    ).rejects.toMatchObject({ atr: { code: "ATR-4xx-dev", fix: expect.stringContaining("pnpm dev") } });
+  });
+});
+
 /* ---------- stdio e2e：入口形态 + tools/list 计数 ---------- */
 
 describe("stdio e2e（spawn server.mjs）", () => {
-  it("initialize → tools/list 含 8 个新工具 + tasks 扩展 3 工具（33+3=36）→ tools/call endpoint.list", async () => {
+  it("initialize → tools/list 含 8 个 FS-6 工具 + tasks 3 + 四面 4（33+3+4=40）→ tools/call endpoint.list", async () => {
     const child = spawn(process.execPath, [SERVER_MJS], {
       env: { ...process.env, ATELIER_DEV_URL: baseUrl, ATELIER_PROJECT_ROOT: APP_ROOT, ATELIER_TOOLSETS: "" },
       stdio: ["pipe", "pipe", "pipe"],
@@ -409,8 +534,8 @@ describe("stdio e2e（spawn server.mjs）", () => {
       await rpc(1, "initialize", { protocolVersion: "2025-06-18" });
       const list = await rpc(2, "tools/list");
       const names: string[] = list.result.tools.map((t: any) => t.name);
-      expect(names.length).toBe(36);
-      for (const t of ["endpoint.list", "endpoint.contract", "endpoint.impact", "db.schema", "db.migrations", "server.introspect", "endpoint.call", "endpoint.journal", "tasks.get", "tasks.update", "tasks.cancel"]) {
+      expect(names.length).toBe(40);
+      for (const t of ["endpoint.list", "endpoint.contract", "endpoint.impact", "db.schema", "db.migrations", "server.introspect", "endpoint.call", "endpoint.journal", "tasks.get", "tasks.update", "tasks.cancel", "jobs.status", "email.log", "uploads.status", "server.health"]) {
         expect(names).toContain(t);
       }
       const call = await rpc(3, "tools/call", { name: "endpoint.list", arguments: {} });

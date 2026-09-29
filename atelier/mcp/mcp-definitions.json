@@ -658,6 +658,62 @@
     }
    },
    "errors": []
+  },
+  {
+   "name": "jobs.status",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Job queue snapshot from the dev face server-status jobs segment: per-status counts (pending/running/done/failed) + recent tail (~20). Absent segment = honest null + assembly pointer (createHandler({ jobs })) — never a fabricated empty queue.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "errors": []
+  },
+  {
+   "name": "email.log",
+   "face": "audit",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Email delivery ledger tail from the dev face server-status email segment (six-field projection id/ts/transport/to/subject/status; ok AND failed — what was sent and what bounced). Tail is bounded (~20): full ledger goes through atelier_email_log SQL. Absent segment = honest null + assembly pointer.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "errors": []
+  },
+  {
+   "name": "uploads.status",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Uploads/assets face snapshot from the dev face server-status uploads segment, passed through verbatim (declared faces + asset ledger + tail) — no field-level re-projection, zero contract drift surface. Absent segment = honest null + assembly pointer (createHandler({ uploads })).",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {}
+   },
+   "errors": []
+  },
+  {
+   "name": "server.health",
+   "face": "query",
+   "priority": "P1",
+   "status": "implemented",
+   "summary": "Probe the server-face health endpoint (GET <mount|/api>/__atelier/health): body ok/uptimeMs/db/version plus HTTP status and latency. Non-200 is data, never thrown (health.ts semantics: a failing db probe answers 503 for orchestrator alerting); transport-level unreachability is the only structured error.",
+   "params": {
+    "type": "object",
+    "reqProps": {},
+    "optProps": {
+     "mount": {
+      "type": "string"
+     }
+    }
+   },
+   "errors": []
   }
  ]
 }

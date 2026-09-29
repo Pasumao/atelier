@@ -10,9 +10,9 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 | Face | Tools | Power |
 |---|---|---|
 | **Query (read-only)** | `structure.map` · `structure.check` · `graph.static` · `registry.list_components` · `registry.get_component` · `tokens.list` · `state.snapshot` · `state.get` · `state.graph` · `state.journal` · `ui.screenshot` · `ui.a11y` · `docs.search` · `tasks.get` | inspect only — `structure.*`/`graph.static` computed server-locally, no dev server needed |
-| **Query (server face)** | `endpoint.list` · `endpoint.contract` · `endpoint.impact` · `db.schema` · `db.migrations` · `server.introspect` | inspect the full-stack surface — served from the app dev face `server-status`; `endpoint.impact` is static (no dev face) |
+| **Query (server face)** | `endpoint.list` · `endpoint.contract` · `endpoint.impact` · `db.schema` · `db.migrations` · `server.introspect` · `jobs.status` · `uploads.status` · `server.health` | inspect the full-stack surface — served from the app dev face `server-status`; `endpoint.impact` is static (no dev face); `server.health` probes the health endpoint directly |
 | **Operation** | `checkpoint.list` · `checkpoint.rollback` · `checkpoint.source_list` · `checkpoint.source_commit` · `checkpoint.source_rollback` · `state.time_travel` · `test.run` · `snapshot.diff` · `snapshot.review_diff` · `diff.report` · `endpoint.call` · `tasks.update` · `tasks.cancel` | changes state; **audit-logged**, confirm tier applies |
-| **Audit** | `audit.log` · `feedback.read` · `endpoint.journal` | read side effects + human feedback |
+| **Audit** | `audit.log` · `feedback.read` · `endpoint.journal` · `email.log` | read side effects + human feedback |
 
 ## Command ↔ tool mapping (use the tool when the CLI is not enough)
 
@@ -39,7 +39,7 @@ description: Atelier built-in tool surface. Query / operation / audit faces, com
 
 Tools accept **flat** schemas (no `$ref`/`oneOf`) — identical to component contracts. If a tool's `fix`/schema is unfamiliar, query `docs.search` instead of guessing.
 
-## Wire notes (v0.4 — 36 tools defined; the server-face 8 consume the app dev face `server-status`)
+## Wire notes (v0.4 — 40 tools defined; the server-face tools consume the app dev face `server-status`)
 
 - `state.get`：path = `sig-<n>[.子路径]`（信号按安装序编号，无 debugName——bridge 已知边界）；拿不准先 `state.snapshot` 看全貌。
 - `state.graph`：活依赖图——signals（sig-N 键+kind）与每条 effect 依赖边；sig-N 与 `state.snapshot.signals` 同一键空间；适合改代码前判断"动哪个信号会影响哪些 effect"。
@@ -66,6 +66,10 @@ specs/<name>.feedback.md  # 自由格式 markdown，原文返回
 - `db.schema`（表/列/索引，可按 `table` 聚焦）/ `db.migrations`（head/applied/pending——不可逆 down 仍是人工 CLI `--force`）/ `server.introspect`（server 摘要 + live 订阅 + journal 尾部）。
 - `endpoint.journal`：command 审计（成功与失败同源呈现）——"代理改了什么、砸了什么"从这里查。
 - `endpoint.call`：POST `<mount|/api>/<name>` JSON 体；响应体/状态/耗时返回，端点级 ATR 错误原样留在 body 作数据（不吞）；confirm=ask 时走多轮审批（见上节——首轮 inputRequired + requestState，二次提交 `_approval`）。
+- `jobs.status`：队列快照（counts 四态计数 + recent 尾部 ~20 条，jobs.ts JobsStats 投影）——"堆积在哪、什么在失败"从这里查；段缺省 = 诚实 null + 装配指路（`createHandler({ jobs })`），绝不编造空队列。
+- `email.log`：投递记账尾部（六字段 id/ts/transport/to/subject/status，ok 与 failed 同源呈现）；tail 有界 ~20 条——全量台账走 `atelier_email_log` SQL 直读；段缺省 = 诚实 null + 装配指路（决策 31）。
+- `uploads.status`：资产面快照原样透传（faces 注册 + assets 台账聚合 + tail）——零字段级再投影，漂移面压到零；段缺省 = 诚实 null + 装配指路（决策 32）。
+- `server.health`：GET `<mount|/api>/__atelier/health` 探活（body ok/uptimeMs/db/version + HTTP 状态/耗时）——**非 200 是数据不抛**（db 探活失败 = 503，orchestrator 报警语义）；传输层不通才结构化报错。
 - live 组在 dev face 不在时返回四段式结构化错误（fix 指路应用目录 `pnpm dev`），绝不静默空结果。
 - 后台任务口径（`src/server/jobs/README.md` 同源，2026-09-28 差距批 A1 起队列已落地）：`startJobs({ db, handlers, cron? })` 装配后 `ctx.jobs.enqueue` 投递（tx 内投递与业务写同事务原子）、`ctx.kv.setIfAbsent` 做幂等去重（ATR-350/351 参数面）；无 jobs 装配的应用沿用旧口径——command 内联执行，长任务的 command 必须声明 `timeoutMs`（超时 ATR-322；handler 监听 `ctx.signal` 提前退出）。jobs 内省走 server-status 的 `jobs` 段（未装配不出现）。
 
