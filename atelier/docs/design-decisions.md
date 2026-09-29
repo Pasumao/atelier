@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-28**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批）；未决项 2 条见文末。
+> 已决 **0-29**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -438,6 +438,14 @@
 - **版本引用面纪律**：框架版本单一源 = `atelier/package.json`；`mcp/mcp-definitions.json` `$meta.version`（MCP serverInfo 真实消费方）、CLI 横幅、dev 面 registry meta 随发布同步。文档自身的版本号（SPEC v0.2 / ARCHITECTURE v0.2 等）与代码内部语义标签（core.ts "v0.2 订阅模型"）**不属**框架发布版本，不随动——历史记录不改写。
 - 取舍：不引入 changesets/release-please 等发布编排工具（单人仓 + BACKLOG 归档行已是变更史单一源，工具链重复）；不设 LTS 分支（1.0 前无外部用户，支持负担承诺见 D-3 后果栏）。
 - 时间：2026-09-27（m12 批，统筹者单分支串行；release-ready 口径的 PM 拍板见 BACKLOG 归档行）。
+
+## 决策 29：command journal 持久化——追加事件表，重启不灭（差距批 B5）
+
+- **定论**：command 审计 journal 持久化为**追加事件表 `atelier_command_journal`**——迁移 journal `atelier_migration_journal`（决策 21）同款模式：**追加式**（一行 = 一次事件非当前态，只 INSERT 不 UPDATE）/ **惰性建表**（首条 command 入账时 `CREATE TABLE IF NOT EXISTS`，旧库零迁移获得）/ **框架自管**（不进应用迁移序列，应用 schema.ts 零感知）。内存环形（journalLimit）**保留**为无 db / `persist:false` / 落库失败 / 读回落时的兜底——持久化是**增益层不是替代**；introspect 读路径（server-status journal 段）有持久表时改读库尾部 N 条，dev 面 review 三源时间轴 / MCP endpoint.* 族消费面自动获得「重启不灭」的审计史。
+- **保留窗口 = 行数基**：`maxRows` 缺省 1 万，写时惰性裁最老（AUTOINCREMENT 单调 → 「保最新 maxRows」≡ 主键点删 `id ≤ lastId − maxRows`，每次写后不变式成立，无周期窗口期超限）；**时间基裁剪 v1 不做**（诚实边界）。
+- **脱敏与语义单源**：journalPush 是 journal 唯一写入口——W2 批递归脱敏产物（P1-6）直接落库，持久层**不二次实现脱敏**；只 command 条目入表（query 永不入账语义不变）；ok/failed 两态同源入账（D-F12 失败入账语义延伸到持久层）；列形状 = 内存条目 `EndpointJournalEntry` 的持久镜像，投影互逆（`server/command-journal.ts` 单源，两处注释互指）。
+- 取舍：**落库失败不反噬 command 响应**（console.warn 降级不抛——审计不挡业务，该条只存内存环形，不掩盖原始 command 结果）；error 列超 2KB 降级为 code + 截断 message 摘要（JSON 恒合法，不落半截串）；live 引擎 query 重算失败条目（ATR-321）属诊断非命令审计，**留内存**不入表；ok 路径写捕获槽**收槽先于 journal 入账**（持久化 INSERT 经同一装配句柄，sqlite.ts 捕获槽把写记录并入所有活跃槽——槽若仍开着会把框架表混进本 command 的自动失效键；顺序调整有红检用例钉住）；prod 语义不变（journal 照写——审计是安全语义非 dev 语义，§3.7；server-status 调试面 prod 隐身不变，表在库内可经备份/SQL 审计直达）；不引入 jsonl 追加文件方案（§3.5 原候选——单机形态 db 内表即可，与迁移 journal 同构零新概念，且天然共享 `atelier db backup` 备份面）。
+- 时间：2026-09-28（差距批 B5）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。

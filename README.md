@@ -77,7 +77,7 @@ node <atelier仓库路径>/atelier/mcp/server.mjs   # MCP 工具面（ATELIER_PR
 以下四点是 Atelier 与现有框架的实质差异，每条附实测与复现命令：
 
 **① 扁平 schema 一份三用** —— 同一个 `{reqProps, optProps}` 扁平形态同时充当组件契约（运行时校验 + token 校验，错误带错误码与 fix 行动指令）、MCP 工具参数（`mcp-definitions.json` 单源生成 tools/list）、注册表白名单渲染校验。无 $ref/oneOf，代理不猜。
-实测：框架 <!--@num:tests-->735<!--@/--> 用例 vitest 通过（另有 8 例实验台用例按环境跳过）；<!--@num:tools-->36<!--@/--> 工具单源接线，一致性校验全绿。
+实测：框架 <!--@num:tests-->745<!--@/--> 用例 vitest 通过（另有 8 例实验台用例按环境跳过）；<!--@num:tools-->36<!--@/--> 工具单源接线，一致性校验全绿。
 复现：`node atelier/scripts/check-skills.mjs` · `atelier/pnpm test`。
 
 **② 事务状态层 + 双轨回滚** —— 应用状态：命名合并 checkpoint（同名栈顶幂等，即轮级回滚）+ 增量事件日志（journal）+ 依赖图查询（`store.graph()` 与 journal 已接进 MCP，代理可直接问"现在哪些状态依赖什么"）；源码：git 源码锚，锚定前强制过三道门禁（测试绿 + 截图快照无漂移 + API 面无破坏性变更）。危险操作走 `agent.confirm` 确认闸，拒绝时返回结构化错误而非静默失败。
@@ -121,7 +121,7 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 - **Bun 路径实测过但无 CI 常规覆盖**：SQLite 薄宿主适配经真实 Bun 1.4.2 全语义面冒烟 + 全栈落库/持久化验证；但冒烟脚本需 bun 宿主手动跑（`scripts/bun-adapter-smoke.mjs`），未进常规测试门禁。影响：bun 回归依赖手动冒烟，报错文案匹配归一可能随 bun 升级失效（失效=差异重新可见，非静默）。出路：`atelier build --target=bun` 产物冒烟自证兜底。
 - **真实 CI 未首跑**：CI 矩阵已接线（linux/windows × node 22/24），但仓库未 push 远端，视觉冒烟作业保留 continue-on-error。影响：CI 门禁承诺（测试/结构/API 面）尚未在第三方环境兑现。出路：push 远端 + 首跑后摘除 continue-on-error（RELEASE-CHECKLIST 发布日动作）。
 - **Windows 进程收尾语义**：`atelier dev` 托管的 server 子进程在 Windows 上 kill = 即终止，优雅关停兜底窗口形同保障。影响：热重启瞬间可能有极小概率的端口/句柄残留。出路：监督器 SIGTERM 1.5s 兜底 + 未就绪 503 自愈，重启即恢复。
-- **command journal 内存环形**：命令审计 journal 为有界环形（默认 500 条）、进程重启清零；迁移 journal 持久（成败条目入账）但随数据库文件存亡。影响：跨重启的端点行为 diff 降级为 audit 源；删除库文件即丢失迁移史。出路：审计面 audit.jsonl 持久；迁移史以 checkpoint 台账为锚。
+- **command journal 保留窗口为行数基**：命令审计 journal 持久化为追加事件表（db 已装配即写、重启不灭；缺省保留 1 万行、写时裁最老，`createHandler({ journal: { persist: false } })` 可显式关闭回内存环形）；live 重算失败诊断条目仍只在内存。影响：超出保留窗口的最老事件滚出即不可查（时间基窗口 v1 不做）；删除库文件即丢失全部审计史（同迁移 journal 口径）。出路：窗口经 `journal.maxRows` 调大；关键节点以 checkpoint 台账为锚；库文件进常规备份（`atelier db backup`）。
 - **server 面 prod 激活为行为级**：服务面无打包器，prod 语义靠旗关断（调试面隐身/校验跳过），代码仍在产物内；构建期 DCE 只覆盖浏览器面。影响：server 产物体积不是最小。出路：单容器整目录部署语义（`atelier build`），体积优化非 1.0 目标。
 - **vendored 应用按 init 时点冻结**：应用获得的是 init 时刻的框架拷贝；新能力（MCP HTTP 直连、全页快照等）需 `atelier sync` 拉齐。影响：未 sync 的旧应用 MCP 直连 503（诚实指路 stdio）。出路：`node atelier/cli.mjs sync --target <dir>` 幂等拉齐，应用源码不受影响。
 - **正确率主张克制**：三臂对照实验在简单层与加难层（Wave-7 正式波 45 run）均全平——绝对口径 100% 达标、相对区分力为零；「技能包优势」主张悬置待干扰面/混合实验出数，我们不引用任何"首遍正确率优势"数字，请引用者同样克制。
