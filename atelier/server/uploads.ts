@@ -73,6 +73,9 @@ export const ASSETS_DDL = `CREATE TABLE IF NOT EXISTS atelier_assets (
   created_at INTEGER NOT NULL
 )`;
 
+/** stats() tail 条数上界（introspect server-status uploads 段的调试面有界呈现——全量走库直读，记账表 atelier_assets） */
+export const UPLOADS_STATUS_TAIL_LIMIT = 20;
+
 /* ---------------- 类型面 ---------------- */
 
 /** 上传面定义（defineUpload 产物；auth 语义复用端点拦截链——缺省 session，见决策 32） */
@@ -105,6 +108,24 @@ export type UploadResult = {
 /** 记账行读回形态（内部投影——path 相对布局） */
 type AssetRow = { id: number; name: string; mime: string; size: number; sha256: string; path: string; created_at: number };
 
+/** 资产台账读出行（stats() tail 投影——恰六字段，**不含 path**：磁盘布局不外泄调试面）；createdAt = created_at（INTEGER epoch ms，写路径 now.getTime() 单源）转 ISO 串（email 段 ts 同款） */
+export type UploadsAssetEntry = {
+  id: number;
+  name: string;
+  mime: string;
+  size: number;
+  sha256: string;
+  createdAt: string;
+};
+
+/** 上传面内省读出（UploadsFace.stats() 产物——introspect.ts server-status uploads 段 assets/tail 数据源；faces 投影由 endpoints.ts 注册表侧构建，注册表 uploadsDefs 只在那儿可见） */
+export type UploadsStats = {
+  /** 台账聚合：COUNT(*) 与 COALESCE(SUM(size),0)；未建表/空表 = {count:0,bytes:0}（真实事实非假数据，email.tail 未建表返回 [] 同款纪律） */
+  assets: { count: number; bytes: number };
+  /** 台账尾部 ≤ UPLOADS_STATUS_TAIL_LIMIT 条（id 降序 新→旧——调试面最新在前）；恰六字段投影（不含 path） */
+  tail: UploadsAssetEntry[];
+};
+
 /** 记账 db 句柄最小结构面（SqliteDb 四原语的结构子集——email.ts EmailLogDb 同形，测试可注入假句柄） */
 export type UploadsDb = {
   exec(sql: string): void;
@@ -127,6 +148,8 @@ export type UploadsFace = {
   handleUpload(args: { req: Request; def: UploadDef; mount: string }): Promise<Response>;
   /** GET <mount>/assets/<id>：查表 → 流式回文件（mime/Cache-Control immutable） */
   handleDownload(args: { id: string; mount: string }): Promise<Response>;
+  /** 内省窄口（MCP 批 A）：资产台账聚合 + 尾部投影（introspect.ts server-status uploads 段数据源——命名对齐 jobs.stats() 先例；纯读不建表，SQL 单源在本文件） */
+  stats(): UploadsStats;
 };
 
 /* ---------------- multipart/form-data 最小解析器（零依赖，单文件字段语义 v1） ---------------- */
@@ -568,6 +591,27 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
           },
         })
       );
+    },
+
+    // 内省窄口（MCP 批 A，jobs.stats()/email.tail() 同款先例）：聚合 + 尾部一次读出。
+    // 纯读不建表（email.tail 同款纪律）：表未建（装配后零上传）= 零值事实不是错误——
+    // 「零上传」是真实状态非假数据；聚合恒单行（COUNT/SUM 对空表 = 0/0，无需特判）。
+    stats(): UploadsStats {
+      const has = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(ASSETS_TABLE);
+      if (!has) return { assets: { count: 0, bytes: 0 }, tail: [] };
+      const agg = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS total FROM ${ASSETS_TABLE}`).get()!; // 常量聚合无外部值，免绑（决策 19 红线针对外部值——本文件全 ? 绑定口径不变）
+      const tail = db
+        .prepare(`SELECT id, name, mime, size, sha256, created_at FROM ${ASSETS_TABLE} ORDER BY id DESC LIMIT ?`)
+        .all(UPLOADS_STATUS_TAIL_LIMIT)
+        .map((r) => ({
+          id: Number(r.id),
+          name: String(r.name),
+          mime: String(r.mime),
+          size: Number(r.size),
+          sha256: String(r.sha256),
+          createdAt: new Date(Number(r.created_at)).toISOString(), // created_at = epoch ms（写路径 now.getTime() 单源）
+        }));
+      return { assets: { count: Number(agg.n), bytes: Number(agg.total) }, tail };
     },
   };
 }

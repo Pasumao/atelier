@@ -34,6 +34,7 @@ import { readCommandJournalTail } from "./command-journal.ts";
 import { MIGRATION_JOURNAL_TAIL_LIMIT, migrateStatus } from "./migrate.ts";
 import type { JobsStats } from "./jobs.ts"; // 仅类型——jobs 段数据经 handle.stats() 窄口取，SQL 单源在 jobs.ts
 import type { EmailLogEntry } from "./email.ts"; // 仅类型——email 段数据经 recorder.tail() 窄口取，SQL 单源在 email.ts
+import type { UploadsAssetEntry, UploadsStats } from "./uploads.ts"; // 仅类型——uploads 段 assets/tail 经 face.stats() 窄口取（SQL 单源在 uploads.ts），faces 投影由 endpoints.ts 注册表侧构建
 import { timingSafeEqual } from "node:crypto";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -73,10 +74,33 @@ export type ServerStatusSnapshot = {
    * prod 隐身语义沿用调试面整体（prod 旗下 introspectResponse 返回 null）。
    */
   email?: EmailStatusEntry[];
+  /**
+   * uploads 段（MCP 工具族扩张批，决策 32 上传面的内省位；可选位）：注册上传面全表投影（faces，
+   * name 字母序——uploadsDefs 注册表只在 endpoints.ts 闭包可见，投影由装配闭包构建）+ 资产台账
+   * 聚合与尾部（face.stats() 窄口读出，SQL 单源在 uploads.ts）。仅 createHandler({ uploads })
+   * 装配后出现；未装配 = 键不出现；读失败 = 段缺省（jobs/email 同款零假数据纪律）。tail 恰六字段
+   * 不含 path——磁盘布局不外泄调试面。
+   */
+  uploads?: UploadsStatus;
 };
 
 /** server-status email 段单行（EmailLogEntry 的调试面最小投影——恰六字段，不含 payload/error） */
 export type EmailStatusEntry = Pick<EmailLogEntry, "id" | "ts" | "transport" | "to" | "subject" | "status">;
+
+/** server-status uploads 段单面行（UploadDef 的调试面投影——恰四字段，缺省值诚实呈现：accept/maxBytes 未声明 = null 不编造缺省；auth 未声明 = "session" 是决策 32 生效缺省〔gateAuth 同口径〕的文档性投影） */
+export type UploadFaceStatusEntry = {
+  name: string;
+  accept: string[] | null;
+  maxBytes: number | null;
+  auth: string;
+};
+
+/** server-status uploads 段（faces 注册表投影 + stats() 窄口产物展开；三纪律同 jobs/email——装配在场才出现 / 读失败 = 段缺省 / 零假数据） */
+export type UploadsStatus = {
+  faces: UploadFaceStatusEntry[];
+  assets: { count: number; bytes: number };
+  tail: UploadsAssetEntry[];
+};
 
 /** prod 旗（endpoints.ts 同机制同读法——单点复制而非跨模块开私有口，两处注释互指） */
 function isProd(): boolean {
@@ -186,11 +210,13 @@ function introspectMigrations(db: ReadableDb, migrationsDir: string | null) {
  * opts.migrationsDir = 迁移目录（缺省 <cwd>/src/server/db/migrations——dev 托管 spawn cwd=应用根，
  * 直跑 main-server.ts 亦同；§5.4 目录约定单源在 scripts/migrate.mjs）；
  * opts.jobs = createHandler 装配的 jobs 句柄（A1/A4 差距批；未装配 = jobs 段不出现）；
- * opts.email = createHandler 装配的 email recorder（B3 差距批，决策 31；未装配 = email 段不出现）。
+ * opts.email = createHandler 装配的 email recorder（B3 差距批，决策 31；未装配 = email 段不出现）；
+ * opts.uploads = endpoints.ts 装配闭包组装的上传面窄口（faces 注册表投影 + face.stats 窄口——
+ * MCP 工具族扩张批；未装配 = uploads 段不出现）。
  */
 export function serverStatusSnapshot(
   registry: EndpointRegistry,
-  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; jobs?: { stats(): JobsStats }; email?: { tail(n: number): EmailLogEntry[] } } = {},
+  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; jobs?: { stats(): JobsStats }; email?: { tail(n: number): EmailLogEntry[] }; uploads?: { faces: UploadFaceStatusEntry[]; stats(): UploadsStats } } = {},
 ): ServerStatusSnapshot {
   // 端点全表 = registry.list() 摘要 + 契约体（get() 公开位逐个补全——不为内省开新的注册表写入口）
   const summaries = new Map(registry.list().map((s) => [s.name, s]));
@@ -250,6 +276,18 @@ export function serverStatusSnapshot(
     }
   }
 
+  // uploads 段（MCP 工具族扩张批）：面在场才出现——faces 投影由装配闭包构建（uploadsDefs 注册表
+  // 只在 endpoints.ts 可见），assets/tail 经 face.stats() 窄口读（SQL 单源在 uploads.ts；未建表 =
+  // 零值事实非假数据）。读失败 = 段缺省（零假数据，jobs/email 同款纪律）。
+  let uploads: ServerStatusSnapshot["uploads"];
+  if (opts.uploads != null) {
+    try {
+      uploads = { faces: opts.uploads.faces, ...opts.uploads.stats() };
+    } catch {
+      uploads = undefined; // 表损坏/句柄异常——诚实缺省，台账可经 SQL 直查
+    }
+  }
+
   // journal 段（B5 差距批，决策 29）：db 已装配且持久表存在 → 读库尾部 N 条（N = journalLimit，
   // 与内存环形同界——快照有界，全量走库直读；条目投影与内存条目字段逐一兼容）。表不存在（null）/
   // 未装配 db/读失败 → 回落内存环形（诚实降级，零假数据——回落语义与迁移 journal 段同款纪律）。
@@ -273,6 +311,7 @@ export function serverStatusSnapshot(
     dbNote,
     ...(jobs != null ? { jobs } : {}),
     ...(email != null ? { email } : {}),
+    ...(uploads != null ? { uploads } : {}),
   };
 }
 
@@ -292,7 +331,7 @@ const STARTED_AT = new Date().toISOString();
  */
 export function introspectResponse(
   registry: EndpointRegistry,
-  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; statusToken?: string; req?: Request; jobs?: { stats(): JobsStats }; email?: { tail(n: number): EmailLogEntry[] } } = {},
+  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; statusToken?: string; req?: Request; jobs?: { stats(): JobsStats }; email?: { tail(n: number): EmailLogEntry[] }; uploads?: { faces: UploadFaceStatusEntry[]; stats(): UploadsStats } } = {},
 ): Response | null {
   if (isProd()) return null;
   if (opts.statusToken != null) {
