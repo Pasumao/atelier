@@ -693,7 +693,7 @@ describeSqlite("MCP批A 内省：server-status uploads 段两态（装配 / 未�
     expect(Number.isNaN(Date.parse(uploads.tail[0]!.createdAt))).toBe(false);
   });
 
-  it("装配但零上传：faces 在场 + assets {count:0,bytes:0} + tail []（未建表 = 零值事实非假数据；纯读不建表）", async () => {
+  it("装配但零上传：faces 在场 + assets {count:0,bytes:0} + tail []（零上传 = 零值事实非假数据；stats 纯读不建表）", async () => {
     const db = await fixtureDb();
     const reg = new EndpointRegistry();
     reg.registerUpload(defineUpload({ name: "idle", auth: { type: "none" } }));
@@ -702,8 +702,10 @@ describeSqlite("MCP批A 内省：server-status uploads 段两态（装配 / 未�
     expect(uploads.faces.map((f) => f.name)).toEqual(["idle"]);
     expect(uploads.assets).toEqual({ count: 0, bytes: 0 });
     expect(uploads.tail).toEqual([]);
-    // 纯读不建表（email.tail 同款纪律）：内省读出后表仍不存在
-    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'atelier_assets'").get()).toBeUndefined();
+    // 表在装配期已由 createUploadsFace 尽力建成（jobs/email 同款先例——DDL 事务性见 uploads.ts 头注）；
+    // stats() 自身纯读不建表：空表聚合如实 {count:0,bytes:0}，绝不编造非零假象
+    const rows = db.prepare("SELECT COUNT(*) AS n FROM atelier_assets").get() as { n: number };
+    expect(rows.n).toBe(0);
   });
 
   it("tail 有界：≤20 条（恰第 21 条起滚出快照——调试面有界呈现，全量走库直读）", async () => {

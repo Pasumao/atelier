@@ -1029,7 +1029,9 @@ export class EndpointRegistry {
    * 面未装配时这两族路由诚实 404 ATR-310 指路装配（不落回「未知端点/改 POST」误导文案）；
    * 上传定义经 reg.registerUpload 注册（兄弟注册表不入端点表），鉴权经 gateAuth 单源（缺省
    * session fail-closed），定义精闸（maxBytes）在面内——JSON maxBodyBytes 闸对上传路由不生效
-   * （multipart 独立上限，桥面粗闸见 node-host.ts）。
+   * （multipart 独立上限，桥面粗闸见 node-host.ts）。MCP 工具族扩张批：uploads 装配后
+   * introspect server-status 增 uploads 段（faces 注册表投影 + assets/tail 台账读出——未装配 =
+   * 段不出现，零假数据）。
    */
   createHandler(
     opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; apiKeys?: ApiKeysOptions; jobs?: JobsHandle; email?: EmailRecorder; version?: string | null; journal?: CommandJournalPersistOptions; uploads?: UploadsFace } = {}
@@ -1065,6 +1067,21 @@ export class EndpointRegistry {
     // 路由诚实 404 指路装配（见下方路由块）。鉴权在分发器 gateAuth（缺省 session fail-closed），
     // 定义精闸在面内——本模块只做注册表与路由分派。
     const uploadsFace = opts.uploads;
+    // MCP 工具族扩张批：uploads 内省窄口（introspect.ts server-status uploads 段，jobs/email 同位
+    // 同式）——faces 投影由注册表 uploadsDefs 构建（name 字母序 = uploadNames() 同序；缺省值诚实
+    // 投影：accept/maxBytes 未声明 = null 不编造缺省，auth 未声明 = "session" 决策 32 生效缺省的
+    // 文档性投影），assets/tail 由 face.stats() 提供（SQL 单源在 uploads.ts）。未装配 opts.uploads =
+    // 窄口不出现 = 段不出现（零假数据；兄弟注册表不入端点表的既有负例不受影响——新增段不是端点表项）。
+    const uploadsStatus =
+      uploadsFace != null
+        ? {
+            faces: this.uploadNames().map((n) => {
+              const d = this.uploadsDefs.get(n)!;
+              return { name: d.name, accept: d.accept ?? null, maxBytes: d.maxBytes ?? null, auth: d.auth?.type ?? "session" };
+            }),
+            stats: () => uploadsFace.stats(),
+          }
+        : undefined;
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     /**
      * 分发共享 tail（差距批 A7，决策 34 提取）：ctx 装配（db/auth/signal/audit/setCookie/jobs/kv/email）
@@ -1234,7 +1251,7 @@ export class EndpointRegistry {
       //      A2 硬化5：statusToken 装配项透传——设置后该路由要求 x-atelier-token 头（401 ATR-340），
       //      未设置 = 行为零变化；prod 隐身优先于 token 判定（判定在 introspect 内部）。 ----
       if (req.method === "GET" && name === INTROSPECT_NAME) {
-        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs, email: opts.email });
+        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs, email: opts.email, uploads: uploadsStatus });
         if (res) return res;
       }
 
