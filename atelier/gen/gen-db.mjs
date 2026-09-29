@@ -4,7 +4,8 @@
  *
  * 读 <root>/src/server/db/schema.ts，生成三类产物（§5.2 表）：
  *   a. src/generated/db/tables.ts        每表行类型 + 表元数据规范命名导出（显式 import schema.ts）
- *   b. src/generated/db/crud.ts          每表 4 个薄函数 GetByPk/Insert/Update/Delete（SQL 内联可读、全参数化）
+ *   b. src/generated/db/crud.ts          每表 4 个薄函数 GetByPk/Insert/Update/Delete + 分页二原语
+ *                                        ListPaged/Count（B7，无 opt-in 全 PK 表无条件生成；SQL 内联可读、全参数化）
  *   c. src/server/db/migrations/NNN_<table>.{up,down}.sql  建表/删表迁移骨架（**追加式**：
  *      只为尚无迁移的表生成，编号 = 现有最大 NNN+1 递增；已存在迁移文件永不重写，§5.4）
  *   d. src/server/db/seeds/001_example.seed.sql  种子目录 + 示例骨架（D-F17，FS-M2(m2d) 加法；
@@ -348,7 +349,7 @@ function renderTables(tables, schemaFile, vendorDbFile, outFile) {
 function renderCrud(tables, vendorSqliteFile, outFile) {
   const relVendor = relImport(outFile, vendorSqliteFile);
   const lines = [];
-  lines.push("// @atelier-generated (gen db) — 极薄参数化 CRUD（§5.2：四原语量级，SQL 字面量内联可读）。");
+  lines.push("// @atelier-generated (gen db) — 极薄参数化 CRUD + 分页二原语（§5.2：四原语 + ListPaged/Count 量级，SQL 字面量内联可读）。");
   lines.push("// 红线（决策 19）：全参数化、零值拼接——值一律 ? 绑定；UPDATE 的 SET 列名来自下方生成时允许清单");
   lines.push("// （contract 定义，非运行时输入）。手写 SQL（join/聚合）一等公民：ctx.db.prepare 直用（§5.3）。");
   lines.push(`import type { SqliteDb, SqliteRunResult } from "${relVendor}";`);
@@ -398,6 +399,22 @@ function renderCrud(tables, vendorSqliteFile, outFile) {
     lines.push("");
     lines.push(`export function ${fn}Delete(db: Pick<SqliteDb, "prepare">, pk: ${pkParam}): SqliteRunResult {`);
     lines.push(`  return db.prepare("DELETE FROM ${t.name} WHERE ${where}").run(${pkArgs});`);
+    lines.push("}");
+    lines.push("");
+    // 分页二原语（B7，与 CRUD 同条件生成）：LIMIT/OFFSET v1（keyset 留门）；ORDER BY 主键升序
+    // （复合主键全列）保证分页窗口决定论稳定；负 limit 在 SQLite 语义=无界查询，生成代码内
+    // 一行显式守卫硬错不静默（决策 19 参数化红线不因分页破例——LIMIT/OFFSET 值仍全 ? 绑定）。
+    lines.push("/**");
+    lines.push(` * 分页列表（B7）：ORDER BY 主键升序${pkCols.length > 1 ? "（复合主键全列）" : ""}——同 limit/offset 恒同窗口，无重复/漏行；`);
+    lines.push(" * limit/offset 必须为非负整数（负 limit 在 SQLite 语义下是无界查询，显式硬错不静默）。");
+    lines.push(" */");
+    lines.push(`export function ${fn}ListPaged(db: Pick<SqliteDb, "prepare">, opts: { limit: number; offset?: number }): ${Pascal}Row[] {`);
+    lines.push(`  if (!Number.isInteger(opts.limit) || opts.limit < 0 || !Number.isInteger(opts.offset ?? 0) || (opts.offset ?? 0) < 0) throw new Error("${fn}ListPaged：limit/offset 必须是非负整数（正确用法：${fn}ListPaged(db, { limit: 20, offset: 0 })，offset 缺省 0）——负 limit 在 SQLite 中是无界查询，拒绝静默");`);
+    lines.push(`  return db.prepare("SELECT ${selCols} FROM ${t.name} ORDER BY ${pkCols.join(", ")} LIMIT ? OFFSET ?").all(opts.limit, opts.offset ?? 0) as ${Pascal}Row[];`);
+    lines.push("}");
+    lines.push("");
+    lines.push(`export function ${fn}Count(db: Pick<SqliteDb, "prepare">): number {`);
+    lines.push(`  return (db.prepare("SELECT COUNT(*) AS n FROM ${t.name}").get() as { n: number }).n;`);
     lines.push("}");
     lines.push("");
   }

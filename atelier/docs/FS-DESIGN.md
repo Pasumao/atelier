@@ -480,12 +480,23 @@ export const messages = table("messages", {
 |---|---|---|
 | `src/generated/db/tables.ts` | 每表行类型 + 表元数据常量（显式 import schema.ts） | 零修改可编译 |
 | `src/server/db/migrations/NNN_*.up/.down.sql` | 建表/索引迁移骨架（`--regen` 时**只增不改**——已应用迁移永不重写，见 §5.4） | 成对存在 + checksum |
-| `src/generated/db/crud.ts` | 每表极薄参数化 CRUD：`messagesGetByPk / messagesInsert / messagesUpdate / messagesDelete`（四原语量级，SQL 字符串内联可读） | 参数化唯一路径（红线） |
+| `src/generated/db/crud.ts` | 每表极薄参数化 CRUD：`messagesGetByPk / messagesInsert / messagesUpdate / messagesDelete` + 分页二原语 `messagesListPaged / messagesCount`（B7，见下方落地注记；SQL 字符串内联可读） | 参数化唯一路径（红线） |
 
 **克制声明**：不做查询构造器（query builder）、不做关系 API、不做懒加载——"贴 SQL"纪律
 （决策 19）；join/聚合/窗口 = 手写 SQL 经 `ctx.db.prepare()` 直用（§5.3）。CRUD 生成只为
 消掉最高频样板；sqlc 式 `.sql → 类型化函数` AOT 通道确认为空位但列 **B 队**（M2 不抢，
 先让基础面稳）。
+
+> **落地注记（2026-09-29，差距批 B7）**：分页 helper 就此补齐——`gen db` 在 CRUD 四原语之外为
+> 每张有主键表（与 CRUD 生成条件完全一致）**无条件**追加二原语 `messagesListPaged(db, { limit, offset? })`
+> 与 `messagesCount(db)`。无 opt-in 开关：分页是列表读取的高频刚需，开关位只会制造「忘了开」的
+> 静默缺口，纯加法零新契约面。v1 = **OFFSET/LIMIT**：`SELECT 全列 ORDER BY 主键升序（复合主键
+> 全列）LIMIT ? OFFSET ?`，值全 ? 绑定（决策 19 红线不因分页破例）；主键排序保证分页窗口
+> **决定论稳定**——同 limit/offset 恒同窗口，无重复/漏行；keyset/游标分页确认**留门**（OFFSET
+> 深翻页代价与并发漂移是已知边界，量级上来再升级）。守卫：ListPaged 生成代码第一行显式校验
+> limit/offset 为非负整数（`Number.isInteger(x) && x >= 0`），负值硬 throw 中文错误指明用法——
+> SQLite 负 LIMIT 语义 = 无界查询，显式硬错优于静默全表（gen-db 解析器"绝不静默降级"同款
+> 取向）；offset 缺省 0（`opts.offset ?? 0`），Count 无参数零守卫。测试：`tests/gen-db.test.ts`。
 
 ### 5.3 手写 SQL 通道与参数化红线
 
