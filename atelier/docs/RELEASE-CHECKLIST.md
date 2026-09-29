@@ -19,6 +19,7 @@
 | 10 | bun 产物构建冒烟 | `node atelier/cli.mjs build --root <scratch应用> --target=bun`（本机 bun 1.4.2） | 冒烟自证 PASS；bun 宿主侧另跑 `node atelier/scripts/bun-adapter-smoke.mjs` 16 项全 PASS（node 下诚实 exit 1 指路 bun） |
 | 11 | 性能四指标不回退 | `node atelier/cli.mjs bench --app <scratch应用>`（对照 README 性能表） | gzip ≤ 30KB · 10³ 节点挂载 ≤ 50ms · HMR ≤ 100ms · 截图回环 ≤ 500ms，四项不差于 README 表口径；回退即停下修，不粉饰 |
 | 12 | checkpoint 门禁可达 | 仓库根 `node atelier/cli.mjs checkpoint save "<版本>"` | 三道门（测试绿 + 快照无漂移 + API 面无破坏漂移）全过才许锚定；迁移 head 入台账 |
+| 13 | 发版时点 API 面终检（决策 28 实战） | `node atelier/cli.mjs api-diff check --strict` → 红出全部 additive（预期行为非事故）→ 人工核对红出清单与 CHANGELOG 新版条目一致 → `node atelier/cli.mjs api-diff snapshot` 刷新基线 → 常规 `api-diff check` 回绿 | 红出清单与 CHANGELOG 对账一致；基线刷新后常规 check PASS |
 
 **1.0.0 执行记录（2026-09-27，m12 批）**：#1 618 绿+8 skip（基线 615 + 形态钉 3）✅ · #2 3/3 ✅（先红后绿：红检 `ea4d013`）· #3 56-0 ✅ · #4 PASS ✅ · #5 sync 后 check PASS ✅ · #7 全链 PASS ✅ · #8 复验全绿 ✅ · 其余项沿用 m11 批复测证据（#6 双 MATCH `a1c2f01`、#9 405 ATR-311 `74627f9` 前后多批复验、#10 bun 1.4.2 16 项 `731fe74`、#11 四指标 ALL PASS `d3b2970`）。发布日若代码无漂移，本段只需重跑 #1/#4/#5；有漂移则全量重跑。
 
