@@ -611,6 +611,31 @@ await ctx.db.tx(async (tx) => {
   无增量备份（全量快照语义）、单文件库快照——库外状态不在射程。回归钉 = `tests/backup.test.ts`
   （9 用例）。
 
+### 5.8 email 适配边界〔议 → 差距批 B3 落地，决策 31〕
+
+- 原状：框架零命中（无 transport 概念，差距调研 §3-B3）。同「不内嵌 LLM/不内建云复制」纪律的
+  最小切口：**框架不内建发送，内建可验证的投递记账**。
+
+> **落地注记（2026-09-28，差距批 B3——决策 31）**：`atelier/server/email.ts` 单文件落地。
+> **机制**：① 显式 transport 接口 `EmailTransport = { name, send(msg) }`——应用自接 SMTP/Resend/SES
+> 等任意通道（name 自报进记账 transport 列），装配点 `createHandler({ email: createEmailRecorder({
+> db, transport?, maxRows? }) })` 明文接线；**框架不内建真实发送**，内建唯一 transport = mock
+> （零 IO 恒成功、dev/prod 同语义）。② 记账 = 追加事件表 `atelier_email_log`（决策 21/29 同款：
+> 追加式一行 = 一次投递请求/框架自管不进应用迁移序列/建表装配期尽力完成——SQLite DDL 事务性，
+> tx 内首投递才建表会随业务回滚卷走表面）。列 `id/ts/transport/to/subject/payload/status/error`，
+> payload(JSON) 只收在场可选字段（from/cc?/bcc?/text?/html?），`"to"` = SQLite 保留字恒双引号；
+> maxRows 行数基裁剪缺省 1 万（决策 29 同款）。③ send 语义：**先 transport 后记账**、成功/失败两态
+> 都记；transport 失败 → send **不抛**（resolve `{ id, status: "failed", error }`——投递失败是记账
+> 事实不是异常，调用方拿 status 自行决定）；记账本身失败 → 原样上抛（不可记账 ≠ 假账）。④ tx 语义：
+> 同一句柄装配时 `ctx.db.tx(() => { 业务写; ctx.email.send(...) })` 业务写+记账同事务；mock 零外部
+> IO = **完全原子**（tx 抛错齐回滚用例钉死）；真实 transport 无分布式事务（回滚只回滚记账不召回
+> 邮件）。⑤ ctx.email = { send } 可选位（未装配 = 不存在，jobs/kv 同款）；⑥ 内省 server-status 可选
+> `email` 段（尾部 ~20 条六字段投影，不含 payload/error；未装配不出现/零投递空数组/读失败缺省——
+> 零假数据；prod 隐身沿用调试面整体）；⑦ payload 脱敏 = endpoints.ts `redactSensitiveInput` W2
+> 词根**单源 import 复用**（journal input 与 email payload 同一收口）。**诚实边界**：无模板引擎
+> （subject/body 调用方给）；无队列联动强制（大量发送经 §5.6 jobs 自行投递）；无退订/合规面；
+> mock 表即真信源，dev 面 review 时间轴消费归后续批。回归钉 = `tests/email.test.ts`（12 用例）。
+
 ---
 
 ## 6. 鉴权：`atelier gen auth`（FS-5 组成，决策 18 已定路线）
