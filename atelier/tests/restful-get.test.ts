@@ -374,15 +374,13 @@ describe("restful + cache（A5 决策 33 联动）：GET 与 POST 共用成功�
 /* ================= ⑥ live × restful 两不误 ================= */
 
 describe("restful live 端点（GET <name> JSON 与 GET <name>/live SSE 两不误）", () => {
-  /** SSE 首块读取（最小实现——live.test.ts SseReader 的单帧版） */
-  async function firstSseChunk(url: string): Promise<{ contentType: string; chunk: string }> {
-    const ac = new AbortController();
-    const res = await fetch(url, { signal: ac.signal, headers: { accept: "text/event-stream" } });
+  /** SSE 首块读取（最小实现——live.test.ts SseReader 的单帧版；直调 handler 不过网络） */
+  async function firstSseChunk(handler: (req: Request) => Promise<Response>, url: string): Promise<{ contentType: string; chunk: string }> {
+    const res = await handler(new Request(url, { method: "GET", headers: { accept: "text/event-stream" } }));
     const contentType = res.headers.get("content-type") ?? "";
     const reader = res.body!.getReader();
     const dec = new TextDecoder();
     const { value } = await reader.read();
-    ac.abort();
     await reader.cancel().catch(() => {});
     return { contentType, chunk: dec.decode(value) };
   }
@@ -404,7 +402,7 @@ describe("restful live 端点（GET <name> JSON 与 GET <name>/live SSE 两不�
     expect(json.headers.get("content-type")).toContain("application/json");
     const postJson = await post(handler, "feed.stream", { limit: 6 });
     expect(await postJson.json()).toEqual({ got: 6 }); // POST 直调 live = 普通 JSON（现状语义不变）
-    const sse = await firstSseChunk("http://local.test/api/feed.stream/live");
+    const sse = await firstSseChunk(handler, "http://local.test/api/feed.stream/live");
     expect(sse.contentType).toContain("text/event-stream");
     expect(sse.chunk).toContain("retry: 3000"); // §4.3 线协议：retry 帧先行——/live 通道未被 GET 分发挤占
   });
@@ -445,7 +443,15 @@ describe("journal 与内省（语义不变 + 形状零变化负例）", () => {
 
 describe("node-host serve() 真实端口：restful GET 过真 socket 一轮", () => {
   it("GET /api/browse.list?chatId=42&flag=true → 200 JSON + x-atelier-endpoint 头（查询串经真 URL 解析）", async () => {
-    const { handler } = restfulReg();
+    const reg = new EndpointRegistry();
+    reg.register(
+      defineQuery("browse.list", {
+        contract: browseInput,
+        restful: true,
+        handler: (input) => ({ echo: input as Record<string, unknown> }),
+      })
+    );
+    const handler = reg.createHandler({ mount: "/api" }); // serve 用例自配 mount（fetch URL /api/* 与 uploads ⑨ 同形）
     const orig = process.stdout.write.bind(process.stdout);
     process.stdout.write = (() => true) as typeof process.stdout.write; // serve 就绪握手行静音（uploads 同款）
     let server: import("node:http").Server;

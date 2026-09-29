@@ -41,6 +41,17 @@
  * （缺 maxAge 就是错——Next 缓存语义三年三变的教训：引入缓存必须一步到位显式契约化）。分发
  * 成功路径对声明对象档的 query 端点注入 Cache-Control: private|public, max-age=N（错误路径
  * errorResponse 不加——错误响应不该被缓存）；"none" 与未声明 = 零变化（无 Cache-Control 头）。
+ * A7 差距批（2026-09-29，决策 34）加 restful GET 分发：EndpointDef.restful = true 的 **query** 端点
+ * 接受 GET <mount>/<name>?<query>（D-F11 留门的运行时扩张——restful 声明此前只活在 OpenAPI 文档位，
+ * 传输面从「文档位」扩为「文档+运行时双真」）。输入构造 = URL 查询串按契约显式类型投影
+ * （buildRestfulInput：number Number(v)/boolean 只认 "true"/"false"/string 原样/array 重复键收集；
+ * 未知参数与标量重复键显式拒绝 400 ATR-312——URL 是代理日志/浏览器历史里的公共面，寄生参数
+ * 不得静默流进 handler，与 POST JSON 体未知键经 validateFlat 静默放行的既有口径**有意分叉**）；
+ * 投影产物照走 validateFlat 同链（缺必填/范围违规 → ATR-201，与 POST 同码同文风）；鉴权
+ * （gateAuth 单源）/限流（分发器最前闸）/journal（query 永不入账）/成功响应构造（x-atelier-* 头 +
+ * A5 Cache-Control 注入）与 POST 全同链——分发 tail 提取为 dispatchEndpoint 共享闭包（纯搬运，
+ * POST 行为零变化）。command 声明 restful = 注册期 ATR-313 硬错（export-openapi 扫描器同规则，
+ * 声明不可能被静默吞）；未声明 restful 端点零变化（GET 仍落 405 ATR-311 兜底，文案补导航指路）。
  * v2 边界（诚实）：gen auth 产物（会话原语/cookie/端点骨架）归 FS-5 生成器，本模块只做装配层拦截；
  * live 为全量引擎（FS-7，live.ts 协作对象：SSE 失效-重算-推送——单进程内存订阅、重连全量重算，
  * 诚实边界随 live.ts 文件头）；注册表为单进程内存态；command journal 自 B5 差距批（2026-09-28，
@@ -49,7 +60,7 @@
  * timeout 中止只停止等待，handler 自身须监听 ctx.signal 提前退出。
  */
 import { createHash, timingSafeEqual } from "node:crypto";
-import { validateFlat, type AtrError, type FlatSchema } from "../runtime/contract.ts";
+import { validateFlat, type AtrError, type FlatField, type FlatSchema } from "../runtime/contract.ts";
 import { LiveEngine, type LiveEngineOptions } from "./live.ts";
 import { beginWriteCapture, endWriteCapture, type SqliteDb, type WriteCapture } from "./sqlite.ts";
 import { INTROSPECT_NAME, introspectResponse } from "./introspect.ts";
@@ -155,6 +166,15 @@ export type EndpointDef<TInput = Record<string, unknown>, TOutput = unknown, TDb
   idempotent?: boolean;
   /** 缓存语义显式声明（§2.2，差距批 A5 决策 33）：档位形状与定义期硬错规则见 EndpointCacheMeta */
   cache?: EndpointCacheMeta;
+  /**
+   * restful 互操作位（§3.4，差距批 A7 决策 34）：true = 该 **query** 端点接受
+   * GET <mount>/<name>?<query> 分发（URL 查询串按契约显式投影，鉴权/限流/校验/journal 与 POST
+   * 全同链——见 buildRestfulInput 与分发器 restful GET 分支）。默认关：未声明 = 零变化
+   * （GET 落既有 405 ATR-311 兜底）；command 声明 = 注册期 ATR-313 硬错（读写二分纪律——
+   * export-openapi 扫描器同规则）。OpenAPI 文档位（export-openapi restful 分支）与运行时分发
+   * 自此同源双真；v1 不进内省（EndpointSummary 零形状——留门注记见 docs/design-decisions.md）。
+   */
+  restful?: boolean;
   auth?: EndpointAuthMeta;
   handler: (input: TInput, ctx: EndpointContext<TDb>) => TOutput | Promise<TOutput>;
 };
@@ -541,6 +561,106 @@ function assertCacheMeta(def: EndpointDef): void {
 /** 超时竞速哨兵：Promise.race 输家判定用（区别于 handler 自身抛出的任何错误） */
 const TIMEOUT_BREACH = Symbol("atelier-endpoint-timeout");
 
+/* ---- restful GET 输入构造（差距批 A7，决策 34）：URL 查询串 → 契约输入对象 ----
+ * 每参数值是字符串，按端点输入契约（FlatSchema reqProps/optProps，runtime/contract.ts FlatField
+ * 类型全集 = string | number | boolean | array）做**显式类型投影**——有什么类型投影什么，不猜：
+ *   string   原样透传（URLSearchParams 已解码）；
+ *   number   Number(v)；空串（`?n=`——Number("")===0 的无声陷阱）与 NaN 显式拒绝；
+ *   boolean  只认 "true"/"false"（URL 惯例两值——"1"/"yes" 不猜）；
+ *   array    重复键收集（URLSearchParams.getAll，Web 标准——?tag=a&tag=b → ["a","b"]；单值 =
+ *            单元素数组），元素按 items 逐个投影（无 items = 原样字符串，与 collectFlatIssues
+ *            无 items 不查元素的既有口径一致；items 嵌套数组无查询串表示 → 拒绝）。
+ * 未知参数显式拒绝（400 ATR-312）：POST JSON 体的未知键经 validateFlat **静默放行**（既有口径，
+ * runtime/contract.ts 零改动），GET 查询串**有意更严**——URL 是代理日志/浏览器历史里的公共面，
+ * utm_source/缓存戳等寄生参数静默流进 handler 输入；无契约端点 = 无投影依据，带参即拒（fix 指路补契约）。
+ * 标量字段重复键（?id=1&id=2）同样拒绝——get() 取首值是无声猜测，不猜。
+ * 码位复用先例：ATR-312 = 传输层输入形态非法槽位（决策 32 multipart 结构非法「JSON 非法体同槽位」
+ * 同款）——本处 = 查询串投影失败，与契约违规 ATR-201（validateFlat 域）分层。
+ * 限定红线：本函数只投影**在场**参数；缺必填由下方 validateFlat 同链报 ATR-201（与 POST 缺字段
+ * 同码同文风）——投影层不重复立缺字段口径，GET/POST 一致性由同链保证。 */
+
+/** 单叶子投影（string/number/boolean；array 仅作嵌套数组拒绝位——顶层数组在 buildRestfulInput 收集） */
+function projectQueryLeaf(field: FlatField, raw: string): { ok: true; value: unknown } | { ok: false; reason: string } {
+  switch (field.type) {
+    case "string":
+      return { ok: true, value: raw };
+    case "number": {
+      if (raw === "") return { ok: false, reason: "空串不是数值字面量（?n= 会被 Number 静默转 0——显式拒绝）" };
+      const n = Number(raw);
+      if (Number.isNaN(n)) return { ok: false, reason: `"${raw}" 不是数值字面量` };
+      return { ok: true, value: n };
+    }
+    case "boolean":
+      if (raw === "true") return { ok: true, value: true };
+      if (raw === "false") return { ok: true, value: false };
+      return { ok: false, reason: `"${raw}" 不是布尔字面量（只认 "true"/"false"）` };
+    case "array":
+      return { ok: false, reason: "数组元素不支持嵌套数组（扁平 schema 红线——约束只挂叶子）" };
+  }
+}
+
+/** 投影失败的 400 ATR-312 统一出口（消息指明字段与原因；schemaless = 无契约端点带参） */
+function restfulInputError(def: EndpointDef, key: string, info: { field: FlatField | null; reason: string; schemaless: boolean }): AtrError {
+  if (info.schemaless) {
+    return endpointError(
+      "ATR-312",
+      `端点 ${def.name} 的 GET 查询参数 "${key}" 不在契约中（该端点未声明 contract——GET 查询串按契约投影，无契约即无投影依据）`,
+      `为端点 ${def.name} 声明 contract（FlatSchema 契约单源）后 GET 分发才有输入面，或改用 POST 直调（JSON 体，无契约时须为对象）`
+    );
+  }
+  if (info.field == null) {
+    return endpointError(
+      "ATR-312",
+      `端点 ${def.name} 的 GET 查询参数 "${key}" 不在契约 reqProps/optProps 中（未知参数显式拒绝——决策 34）`,
+      "只用契约声明的参数；确需携带契约外数据时改用 POST 直调（JSON 体——未知键经契约校验静默放行是 POST 既有口径，两通道有意分叉：URL 是公共面）"
+    );
+  }
+  return endpointError(
+    "ATR-312",
+    `端点 ${def.name} 的 GET 查询参数 "${key}" 投影失败（契约类型 ${info.field.type}）：${info.reason}`,
+    `按契约类型传值：number = 十进制数字面量（如 42）、boolean = "true"/"false"、string = 原样、array = 重复键（?tag=a&tag=b）、标量字段不认重复键；确需携带契约外数据时改用 POST 直调`
+  );
+}
+
+/**
+ * restful GET 分发的输入构造单源（分发器 restful GET 分支调用；语义全量见上方块注）。
+ * 返回 { ok: true, input } = 投影成功（**在场参数**的对象——缺必填交由 validateFlat 同链）；
+ * { ok: false, error } = 400 ATR-312（未知参数/投影失败/重复键）。
+ */
+function buildRestfulInput(def: EndpointDef, searchParams: URLSearchParams): { ok: true; input: Record<string, unknown> } | { ok: false; error: AtrError } {
+  const schema = def.contract;
+  const req = schema?.reqProps ?? {};
+  const opt = schema?.optProps ?? {};
+  const known = new Map<string, FlatField>();
+  for (const [k, f] of Object.entries(req)) known.set(k, f);
+  for (const [k, f] of Object.entries(opt)) known.set(k, f);
+  const input: Record<string, unknown> = {};
+  for (const key of new Set(searchParams.keys())) {
+    const field = known.get(key);
+    if (field == null) {
+      return { ok: false, error: restfulInputError(def, key, { field: null, reason: "", schemaless: schema == null }) };
+    }
+    if (field.type === "array") {
+      const items: unknown[] = [];
+      for (const raw of searchParams.getAll(key)) {
+        const one = projectQueryLeaf(field.items ?? { type: "string" }, raw);
+        if (!one.ok) return { ok: false, error: restfulInputError(def, key, { field, reason: one.reason, schemaless: false }) };
+        items.push(one.value);
+      }
+      input[key] = items;
+      continue;
+    }
+    const values = searchParams.getAll(key);
+    if (values.length > 1) {
+      return { ok: false, error: restfulInputError(def, key, { field, reason: `重复出现 ${values.length} 次（标量参数不认重复键）`, schemaless: false }) };
+    }
+    const one = projectQueryLeaf(field, values[0]!);
+    if (!one.ok) return { ok: false, error: restfulInputError(def, key, { field, reason: one.reason, schemaless: false }) };
+    input[key] = one.value;
+  }
+  return { ok: true, input };
+}
+
 /* ---- journal input 敏感键脱敏（P1-6）：写入单源收口（journalPush），POST 分发与 live 引擎条目同源受保护 ----
  * 键名含下列词根即视为敏感（不区分大小写，子串命中——accessToken/refresh_token 等派生拼写一并覆盖）：
  * 词根清单按"宁可多脱、不可漏脱"取常用凭据词；新凭据形态出现时在此追加。
@@ -720,6 +840,20 @@ export class EndpointRegistry {
     //      显式失败（ATR-313），声明不可能被静默忽略。"none" 显式零档全端点可声明（位先固化
     //      形状保持——server-v2 基线用例钉住 command 上 "none" 合法，且「不缓存」声明无语义矛盾） ----
     assertCacheMeta(def as EndpointDef);
+    // ---- restful 互操作位定义期硬错（差距批 A7，决策 34）：restful GET 分发只许 query 端点声明。
+    //      command 带 = 写端点不存在 GET 分发语义（读写二分纪律，D-F11）；export-openapi 扫描器
+    //      同规则先例（scanOpenApiEndpoints restful 分支同文案同拦截）——运行时不校验的话，
+    //      command+restful 会静默注册成功、直到导出 OpenAPI 才炸（声明被吞 = 晚失败），与
+    //      assertCacheMeta「契约错误炸在定义处」同款纪律（ATR-313 同码，不另开新码） ----
+    if (def.restful === true && def.kind !== "query") {
+      throw new AtrEndpointError(
+        endpointError(
+          "ATR-313",
+          `端点 ${def.name} 是 command，却声明 restful: true`,
+          "restful GET 分发位（§3.4，决策 34）只许 query 端点声明——写端点保持 POST（读写二分纪律）；确有 GET 读面需求时改用 query 端点声明"
+        )
+      );
+    }
     // ---- live×鉴权 fail-closed（P1-5，ATR-315）：live SSE 通道与端点级鉴权声明互斥，注册期显式拒绝 ----
     // GET /live 路由不经过 POST 通道的 readAuth 门禁，且 live 引擎重算 ctx.auth=null（live.ts 诚实边界）：
     // 若放行组合，端点声明的 auth 会被 SSE 通道静默忽略（未认证客户端直接订阅）。引擎的共享重算模型
@@ -864,8 +998,10 @@ export class EndpointRegistry {
   /**
    * Web 标准分发器 v2。约定：POST <mount>/<name>，请求体 = JSON 输入（query 与 command
    * 同走 POST——输入必须过契约校验这条纪律不因动词分叉）；FS-7 加法通道：GET <mount>/<name>/live
-   * → 声明 live 的 query 端点走 SSE 订阅（live.ts 引擎：失效-重算-推送），其余非 POST 维持 ATR-311。
-   * 装配点（§3.2）：db / auth 一次性显式注入，无 DI 容器——装配代码在应用入口明文可见。
+   * → 声明 live 的 query 端点走 SSE 订阅（live.ts 引擎：失效-重算-推送）；A7 加法通道（决策 34）：
+   * GET <mount>/<name>?<query> → 声明 restful:true 的 query 端点走运行时 GET 分发（查询串按契约
+   * 显式投影 buildRestfulInput，鉴权/限流/校验/journal/成功响应构造与 POST 全同链）；其余非 POST
+   * 维持 ATR-311 兜底（fix 补指路 restful 导航）。装配点（§3.2）：db / auth 一次性显式注入，无 DI 容器——装配代码在应用入口明文可见。
    * A2 硬化3：maxBodyBytes = 请求体上限（缺省 1MiB），JSON 解析处校验，超限 413 ATR-346
    * （不进 handler、不入 journal——与鉴权拦截同款"被拒之门前不触碰 handler"语义）；
    * node-host 桥侧另有读体中途截断的同上限闸（更早、更省内存），本兜底覆盖直挂宿主/进程内调用。
@@ -930,171 +1066,15 @@ export class EndpointRegistry {
     // 定义精闸在面内——本模块只做注册表与路由分派。
     const uploadsFace = opts.uploads;
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
-    return async (req: Request): Promise<Response> => {
-      // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
-      if (rateLimit != null && rateBuckets != null) {
-        const verdict = tickRateLimit(rateBuckets, rateLimit, rateKeyOf(req), Date.now());
-        if (!verdict.ok) return rateLimitResponse(verdict.retryAfterSec);
-      }
-      const url = new URL(req.url);
-      let rest = url.pathname;
-      if (mount && rest.startsWith(mount)) rest = rest.slice(mount.length);
-      const name = rest.replace(/^\/+|\/+$/g, "");
-
-      // ---- FS-7 live 路由：GET /<mount>/<name>/live → SSE（仅声明 live 的 query 端点；其余非 POST 维持 ATR-311） ----
-      if (req.method === "GET" && name.endsWith("/live")) {
-        const base = name.slice(0, -"/live".length);
-        const liveDef = base !== "" ? this.defs.get(base) : undefined;
-        if (liveDef && liveDef.kind === "query" && isLiveDeclared(liveDef)) { // live:false 通道关闭（硬化7）
-          const sse = this.liveEngine.handleLive(req, liveDef);
-          if (sse) return sse;
-        }
-        return errorResponse(
-          405,
-          endpointError(
-            "ATR-311",
-            `端点只接受 POST：${req.method} ${url.pathname}（/live SSE 通道仅面向声明 live 的 query 端点）`,
-            `订阅 live query：GET ${mount}/${base || "<name>"}/live；直调端点：POST ${mount}/${base || "<name>"}，JSON 体 = 契约输入`,
-            this.names()
-          )
-        );
-      }
-
-      // ---- D-F16 保留内省路由（§10.3）：GET <mount>/__atelier/server-status → 运行时事实 JSON。
-      //      dev 面 server-status（父进程代理）与 MCP endpoint.* 族、调试页三处同源；prod 旗下
-      //      introspectResponse 返回 null，落回下方既有 ATR 路径（调试面不进生产 API 面）。
-      //      A2 硬化5：statusToken 装配项透传——设置后该路由要求 x-atelier-token 头（401 ATR-340），
-      //      未设置 = 行为零变化；prod 隐身优先于 token 判定（判定在 introspect 内部）。 ----
-      if (req.method === "GET" && name === INTROSPECT_NAME) {
-        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs, email: opts.email });
-        if (res) return res;
-      }
-
-      // ---- B4 差距批（2026-09-28）：健康面路由 GET <mount>/__atelier/health → 三事实 JSON（health.ts）。
-      //      与 introspect 同族命名空间、语义分离：server-status=内省面（prod 405 隐身，上方路由）、
-      //      health=健康面（prod 恒在——docker/orchestrator 的探活口，永不离线）；**不走 statusToken 门**
-      //      （健康面无秘密，门禁只会把探活变成假死报警）；非 GET → 405 ATR-311（既有口径复用，不新配码）；
-      //      db 探活抛错 → 503（ok:false + db:"error"——状态码即报警面）。限流闸（本函数最前）对
-      //      health 同样计数（闸位单一不分路由豁免）。三事实组装单源 = healthResponse（health.ts）。 ----
-      if (name === HEALTH_NAME) {
-        if (req.method !== "GET") {
-          return errorResponse(
-            405,
-            endpointError("ATR-311", `健康检查端点只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/${HEALTH_NAME}（探活 = 幂等读，无请求体；响应 = { ok, uptimeMs, db, version } 四键 JSON）`)
-          );
-        }
-        return healthResponse({ db, version: opts.version ?? null, startedAtMs });
-      }
-
-      // ---- B1 差距批（2026-09-28，决策 32）：上传/资产面路由（兄弟注册表——不入端点表，
-      //      introspect 端点表形状零变化）。POST <mount>/upload/<name> + GET <mount>/assets/<id>。
-      //      端点名文法不含 "/"，upload//assets/ 前缀与端点名空间天然不相交（assets 限数字 id、
-      //      upload 限 NAME_RE 名，不匹配的形态照旧落既有 404/405 路径——端点面零扰动）。
-      //      面未装配 = 诚实 404 ATR-310 指路装配（落回既有路径会把 GET 资产误报成 405「改
-      //      POST」、把上传路由报成「未知端点」——都误导指路）。限流闸（本函数最前）对上传/
-      //      下载同样计数（上传是最贵的请求形态——闸位单一不分路由豁免）。 ----
-      const uploadRoute = name.startsWith("upload/") ? name.slice("upload/".length) : null;
-      if (uploadRoute != null) {
-        if (uploadsFace == null) {
-          return errorResponse(
-            404,
-            endpointError(
-              "ATR-310",
-              `上传/资产面未装配：${url.pathname}`,
-              "装配点显式接线：createHandler({ db, uploads: createUploadsFace({ db, dir }) })（uploads.ts 决策 32）；上传定义经 reg.registerUpload(defineUpload({ name, accept?, maxBytes?, auth? })) 注册（兄弟注册表，不入端点表）"
-            )
-          );
-        }
-        if (req.method !== "POST") {
-          return errorResponse(405, endpointError("ATR-311", `上传面只接受 POST：${req.method} ${url.pathname}`, `改为 POST ${mount || ""}/upload/${uploadRoute}，multipart/form-data 单文件字段体`));
-        }
-        const upDef = this.uploadsDefs.get(uploadRoute);
-        if (!upDef) {
-          return errorResponse(404, endpointError("ATR-310", `未知上传面：${uploadRoute}`, `用以下已注册上传面之一：${this.uploadNames().join(", ") || "（无）"}`, this.uploadNames()));
-        }
-        // 鉴权拦截链单源复用（gateAuth）：**缺省 session**（上传是写面——落盘+记账，未声明 =
-        // fail-closed 要求会话，与端点「未声明 = 开放」有意差异）；auth: { type: "none" } = 显式
-        // 消警开放，不进 gateAuth（与端点判定同款——显式选择优于沉默缺省，决策 32）。拦截在面内
-        // 任何落盘之前——被拒之门前不触碰存储（与端点「不进 handler」同款语义）。
-        const upAuth = (upDef.auth ?? { type: "session" }) as EndpointAuthMeta;
-        if (upAuth.type !== "none") {
-          const gate = gateAuth("上传面", uploadRoute, upAuth, readAuth, apiKeys, req);
-          if (!gate.ok) return gate.response;
-        }
-        return uploadsFace.handleUpload({ req, def: upDef, mount: mount || "" });
-      }
-      const assetRoute = /^assets\/(\d+)$/.exec(name)?.[1] ?? null;
-      if (assetRoute != null) {
-        if (uploadsFace == null) {
-          return errorResponse(
-            404,
-            endpointError(
-              "ATR-310",
-              `上传/资产面未装配：${url.pathname}`,
-              "装配点显式接线：createHandler({ db, uploads: createUploadsFace({ db, dir }) })（uploads.ts 决策 32）；上传定义经 reg.registerUpload(defineUpload({ name, accept?, maxBytes?, auth? })) 注册（兄弟注册表，不入端点表）"
-            )
-          );
-        }
-        if (req.method !== "GET") {
-          return errorResponse(405, endpointError("ATR-311", `资产面只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/assets/${assetRoute}（内容寻址不可变——响应带 Cache-Control: immutable）`));
-        }
-        return uploadsFace.handleDownload({ id: assetRoute, mount: mount || "" });
-      }
-
-      if (req.method !== "POST") {
-        return errorResponse(405, endpointError("ATR-311", `端点只接受 POST：${req.method} ${url.pathname}`, `改为 POST ${mount}/${name}，JSON 体 = 契约输入`, this.names()));
-      }
-      const def = this.defs.get(name);
-      if (!def) {
-        return errorResponse(404, endpointError("ATR-310", `未知端点：${name}`, `用以下已注册端点之一：${this.names().join(", ") || "（无）"}`, this.names()));
-      }
-
-      // ---- 鉴权拦截（§6.2，FS-M2(m2d) 加法）：只对声明 auth: { type } 且 type !== "none" 的端点生效 ----
-      // auth: { type: "none" } = 显式消警（"沉默缺省"才是 agent 高错区）。未声明端点连 readAuth 的
-      // 调用时机都维持原状（仍在下方 ctx 装配处调用一次）——行为零变化。拦截在 handler 之前，
-      // journal 不记账（journal 语义 = "分发穿过 handler 之后"，§3.5——被拒之门的请求未触达 handler）。
-      // 声明了 auth 的端点：readAuth 在此处调用一次并复用进 ctx（总调用次数与旧路径相同）。
-      // B1 差距批：拦截链提为模块级 gateAuth 单源（上传面路由同链复用——两处消息/码位零漂移，
-      // 端点侧 kindLabel="端点" 时消息逐字节一致）。
-      const authMeta = def.auth;
-      const authRequired = authMeta != null && authMeta.type !== "none";
-      let gatedAuth: AuthInfo | null = null;
-      if (authRequired) {
-        const gate = gateAuth("端点", name, authMeta, readAuth, apiKeys, req);
-        if (!gate.ok) return gate.response;
-        gatedAuth = gate.auth;
-      }
-
-      // ---- A2 硬化3：请求体上限（缺省 1MiB，maxBodyBytes 可配）——超限 413 ATR-346 ----
-      // content-length 声明值先快速拒绝（不读体）；实际字节在缓冲后再兜底校验（声明可缺失/失真）。
-      const overLimitError = (bytes: number): Response =>
-        errorResponse(
-          413,
-          endpointError(
-            "ATR-346",
-            `请求体超限：${bytes} 字节 > 上限 ${maxBodyBytes}（端点 ${name}）`,
-            `缩小请求体（分批/裁剪字段）；服务端上限由装配点调整：createHandler({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）。超限请求不进 handler、不入审计 journal`
-          )
-        );
-      const declaredLength = Number(req.headers.get("content-length"));
-      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) return overLimitError(declaredLength);
-
-      let input: unknown;
-      try {
-        const raw = await req.arrayBuffer();
-        if (raw.byteLength > maxBodyBytes) return overLimitError(raw.byteLength);
-        input = JSON.parse(new TextDecoder().decode(raw));
-      } catch {
-        return errorResponse(400, endpointError("ATR-312", `请求体不是合法 JSON`, "发送 application/json 体，例如 {\"id\": 1}"));
-      }
-      if (def.contract != null) {
-        const v = validateFlat(def.contract, input as Record<string, unknown>, def.name);
-        if (!v.ok) return errorResponse(400, v.error!);
-      } else if (input != null && (typeof input !== "object" || Array.isArray(input))) {
-        return errorResponse(400, endpointError("ATR-312", `端点 ${name} 无契约，输入必须缺省或为 JSON 对象`, "发送空对象 {} 或为该端点补 contract（推荐：契约单源纪律）"));
-      }
-      const payload = (input ?? {}) as Record<string, unknown>;
-
+    /**
+     * 分发共享 tail（差距批 A7，决策 34 提取）：ctx 装配（db/auth/signal/audit/setCookie/jobs/kv/email）
+     * → handler 调用（timeout race）→ 输出面检查（ATR-215/216 单源）→ command journal 与失效广播
+     * → 200 响应构造（x-atelier-* 头 + A5 Cache-Control 注入 + Set-Cookie 透传）。POST 分发与
+     * restful GET 分发共用同一构造——cache 注入、query 永不入账、x-atelier-endpoint 头、超时/抛错
+     * 映射两通道自动零差。提取为**纯搬运**（语句逐字保留，POST 行为零变化红线），调用方 =
+     * 下方 POST 分发与 restful GET 分支。
+     */
+    const dispatchEndpoint = async (def: EndpointDef, payload: Record<string, unknown>, authRequired: boolean, gatedAuth: AuthInfo | null, req: Request): Promise<Response> => {
       // ---- v2 ctx 装配（§3.2）：db / auth / signal / audit ----
       const notes: string[] = [];
       // auth：拦截过的端点复用拦截结果（readAuth 只调一次）；未声明端点维持旧路径（此处调用）
@@ -1217,6 +1197,206 @@ export class EndpointRegistry {
         // 失败 command 不广播（§4.2 只在提交成功后失效），捕获结果就此丢弃。
         if (capture) endWriteCapture(capture);
       }
+    };
+    return async (req: Request): Promise<Response> => {
+      // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
+      if (rateLimit != null && rateBuckets != null) {
+        const verdict = tickRateLimit(rateBuckets, rateLimit, rateKeyOf(req), Date.now());
+        if (!verdict.ok) return rateLimitResponse(verdict.retryAfterSec);
+      }
+      const url = new URL(req.url);
+      let rest = url.pathname;
+      if (mount && rest.startsWith(mount)) rest = rest.slice(mount.length);
+      const name = rest.replace(/^\/+|\/+$/g, "");
+
+      // ---- FS-7 live 路由：GET /<mount>/<name>/live → SSE（仅声明 live 的 query 端点；其余非 POST 维持 ATR-311） ----
+      if (req.method === "GET" && name.endsWith("/live")) {
+        const base = name.slice(0, -"/live".length);
+        const liveDef = base !== "" ? this.defs.get(base) : undefined;
+        if (liveDef && liveDef.kind === "query" && isLiveDeclared(liveDef)) { // live:false 通道关闭（硬化7）
+          const sse = this.liveEngine.handleLive(req, liveDef);
+          if (sse) return sse;
+        }
+        return errorResponse(
+          405,
+          endpointError(
+            "ATR-311",
+            `端点只接受 POST：${req.method} ${url.pathname}（/live SSE 通道仅面向声明 live 的 query 端点）`,
+            `订阅 live query：GET ${mount}/${base || "<name>"}/live；直调端点：POST ${mount}/${base || "<name>"}，JSON 体 = 契约输入`,
+            this.names()
+          )
+        );
+      }
+
+      // ---- D-F16 保留内省路由（§10.3）：GET <mount>/__atelier/server-status → 运行时事实 JSON。
+      //      dev 面 server-status（父进程代理）与 MCP endpoint.* 族、调试页三处同源；prod 旗下
+      //      introspectResponse 返回 null，落回下方既有 ATR 路径（调试面不进生产 API 面）。
+      //      A2 硬化5：statusToken 装配项透传——设置后该路由要求 x-atelier-token 头（401 ATR-340），
+      //      未设置 = 行为零变化；prod 隐身优先于 token 判定（判定在 introspect 内部）。 ----
+      if (req.method === "GET" && name === INTROSPECT_NAME) {
+        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs, email: opts.email });
+        if (res) return res;
+      }
+
+      // ---- B4 差距批（2026-09-28）：健康面路由 GET <mount>/__atelier/health → 三事实 JSON（health.ts）。
+      //      与 introspect 同族命名空间、语义分离：server-status=内省面（prod 405 隐身，上方路由）、
+      //      health=健康面（prod 恒在——docker/orchestrator 的探活口，永不离线）；**不走 statusToken 门**
+      //      （健康面无秘密，门禁只会把探活变成假死报警）；非 GET → 405 ATR-311（既有口径复用，不新配码）；
+      //      db 探活抛错 → 503（ok:false + db:"error"——状态码即报警面）。限流闸（本函数最前）对
+      //      health 同样计数（闸位单一不分路由豁免）。三事实组装单源 = healthResponse（health.ts）。 ----
+      if (name === HEALTH_NAME) {
+        if (req.method !== "GET") {
+          return errorResponse(
+            405,
+            endpointError("ATR-311", `健康检查端点只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/${HEALTH_NAME}（探活 = 幂等读，无请求体；响应 = { ok, uptimeMs, db, version } 四键 JSON）`)
+          );
+        }
+        return healthResponse({ db, version: opts.version ?? null, startedAtMs });
+      }
+
+      // ---- B1 差距批（2026-09-28，决策 32）：上传/资产面路由（兄弟注册表——不入端点表，
+      //      introspect 端点表形状零变化）。POST <mount>/upload/<name> + GET <mount>/assets/<id>。
+      //      端点名文法不含 "/"，upload//assets/ 前缀与端点名空间天然不相交（assets 限数字 id、
+      //      upload 限 NAME_RE 名，不匹配的形态照旧落既有 404/405 路径——端点面零扰动）。
+      //      面未装配 = 诚实 404 ATR-310 指路装配（落回既有路径会把 GET 资产误报成 405「改
+      //      POST」、把上传路由报成「未知端点」——都误导指路）。限流闸（本函数最前）对上传/
+      //      下载同样计数（上传是最贵的请求形态——闸位单一不分路由豁免）。 ----
+      const uploadRoute = name.startsWith("upload/") ? name.slice("upload/".length) : null;
+      if (uploadRoute != null) {
+        if (uploadsFace == null) {
+          return errorResponse(
+            404,
+            endpointError(
+              "ATR-310",
+              `上传/资产面未装配：${url.pathname}`,
+              "装配点显式接线：createHandler({ db, uploads: createUploadsFace({ db, dir }) })（uploads.ts 决策 32）；上传定义经 reg.registerUpload(defineUpload({ name, accept?, maxBytes?, auth? })) 注册（兄弟注册表，不入端点表）"
+            )
+          );
+        }
+        if (req.method !== "POST") {
+          return errorResponse(405, endpointError("ATR-311", `上传面只接受 POST：${req.method} ${url.pathname}`, `改为 POST ${mount || ""}/upload/${uploadRoute}，multipart/form-data 单文件字段体`));
+        }
+        const upDef = this.uploadsDefs.get(uploadRoute);
+        if (!upDef) {
+          return errorResponse(404, endpointError("ATR-310", `未知上传面：${uploadRoute}`, `用以下已注册上传面之一：${this.uploadNames().join(", ") || "（无）"}`, this.uploadNames()));
+        }
+        // 鉴权拦截链单源复用（gateAuth）：**缺省 session**（上传是写面——落盘+记账，未声明 =
+        // fail-closed 要求会话，与端点「未声明 = 开放」有意差异）；auth: { type: "none" } = 显式
+        // 消警开放，不进 gateAuth（与端点判定同款——显式选择优于沉默缺省，决策 32）。拦截在面内
+        // 任何落盘之前——被拒之门前不触碰存储（与端点「不进 handler」同款语义）。
+        const upAuth = (upDef.auth ?? { type: "session" }) as EndpointAuthMeta;
+        if (upAuth.type !== "none") {
+          const gate = gateAuth("上传面", uploadRoute, upAuth, readAuth, apiKeys, req);
+          if (!gate.ok) return gate.response;
+        }
+        return uploadsFace.handleUpload({ req, def: upDef, mount: mount || "" });
+      }
+      const assetRoute = /^assets\/(\d+)$/.exec(name)?.[1] ?? null;
+      if (assetRoute != null) {
+        if (uploadsFace == null) {
+          return errorResponse(
+            404,
+            endpointError(
+              "ATR-310",
+              `上传/资产面未装配：${url.pathname}`,
+              "装配点显式接线：createHandler({ db, uploads: createUploadsFace({ db, dir }) })（uploads.ts 决策 32）；上传定义经 reg.registerUpload(defineUpload({ name, accept?, maxBytes?, auth? })) 注册（兄弟注册表，不入端点表）"
+            )
+          );
+        }
+        if (req.method !== "GET") {
+          return errorResponse(405, endpointError("ATR-311", `资产面只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/assets/${assetRoute}（内容寻址不可变——响应带 Cache-Control: immutable）`));
+        }
+        return uploadsFace.handleDownload({ id: assetRoute, mount: mount || "" });
+      }
+
+      // ---- 差距批 A7（决策 34）：restful GET 分发（D-F11 留门的运行时扩张）——声明 restful:true 的
+      //      query 端点接受 GET <mount>/<name>?<query>。插在 POST 分发兜底之前；与上方 /live 后缀
+      //      路由天然无冲突（带 /live 后缀的请求先被截走走 SSE）；未声明 restful / command / 未知
+      //      端点的 GET 不在此拦截——落回下方既有 405 ATR-311 兜底（默认关零变化）。
+      //      鉴权与 POST 同链（gateAuth 单源，拦截在输入构造之前——「被拒之门前不触碰 handler」
+      //      同款语义）；输入构造 = buildRestfulInput（URL 查询串按契约显式投影，未知参数/投影失败
+      //      → 400 ATR-312）；投影产物照走 validateFlat 同链（缺必填/范围违规 ATR-201，与 POST
+      //      同码同文风，GET/POST 一致性由此保证）；成功路径复用 dispatchEndpoint——Cache-Control
+      //      注入/x-atelier-* 头/journal（query 永不入账）/超时与抛错映射与 POST 自动零差。 ----
+      if (req.method === "GET") {
+        const getDef = this.defs.get(name);
+        if (getDef != null && getDef.kind === "query" && getDef.restful === true) {
+          const authMeta = getDef.auth;
+          const authRequired = authMeta != null && authMeta.type !== "none";
+          let gatedAuth: AuthInfo | null = null;
+          if (authRequired) {
+            const gate = gateAuth("端点", name, authMeta, readAuth, apiKeys, req);
+            if (!gate.ok) return gate.response;
+            gatedAuth = gate.auth;
+          }
+          const built = buildRestfulInput(getDef, url.searchParams);
+          if (!built.ok) return errorResponse(400, built.error);
+          if (getDef.contract != null) {
+            const v = validateFlat(getDef.contract, built.input, getDef.name);
+            if (!v.ok) return errorResponse(400, v.error!); // 与 POST 缺字段/类型错同链同码 ATR-201
+          }
+          return dispatchEndpoint(getDef, built.input, authRequired, gatedAuth, req);
+        }
+        // 非 restful / command / 未知名 → 不拦截，落回下方 405 兜底（restful 默认关 = 零变化）
+      }
+
+      if (req.method !== "POST") {
+        return errorResponse(405, endpointError("ATR-311", `端点只接受 POST：${req.method} ${url.pathname}`, `GET 分发仅限声明 restful:true 的 query 端点（决策 34——声明后 GET ${mount}/${name}?<query-params>，查询串按契约投影；未声明端点行为零变化）；或改 POST ${mount}/${name}，JSON 体 = 契约输入`, this.names()));
+      }
+      const def = this.defs.get(name);
+      if (!def) {
+        return errorResponse(404, endpointError("ATR-310", `未知端点：${name}`, `用以下已注册端点之一：${this.names().join(", ") || "（无）"}`, this.names()));
+      }
+
+      // ---- 鉴权拦截（§6.2，FS-M2(m2d) 加法）：只对声明 auth: { type } 且 type !== "none" 的端点生效 ----
+      // auth: { type: "none" } = 显式消警（"沉默缺省"才是 agent 高错区）。未声明端点连 readAuth 的
+      // 调用时机都维持原状（仍在 dispatchEndpoint ctx 装配处调用一次）——行为零变化。拦截在 handler 之前，
+      // journal 不记账（journal 语义 = "分发穿过 handler 之后"，§3.5——被拒之门的请求未触达 handler）。
+      // 声明了 auth 的端点：readAuth 在此处调用一次并复用进 ctx（总调用次数与旧路径相同）。
+      // B1 差距批：拦截链提为模块级 gateAuth 单源（上传面路由同链复用——两处消息/码位零漂移，
+      // 端点侧 kindLabel="端点" 时消息逐字节一致）；A7（决策 34）restful GET 分发同链复用（GET 与
+      // POST 鉴权零语义差——session/apikey/role 全支持）。
+      const authMeta = def.auth;
+      const authRequired = authMeta != null && authMeta.type !== "none";
+      let gatedAuth: AuthInfo | null = null;
+      if (authRequired) {
+        const gate = gateAuth("端点", name, authMeta, readAuth, apiKeys, req);
+        if (!gate.ok) return gate.response;
+        gatedAuth = gate.auth;
+      }
+
+      // ---- A2 硬化3：请求体上限（缺省 1MiB，maxBodyBytes 可配）——超限 413 ATR-346 ----
+      // content-length 声明值先快速拒绝（不读体）；实际字节在缓冲后再兜底校验（声明可缺失/失真）。
+      const overLimitError = (bytes: number): Response =>
+        errorResponse(
+          413,
+          endpointError(
+            "ATR-346",
+            `请求体超限：${bytes} 字节 > 上限 ${maxBodyBytes}（端点 ${name}）`,
+            `缩小请求体（分批/裁剪字段）；服务端上限由装配点调整：createHandler({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）。超限请求不进 handler、不入审计 journal`
+          )
+        );
+      const declaredLength = Number(req.headers.get("content-length"));
+      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) return overLimitError(declaredLength);
+
+      let input: unknown;
+      try {
+        const raw = await req.arrayBuffer();
+        if (raw.byteLength > maxBodyBytes) return overLimitError(raw.byteLength);
+        input = JSON.parse(new TextDecoder().decode(raw));
+      } catch {
+        return errorResponse(400, endpointError("ATR-312", `请求体不是合法 JSON`, "发送 application/json 体，例如 {\"id\": 1}"));
+      }
+      if (def.contract != null) {
+        const v = validateFlat(def.contract, input as Record<string, unknown>, def.name);
+        if (!v.ok) return errorResponse(400, v.error!);
+      } else if (input != null && (typeof input !== "object" || Array.isArray(input))) {
+        return errorResponse(400, endpointError("ATR-312", `端点 ${name} 无契约，输入必须缺省或为 JSON 对象`, "发送空对象 {} 或为该端点补 contract（推荐：契约单源纪律）"));
+      }
+      const payload = (input ?? {}) as Record<string, unknown>;
+      // ---- 输入就绪：ctx 装配/handler/输出面/journal/响应构造走 dispatchEndpoint 共享 tail ----
+      // （A7 决策 34 提取为闭包——POST 与 restful GET 两通道同一构造，cache 联动自动一致）
+      return dispatchEndpoint(def, payload, authRequired, gatedAuth, req);
     };
   }
 }
