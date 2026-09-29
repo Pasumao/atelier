@@ -1,7 +1,7 @@
 {
   "name": "atelier-framework",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Atelier 框架本体（script-form）：runtime 零依赖内核 + dev 面 + starter 模板 + AI 工具链（mcp/skills/cli）。应用通过 atelier init 脚手架获得自包含拷贝。",
   "scripts": {
