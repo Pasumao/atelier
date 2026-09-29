@@ -5,7 +5,9 @@
  *   → build --target=node --out <tmp>/dist → 产物断言（前端 dist/index.html + 服务端启动壳
  *   dist/server.mjs）→ spawn 产物入口（ATELIER_SERVER_PORT=0）→ 收 ATELIER_SERVER_READY 握手行
  *   → POST /api/app.ping 通（§14.4 验收环同一端点）→ GET / 静态 index.html 通（单容器双面：静态
- *   前端 + /api 同口）→ 收尾杀进程（Windows 孤儿进程零容忍，openapi-golden 同款）。
+ *   前端 + /api 同口）→ GET /api/__atelier/health 的 version === 框架 package.json 的 version
+ *   （1.1.0 批 W-A 产物壳注入对账：测试内动态读，与版本号字面值零耦合）→ 收尾杀进程（Windows
+ *   孤儿进程零容忍，openapi-golden 同款）。
  *
  * 决策 27 F-2 prod 剥离门（本文件追加，构建链激活三分支之 B）：
  *   · 壳旗标形状：dist/server.mjs 含 `__ATELIER_PROD__ = true` + `await import`（置位先于装配单源
@@ -128,7 +130,7 @@ async function startBuiltServer(entry: string, runtime: "node" | "bun"): Promise
 
 d("D-F14 atelier build：自托管单容器产线（node/bun 两 target + edge 拒绝位）", () => {
   it(
-    "全链正控：init → install → build --target=node → 产物 spawn → 握手 → app.ping + 静态 index 双面通",
+    "全链正控：init → install → build --target=node → 产物 spawn → 握手 → app.ping + 静态 index 双面通 + health version 对账",
     { timeout: 300_000, retry: 0 },
     async () => {
       const appDir = ensureFixture();
@@ -148,6 +150,9 @@ d("D-F14 atelier build：自托管单容器产线（node/bun 两 target + edge �
       // 决策 27 prod 剥离·壳旗标形状：置位 + 先于装配（静态 import 会 ESM 提升——必须 await import）
       expect(shellSrc).toContain("__ATELIER_PROD__ = true");
       expect(shellSrc).toContain("await import");
+      // W-A health version：壳注入框架版本（build 时点动态读 atelier/package.json——非硬编码），
+      // 与 __ATELIER_PROD__ 同段置位、先于 await import 装配（同款时序纪律）
+      expect(shellSrc).toContain("__ATELIER_VERSION__ = ");
 
       // spawn 产物 → 握手 → 双面探活
       const srv = await startBuiltServer(path.join(outDir, "server.mjs"), "node");
@@ -170,6 +175,18 @@ d("D-F14 atelier build：自托管单容器产线（node/bun 两 target + edge �
         const hidden = await fetch(`http://127.0.0.1:${srv.port}/api/__atelier/server-status`);
         expect(hidden.status).toBe(405);
         expect(((await hidden.json()) as { code: string }).code).toBe("ATR-311");
+
+        // W-A health version 对账：health 面 version 必须是产物壳注入的**框架**版本（测试内动态
+        // 读框架 package.json 对账，与版本号字面值零耦合），不是应用 package.json 的自报值——
+        // 现状装配点 readAppVersion() 自报模板应用版本（0.1.0 ≠ 框架版本）→ 先红，壳注入后转绿。
+        const fwVersion = (JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8")) as { version: string }).version;
+        const health = await fetch(`http://127.0.0.1:${srv.port}/api/__atelier/health`);
+        expect(health.status).toBe(200);
+        const healthBody = (await health.json()) as { ok: boolean; version: string | null };
+        expect(
+          healthBody.version,
+          `health.version=${JSON.stringify(healthBody.version)} ≠ 框架版本 ${JSON.stringify(fwVersion)}（产物壳须注入 __ATELIER_VERSION__，装配点接线壳注入值）`,
+        ).toBe(fwVersion);
       } finally {
         await srv.stop();
       }
