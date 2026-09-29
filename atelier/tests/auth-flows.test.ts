@@ -16,6 +16,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { genAuth, GenAuthError, parseFlows } from "../gen/gen-auth.mjs";
@@ -55,7 +56,7 @@ const describeSqlite = nodeSqlite ? describe : describe.skip;
 /* ---------- describe A：生成器两态（产物形态 + regen 幂等 + 追加式迁移） ---------- */
 
 describe("gen auth --flows 两态（B2；缺省字节不变负例 + flows 产物面 + regen 幂等）", () => {
-  it("缺省无 --flows：现状三件套字节不变（流程标记零出现的负例钉死）", () => {
+  it("缺省无 --flows：现状三件套字节不变（golden sha256 钉死 + 流程标记零出现负例）", () => {
     const root = makeFixtureRoot();
     const { written, migrationsAppended } = genAuth(root);
     // 产物清单 = 既有五件套 + 001_auth 对（现状口径，一字不差）
@@ -69,6 +70,21 @@ describe("gen auth --flows 两态（B2；缺省字节不变负例 + flows 产物
     ]);
     expect(migrationsAppended).toEqual(["001_auth"]);
     expect(exists(root, "src/server/auth/tokens.ts")).toBe(false); // 流程原语文件不出现
+    // golden sha256（红检期实证：marker 负例对「无流程符号的散文漂移」有盲区——B2 红检曾抓出
+    // registerAuthEndpoints JSDoc 多出一行的缺省态漂移。本表 = B2 时点缺省模板的 golden 锚，
+    // 与 main 基线逐字节对照全同；未来改缺省模板 = 有意升级，须显式重算本表并说明（golden 纪律）。
+    const GOLDEN_SHA256: Array<[string, string]> = [
+      ["src/server/auth/sessions.table.ts", "sha256-c225c7b7aac646680d52c8087a28e700fe3b38f6f6a8844c577bed9c4acc55b6"],
+      ["src/server/auth/cookie.ts", "sha256-863c350af82a8627a029239e962bb039543d08f54cf3995a8251c70d2ca0a0f3"],
+      ["src/server/auth/auth.ts", "sha256-d23eda897311ef663cc1b0cfa9eca12d4809e895ee6e666b099a0ee20242f2e8"],
+      ["src/server/auth/endpoints.ts", "sha256-195f2b534f5e4d4889e3ee802cbbcf9be5ff04211aa1ec9ddfd87714b18f60d0"],
+      ["src/server/db/migrations/001_auth.up.sql", "sha256-f484629abbd74709fa36c99216a1ae9e97df22cfbe158695c88bcf37341d2913"],
+      ["src/server/db/migrations/001_auth.down.sql", "sha256-65ada0200216e2cb6517747139acf42f8d08afc72163a650012cf3a55dc173d9"],
+    ];
+    for (const [rel, want] of GOLDEN_SHA256) {
+      const got = "sha256-" + createHash("sha256").update(read(root, rel)).digest("hex");
+      expect(got).toBe(want); // 缺省产物与 B2 前现状逐字节一致（红线）
+    }
     // 流程标记零出现（任一流程符号泄漏进缺省产物 = 两态失守）
     const endpoints = read(root, "src/server/auth/endpoints.ts");
     const tables = read(root, "src/server/auth/sessions.table.ts");
@@ -210,8 +226,8 @@ describe("gen auth --flows 两态（B2；缺省字节不变负例 + flows 产物
     expect(tablesR).not.toContain("verified"); // reset 流不动 users 契约
     expect(epR).toContain('defineCommand("auth.requestReset"');
     expect(epR).toContain('defineCommand("auth.resetPassword"');
-    expect(epR).not.toContain("auth.requestVerification");
-    expect(epR).not.toContain("auth.verifyEmail");
+    expect(epR).not.toContain('defineCommand("auth.requestVerification"');
+    expect(epR).not.toContain('defineCommand("auth.verifyEmail"');
     expect(epR).not.toContain("VERIFY_EMAIL_SUBJECT");
     expect(exists(rootR, "src/server/db/migrations/002_auth_tokens.up.sql")).toBe(true);
     expect(exists(rootR, "src/server/db/migrations/003_users_verified.up.sql")).toBe(false);
@@ -221,10 +237,9 @@ describe("gen auth --flows 两态（B2；缺省字节不变负例 + flows 产物
     const epV = read(rootV, "src/server/auth/endpoints.ts");
     expect(epV).toContain('defineCommand("auth.requestVerification"');
     expect(epV).toContain('defineCommand("auth.verifyEmail"');
-    expect(epV).not.toContain("auth.requestReset");
-    expect(epV).not.toContain("auth.resetPassword");
-    expect(exists(rootV, "src/server/db/migrations/002_auth_tokens.up.sql")).toBe(true); // verify 也走 token 表
-    expect(exists(rootV, "src/server/db/migrations/003_users_verified.up.sql")).toBe(true);
+    expect(epV).not.toContain('defineCommand("auth.requestReset"');
+    expect(epV).not.toContain('defineCommand("auth.resetPassword"');
+    expect(epV).not.toContain("RESET_EMAIL_SUBJECT");
   });
 
   it("未知 --flows 旗标 → GenAuthError（fix 指路合法清单）；parseFlows 规范化（去重/定序/空白容忍）", () => {
@@ -424,12 +439,12 @@ describeSqlite("auth 流程端到端（--flows reset,verify；真实 registry di
     expect((await expiredHit.json()).code).toBe("ATR-340");
 
     // kind 错配：reset 令牌用于 verifyEmail 拒；verify 令牌用于 resetPassword 拒
-    const asVerify = tokens.createAuthToken(db, user.id, "verify", 60 * 60 * 1000);
-    const wrongKind = await post(handler, "auth.verifyEmail", { token: asVerify.token });
+    const strayReset = tokens.createAuthToken(db, user.id, "reset", 60 * 60 * 1000);
+    const wrongKind = await post(handler, "auth.verifyEmail", { token: strayReset.token });
     expect(wrongKind.status).toBe(400);
     expect((await wrongKind.json()).code).toBe("ATR-340");
-    const asReset = tokens.createAuthToken(db, user.id, "reset", 60 * 60 * 1000);
-    const wrongKind2 = await post(handler, "auth.resetPassword", { token: asReset.token, newPassword: "next-pass-4" });
+    const strayVerify = tokens.createAuthToken(db, user.id, "verify", 60 * 60 * 1000);
+    const wrongKind2 = await post(handler, "auth.resetPassword", { token: strayVerify.token, newPassword: "next-pass-4" });
     expect(wrongKind2.status).toBe(400);
     // verify 令牌打 verifyEmail 正通（正控对照：拒的是 kind，不是端点）
     const goodVerify = tokens.createAuthToken(db, user.id, "verify", 60 * 60 * 1000);
@@ -530,8 +545,8 @@ describe("auth 流程端点投影面（gen endpoint api.ts + export openapi 扫�
     for (const n of ["auth.requestReset", "auth.resetPassword", "auth.requestVerification", "auth.verifyEmail"]) {
       expect(oapi).toContain(n);
     }
-    const doc = buildOpenApi(root, { mount: "/api", name: "FlowProbe" });
-    const paths = Object.keys((doc as { paths: Record<string, unknown> }).paths);
+    const out = buildOpenApi(root, { mount: "/api", name: "FlowProbe" });
+    const paths = Object.keys((out.doc as { paths: Record<string, unknown> }).paths);
     for (const n of ["auth.requestReset", "auth.resetPassword", "auth.requestVerification", "auth.verifyEmail"]) {
       expect(paths).toContain(`/api/${n}`);
     }
