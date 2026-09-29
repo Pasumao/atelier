@@ -239,6 +239,26 @@ M1 现状"只记成功写入"（310-320 注释口径）升级为**完整审计�
   追加写）列 B 队〔议〕——审计跨进程存续是"证据"叙事的补强件，但桌面单进程形态内存态已够 v1。
 - 机检联动：`SERVER_JOURNAL_SILENT`（WARN）——command 端点存在但 journal 被整体关闭时提示。
 
+> **落地注记（2026-09-28，差距批 B5，决策 29）**：上列「v1 维持内存环形 / 落盘候选列 B 队」就此
+> 关闭——command journal 持久化为**追加事件表 `atelier_command_journal`**（迁移 journal 决策 21
+> 同款模式：追加式 / 惰性建表〔首条 command 入账时，旧库零迁移获得〕/ 框架自管**不进应用迁移
+> 序列** / 一行 = 一次事件非当前态；列形状 = 内存条目 `EndpointJournalEntry` 的持久镜像，投影互逆，
+> `server/command-journal.ts` 单源）。装配项 `createHandler({ journal: { persist?, maxRows? } })`：
+> persist 缺省 = **db 已装配即 true**（开箱即得持久审计面）；`persist:false` 显式关闭回纯内存；
+> 无 db 恒内存（现状零变化）。保留窗口 = **行数基**（maxRows 缺省 1 万，写时惰性裁最老；时间基
+> v1 不做）。脱敏单源：journalPush 的 W2 递归脱敏产物直接落库，持久层不二次实现；只 command
+> 条目入表（query 永不入账语义不变）。**读路径源切换**：server-status journal 段有持久表时读库
+> 尾部 N 条（N = journalLimit，与内存环形同界），条目投影与内存条目字段逐一兼容——dev 面 review
+> 三源时间轴 / MCP endpoint.* 族自动获得持久行；无表 / 无 db / 读失败回落内存环形（零假数据）。
+> ok 路径写捕获槽收槽先于 journal 入账（持久化 INSERT 不混入本 command 的自动失效键——顺序
+> 注记见 endpoints.ts/sqlite.ts，红检用例钉住）。诚实边界：**库删即史灭**（同迁移 journal 口径）；
+> 落库失败 console.warn 降级不反噬 command 响应（审计不挡业务）；prod 照写（审计是安全语义，
+> §3.7）而 server-status 调试面 prod 隐身不变——表在库内，可经备份（`atelier db backup`）/SQL
+> 审计直达；live 引擎 query 重算失败条目（ATR-321）是诊断非命令审计，留内存（有持久表时不出现在
+> server-status journal 段，实时面 = SSE error 事件）。红检/回归：`tests/journal-persist.test.ts`
+> （重启不灭核心 = 真换实例同库文件）+ `tests/journal-subprocess.test.ts` golden 镜像（第二用例
+> 断言已随语义反转为跨重启可见）。
+
 ### 3.6 幂等与超时（元数据位，v1 轻实现）〔议〕
 
 - `idempotent: true`：进 OpenAPI 文档 + 客户端生成物携带重试语义（失败自动退避重试一次）+
@@ -889,6 +909,10 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 > （§5.4 注记：`atelier_migration_journal` 追加表成败入账，down/failed 历史与 principal/durMs
 > 持久化；introspect/review-data 顺携 journal 段，旧库/旧 server 面 ok:false 降级不变）。三源中
 > 仅迁移源现持久化；command journal 内存环形清零边界不变（跨重启审计走 audit.jsonl 源）。
+>
+> **落地注记（2026-09-28，差距批 B5，决策 29）**：上注「command journal 内存环形清零边界不变」
+> 就此失效——command journal 持久化为追加事件表（§3.5 注记），server-status journal 段改读库尾
+> （重启不灭），三源统一时间轴的 command 源随之持久；live 重算失败诊断条目（ATR-321）仍留内存。
 
 ---
 

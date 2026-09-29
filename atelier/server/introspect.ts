@@ -14,8 +14,13 @@
  * - db 段是尽力而为的读侧快照（表清单来自 sqlite_master + PRAGMA，迁移行来自
  *   atelier_migrations 状态表 + 迁移目录扫描）——库句柄未装配/读失败时 db=null + note，
  *   绝不编造空表假象；
- * - journal 为内存环形（journalLimit 上限、server 重启清零）——跨重启的历史归 dev 面
- *   audit.jsonl 时间轴（§11.3 统一时间轴的另一来源）；
+ * - journal 段数据源（B5 差距批，决策 29）：db 已装配且 `atelier_command_journal` 表存在 → 读库
+ *   尾部 N 条（N = registry.journalLimit，与内存环形同界；条目投影与内存条目字段逐一兼容，
+ *   command-journal.ts rowToEntry 单源）——**重启不灭**的 command 审计面；表不存在（旧库/尚无
+ *   command）/未装配 db/读失败 → 回落内存环形（零假数据纪律）。内存独有条目 = live 引擎 query
+ *   重算失败诊断（ATR-321，决策 29 明确不入持久表）——有持久表时它们不出现在本段，实时面仍是
+ *   SSE error 事件。prod 语义不变：journal 照写（审计是安全语义），本调试面 prod 隐身（下方
+ *   introspectResponse）——表在库内，可经备份/SQL 审计直达；
  * - 迁移审计（§11.3）：状态表即审计对象（决策 19"迁移即 checkpoint 审计对象"），只有
  *   applied 时刻（applied_at）与名字；down 历史/ principal /durMs 持久于
  *   atelier_migration_journal（决策 21 台账预留位关闭，M6 挂账候选池第二枚——追加式审计史，
@@ -25,6 +30,7 @@
  */
 import type { EndpointDef, EndpointRegistry, EndpointSummary } from "./endpoints.ts";
 import { endpointError, isLiveDeclared } from "./endpoints.ts";
+import { readCommandJournalTail } from "./command-journal.ts";
 import { MIGRATION_JOURNAL_TAIL_LIMIT, migrateStatus } from "./migrate.ts";
 import type { JobsStats } from "./jobs.ts"; // 仅类型——jobs 段数据经 handle.stats() 窄口取，SQL 单源在 jobs.ts
 import { timingSafeEqual } from "node:crypto";
@@ -45,7 +51,7 @@ export type ServerStatusSnapshot = {
   server: { startedAt: string; mount: string; node: string };
   /** 端点全表 */
   endpoints: ServerStatusEndpoint[];
-  /** command 审计 journal（成功与失败同源，环形有界） */
+  /** command 审计 journal（成功与失败同源；B5 起有持久表读库尾部——重启不灭，回落内存环形见头注） */
   journal: readonly unknown[];
   /** live 引擎内省：SSE 订阅者总数 + live 端点名 */
   live: { subscriberCount: number; endpoints: string[] };
@@ -211,11 +217,24 @@ export function serverStatusSnapshot(
     }
   }
 
+  // journal 段（B5 差距批，决策 29）：db 已装配且持久表存在 → 读库尾部 N 条（N = journalLimit，
+  // 与内存环形同界——快照有界，全量走库直读；条目投影与内存条目字段逐一兼容）。表不存在（null）/
+  // 未装配 db/读失败 → 回落内存环形（诚实降级，零假数据——回落语义与迁移 journal 段同款纪律）。
+  let journal: ServerStatusSnapshot["journal"] = registry.journal();
+  if (opts.db != null) {
+    try {
+      const persisted = readCommandJournalTail(opts.db as ReadableDb, registry.journalLimit);
+      if (persisted != null) journal = persisted;
+    } catch {
+      /* 读失败回落内存环形——句柄状态异常不反噬调试面 */
+    }
+  }
+
   return {
     ok: true,
     server: { startedAt: STARTED_AT, mount: opts.mount ?? "/", node: process.version },
     endpoints,
-    journal: registry.journal(),
+    journal,
     live: { subscriberCount: registry.liveEngine.subscriberCount(), endpoints: liveNames },
     db,
     dbNote,
