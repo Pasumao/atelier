@@ -667,6 +667,40 @@ src/server/auth/
 > （连续失败 5 次锁 15 分钟），锁定期 423 不做 scrypt，成功清零、过期解锁、按标识隔离；
 > 诚实边界=单进程内存态重启清零。
 
+> **落地注记（2026-09-28，差距批 B2——`--flows` 鉴权流程族）**：§6.1「magic link 变体 = regen
+> 时选模板」的兑现先行切口 = `atelier gen auth --flows reset,verify` 选装鉴权流程（reset=密码
+> 重置流 / verify=邮箱验证流，可单选可双选）。**缺省不带 = 三件套产物字节不变**（golden sha256
+> 负例钉死，tests/auth-flows.test.ts）。产物清单（在 §6.1 五件套之上追加）：
+> ① sessions.table.ts 加 `auth_tokens` 表契约（id/userId→users.id/kind〔enum reset|verify——
+> 校验在契约层，DDL 不重复 CHECK 框架纪律〕/tokenHash/**expiresAt**/usedAt）——**只存 sha256
+> 不存明文**（随机 32B hex 只经投递通道出站——DB 泄漏 ≠ token 泄漏）；verify 流另加 users.
+> verified 列契约；② tokens.ts 令牌原语：`createAuthToken(db, userId, kind, ttlMs)`（惰性清
+> 过期行）+ `consumeAuthToken(db, rawToken, kind)`（哈希后按 (tokenHash, kind) 查找 + 过期检查
+> + `UPDATE … WHERE usedAt IS NULL` 原子认领——**不存在/已用/过期/kind 错配同一失败路径**恒
+> null）；③ 流程端点对：`auth.requestReset`（auth none；**恒时诚实响应**——存在与否同形
+> `{ok:true}`，ghost 邮箱零写入零投递）/`auth.resetPassword`（auth none；`{token,newPassword
+> ≥8}`；tx 内 = 令牌认领+改密〔A2 版本位 hashPassword〕+ **全端会话吊销**〔重置即登出所有设备〕
+> + 同用户未消费令牌一并作废；token 无效统一 ATR-340 + 400〔匿名流中 401 保留给分发层会话拦截
+> 位——令牌即凭证，凭证无效语义归 ATR-340，状态取 400，正文不区分失败细节〕）/
+> `auth.requestVerification`（**auth session——最小安全形态**：按 email 无身份的变体天然是账号
+> 枚举信道，不做；已验证用户幂等 ok 不再发信）/`auth.verifyEmail`（auth none；`{token}`→
+> users.verified=1）；④ 迁移对：`NNN_auth_tokens`（createTableSql 渲染，reset|verify 共用）+
+> `NNN_users_verified`（仅 verify——**users 表现状无 verified 列**，加列无 createTableSql 渲染
+> 位 → ALTER TABLE 骨架，存量用户 DEFAULT 0；NNN_auth 对不因 --flows 变化——跨态字节稳定）；
+> 全部追加式编号顺延、同名覆盖位永不重写。**邮件投递**：经 ctx.email（B3 §5.8 可选位）记账投
+> 递；**缺位降级 console.warn 可发现通道**（令牌随 warn 打出，绝不因缺装配炸端点；装配后自动
+> 改走记账投递）；邮件正文 = 产物内明文常量/纯函数（`RESET_EMAIL_SUBJECT`/`resetEmailText` 等，
+> agent 可 grep 可改，regen 覆盖——不引模板引擎，决策 31 边界）。**诚实边界**：magic link
+> **登录**变体仍归远期（本注记只兑现 reset/verify 两流）；投递正文（含明文令牌）按 B3「账即所
+> 发」落 atelier_email_log.payload——账面读取面 = 邮件读者面，mock/dev 态这正是测试与代理的取
+> 令牌通道，生产装配真实 transport 后若在意此泄漏面请自行收窄 maxRows 或自接不入账通道；
+> **verified 无框架级门禁拦截**（拦截策略属应用层——端点自行读 ctx.auth 后查列做行级判断）；
+> auth.me 输出不带 verified（三件套形态稳定，应用可自行改 pick）；TTL 常量（reset 1h / verify
+> 24h）为产物明文 knob。投影面：四流程端点经 gen endpoint/export openapi 既有 auth 扫描面
+> （内联契约字面量三形态）自动纳入 api.ts 客户端与 openapi 文档——零新扫描逻辑。回归钉 =
+> `tests/auth-flows.test.ts`（17 用例，含两态 golden/regen 幂等/端到端/token 单次·过期·kind
+> 错配/降级通道）+ `tests/gen-compile-gate.test.ts`（--flows 态 tsc 零诊断挂钩）。
+
 ### 6.2 auth 元数据 × 机检 × MCP
 
 - 端点 `auth: {type, role?}` 声明 → 装配层自动拦截（未通过 = ATR-340/341，§3.3）；

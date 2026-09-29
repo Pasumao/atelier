@@ -67,8 +67,13 @@ GENERATE / DATA (FS-M2 全站化)
   atelier gen db [--root <dir>]                                    MINI* 数据契约 schema.ts → tables/crud + 迁移骨架
                                                                           （追加式永不重写已应用迁移；regen 幂等）
   atelier gen auth [--root <dir>]                                  MINI* 鉴权五件套（FS-5 §6）：sessions/users 契约 +
-                                                                          scrypt 会话原语 + cookie + auth.* 端点骨架 +
-                                                                          NNN_auth 迁移对（追加式；regen 幂等）
+                                     [--flows reset,verify]               scrypt 会话原语 + cookie + auth.* 端点骨架 +
+                                                                          NNN_auth 迁移对（追加式；regen 幂等）；
+                                                                          --flows reset|verify 加发鉴权流（B2）：auth_tokens
+                                                                          表（只存 sha256）+ tokens.ts 原语 + 流程端点对
+                                                                          （reset=密码重置/verify=邮箱验证，可单选可双选）+
+                                                                          NNN_auth_tokens/NNN_users_verified 迁移对；缺省
+                                                                          不带 = 三件套产物字节不变
   atelier gen endpoint [--root <dir>] [--mount /api]               MINI* 端点定义 → src/generated/api.ts 类型化客户端
                                             [--from-specs]                （--from-specs 兼发 specs 意图段的可编译骨架）
   atelier migrate status|up|down|verify|seed [--root <dir>]        MINI* 可逆迁移器（FS-4）+ SQL 种子（D-F17）：
@@ -237,7 +242,7 @@ switch (cmd) {
   case "gen": {
     // FS-M2：契约/数据契约 → 生成物（产物显式 import 闭合；regen 幂等；FS-DESIGN §7.1）
     const genFile = sub === "db" ? path.join(PKG, "gen", "gen-db.mjs") : sub === "endpoint" ? path.join(PKG, "gen", "gen-endpoint.mjs") : sub === "auth" ? path.join(PKG, "gen", "gen-auth.mjs") : null;
-    if (!genFile) die("usage: atelier gen db [--root <dir>] | endpoint [--root <dir>] [--mount /api] [--from-specs] | auth [--root <dir>]", 2);
+    if (!genFile) die("usage: atelier gen db [--root <dir>] | endpoint [--root <dir>] [--mount /api] [--from-specs] | auth [--root <dir>] [--flows reset,verify]", 2);
     runFile(genFile, rest);
     break;
   }

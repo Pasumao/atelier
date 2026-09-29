@@ -16,14 +16,24 @@
  *   <root>/src/server/db/migrations/NNN_auth.{up,down}.sql  成对迁移骨架（**追加式**：编号 =
  *                                              现有最大 NNN+1；已存在迁移文件永不重写，§5.4）
  *
- * 默认形态 = 邮箱+密码；magic link 变体不做（regen 模板选择归后续——auth.ts JSDoc 注明契约位）。
+ * 默认形态 = 邮箱+密码；magic link 登录变体不做（regen 模板选择归后续——auth.ts JSDoc 注明契约位）。
+ *
+ * 流程扩展（B2 差距批 2026-09-28，FS-DESIGN §6.1 落地注记）：`--flows reset,verify` 选装鉴权流程——
+ *   reset = 密码重置流（auth.requestReset / auth.resetPassword）；verify = 邮箱验证流
+ *   （auth.requestVerification / auth.verifyEmail）；可单选可双选。缺省不带 = 三件套产物**字节不变**
+ *   （负例钉死 tests/auth-flows.test.ts）。流程产物（在五件套之上追加）：
+ *   sessions.table.ts 加 auth_tokens 表契约（只存 sha256 不存明文 token——DB 泄漏 ≠ token 泄漏；
+ *   verify 流另加 users.verified 列）+ tokens.ts 令牌原语 + NNN_auth_tokens 迁移对
+ *   （createTableSql 渲染）+ NNN_users_verified 加列迁移对（仅 verify；加列无表契约 DDL 位 →
+ *   ALTER TABLE 骨架）。流程端点投递经 ctx.email（B3 可选位）——缺位降级 console.warn 可发现
+ *   通道，绝不炸；邮件正文 = 产物内明文常量/纯函数（不引模板引擎，决策 31 边界）。
  *
  * 生成器纪律（§7，与 gen-db.mjs 同源）：产物为纯函数渲染（同输入 → 字节全同，regen 幂等）；
  * DDL 经 server/db.ts 的 createTableSql/dropTableSql 渲染（契约校验与迁移 DDL 不出现第二套实现）；
  * regen 重写 TS 产物为字节全同内容（手改被覆盖——§6.3：regen 前先 git diff 审阅），迁移只追加。
  *
- * 用法：node atelier/gen/gen-auth.mjs --root <appDir>
- * 纯 API：import { genAuth, GenAuthError } from "<repo>/atelier/gen/gen-auth.mjs"
+ * 用法：node atelier/gen/gen-auth.mjs --root <appDir> [--flows reset,verify]
+ * 纯 API：import { genAuth, GenAuthError, parseFlows } from "<repo>/atelier/gen/gen-auth.mjs"
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -64,6 +74,62 @@ const SESSIONS_DEF = defineTable("sessions", {
   indexes: [{ name: "idx_sessions_user", columns: ["userId"] }],
 });
 
+/**
+ * auth_tokens：鉴权流一次性令牌（B2 差距批，仅 --flows 生成）：只存 sha256 哈希不存明文
+ * （随机 32B hex 明文只经投递通道出站——DB 泄漏 ≠ token 泄漏）；kind 区流（reset/verify——枚举
+ * 校验在契约层，DDL 不重复 CHECK 的框架纪律，db.ts table() 语义）；expiresAt = 建令牌时定格的
+ * epoch ms；usedAt = 单次使用位（consume 原子认领）。
+ */
+const AUTH_TOKENS_DEF = defineTable("auth_tokens", {
+  id: { type: "integer", primaryKey: true },
+  userId: { type: "integer", notNull: true, references: "users.id" },
+  kind: { type: "text", notNull: true, enum: ["reset", "verify"] },
+  tokenHash: { type: "text", notNull: true, unique: true },
+  expiresAt: { type: "integer", notNull: true },
+  usedAt: { type: "integer" },
+}, {
+  indexes: [{ name: "idx_auth_tokens_user", columns: ["userId"] }],
+});
+
+/**
+ * users 契约按流程裁剪：缺省 = USERS_DEF 原样（三件套字节不变红线）；verify 流追加 verified 列
+ * （0=未验证/1=已验证）。加列的 DDL 位在 NNN_users_verified 迁移对（ALTER TABLE——加列无
+ * createTableSql 渲染位），契约与列形状随本契约单源一致。
+ */
+function usersDefFor(flows) {
+  if (!flows.includes("verify")) return USERS_DEF;
+  return defineTable("users", {
+    ...USERS_DEF.columns,
+    verified: { type: "integer", notNull: true, default: 0 },
+  });
+}
+
+/* ---------- --flows 流程开关（B2） ---------- */
+
+/** 支持的流程清单（顺序即产物渲染规范序） */
+export const AUTH_FLOWS = ["reset", "verify"];
+
+/**
+ * 解析 --flows 值（"reset,verify" / "reset" / "verify" / undefined / 等价数组）：规范化到
+ * AUTH_FLOWS 顺序 + 去重 + 空白容忍；未知旗标 = GenAuthError（fail-closed——拼错旗标绝不静默
+ * 降级为缺省三件套）。
+ */
+export function parseFlows(value) {
+  if (value == null) return [];
+  const parts = (Array.isArray(value) ? value.join(",") : String(value))
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const unknown = parts.filter((p) => !AUTH_FLOWS.includes(p));
+  if (unknown.length > 0) {
+    die(
+      `未知 --flows 旗标：${unknown.join(", ")}`,
+      `支持：${AUTH_FLOWS.join("/")}（reset=密码重置流 / verify=邮箱验证流；可组合 --flows reset,verify；缺省不带 = 三件套现状字节不变）`
+    );
+  }
+  return AUTH_FLOWS.filter((f) => parts.includes(f));
+}
+
 /* ---------- 产物渲染（纯函数：同输入 → 字节全同） ---------- */
 
 const VENDOR_INDEX = "../../vendor/atelier/server/index.ts";
@@ -81,6 +147,7 @@ function renderTableLiteral(def, constName, indent) {
     if (col.default !== undefined) {
       parts.push(`default: ${typeof col.default === "string" ? JSON.stringify(col.default) : String(col.default)}`);
     }
+    if (col.enum !== undefined) parts.push(`enum: [${col.enum.map((v) => JSON.stringify(v)).join(", ")}]`);
     if (col.references) parts.push(`references: "${col.references}"`);
     L.push(`${indent}  ${k}: { ${parts.join(", ")} },`);
   }
@@ -98,17 +165,21 @@ function renderTableLiteral(def, constName, indent) {
   return L.join("\n");
 }
 
-function renderSessionsTable() {
+function renderSessionsTable(flows) {
+  const hasFlows = flows.length > 0;
   return [
-    "// @atelier-generated (gen auth) — 鉴权域数据契约（§6.1）：users（凭据）+ sessions（会话）。",
+    `// @atelier-generated (gen auth) — 鉴权域数据契约（§6.1）：users（凭据）+ sessions（会话）${hasFlows ? " + auth_tokens（流程一次性令牌）" : ""}。`,
     "// 与 schema 单源同规范（server/db.ts 的 table() 扁平字面量）；应用已有 src/server/db/schema.ts 时",
-    "// 可把两个定义并入单源后删除本文件（import 相对路径随之调整——gen db 只扫描单源文件）。",
+    hasFlows
+      ? "// 可把这些定义并入单源后删除本文件（import 相对路径随之调整——gen db 只扫描单源文件）。"
+      : "// 可把两个定义并入单源后删除本文件（import 相对路径随之调整——gen db 只扫描单源文件）。",
     "// regen 语义：每次重写为字节全同内容；手改会被 regen 覆盖（§6.3：regen 前先 git diff 审阅）。",
     `import { table } from "${VENDOR_DB}";`,
     "",
-    renderTableLiteral(USERS_DEF, "users", ""),
+    renderTableLiteral(usersDefFor(flows), "users", ""),
     "",
     renderTableLiteral(SESSIONS_DEF, "sessions", ""),
+    ...(hasFlows ? ["", renderTableLiteral(AUTH_TOKENS_DEF, "authTokens", "")] : []),
     "",
   ].join("\n");
 }
@@ -149,6 +220,79 @@ function renderCookie() {
     '    if (pair.slice(0, eq).trim() === name) return pair.slice(eq + 1).trim();',
     "  }",
     "  return null;",
+    "}",
+    "",
+  ].join("\n");
+}
+
+/**
+ * tokens.ts 产物（B2，仅 --flows 生成）：鉴权流一次性令牌原语。内容与选中流程无关（原语两流共用，
+ * 令牌表也共用一张）——reset-only / verify-only / 双选渲染字节全同，产物面裁剪只发生在端点与
+ * users 契约/迁移层。
+ */
+function renderTokens() {
+  return [
+    "/**",
+    " * @atelier-generated (gen auth --flows) — 鉴权流一次性令牌原语（FS-DESIGN §6.1 落地注记 2026-09-28，",
+    " * 差距批 B2：密码重置 + 邮箱验证流）。",
+    " *",
+    " * 形态（本文件随 --flows 生成；缺省三件套不产本文件）：",
+    " *   - createAuthToken(db, userId, kind, ttlMs)：随机 32B hex 明文 token 只经返回值出站（邮件/",
+    " *     console 降级通道），库内只落 sha256 哈希——DB 泄漏 ≠ token 泄漏；",
+    " *   - consumeAuthToken(db, rawToken, kind)：哈希后按 (tokenHash, kind) 查找 + 过期检查 + 单次",
+    " *     使用（UPDATE ... WHERE usedAt IS NULL 原子认领）——不存在/已用/过期/kind 错配**同一失败",
+    " *     路径**（恒返 null，调用方给统一文案——不向请求侧泄漏 token 状态细节）；",
+    " *   - 建令牌时顺手惰性清理过期行（validateSession 同款纪律，无后台任务）。",
+    " *",
+    " * 装配：流程端点见同目录 endpoints.ts（--flows 选装 auth.requestReset/auth.resetPassword/",
+    " * auth.requestVerification/auth.verifyEmail）；邮件投递经 ctx.email（B3 可选位），缺位降级",
+    " * console.warn 可发现通道（见 endpoints.ts deliverFlowEmail）。",
+    " * SQL 红线（决策 19）：全部参数化（值一律 ? 绑定），无字符串拼接逃生门。",
+    " * regen 语义：每次重写为字节全同内容；手改会被 regen 覆盖（§6.3：regen 前先 git diff 审阅）。",
+    " */",
+    'import { createHash, randomBytes } from "node:crypto";',
+    `import type { SqliteDb } from "${VENDOR_SQLITE}";`,
+    "",
+    "/** 令牌用途（auth_tokens.kind 契约枚举）：reset = 密码重置 / verify = 邮箱验证 */",
+    'export type AuthTokenKind = "reset" | "verify";',
+    "",
+    "/** 密码重置令牌有效期（明文常量 knob——regen 会覆盖手改，§6.3；改 TTL 只影响新建令牌，不溯及） */",
+    "export const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;",
+    "/** 邮箱验证令牌有效期（同上） */",
+    "export const VERIFY_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;",
+    "",
+    "/** 明文 token 只存哈希：sha256 hex（DB 泄漏 ≠ token 泄漏——B2 形态红线，tests/auth-flows.test.ts 钉） */",
+    "function hashToken(rawToken: string): string {",
+    '  return createHash("sha256").update(rawToken).digest("hex");',
+    "}",
+    "",
+    "/**",
+    " * 建一次性令牌：返回明文 token（调用方负责经投递通道送出——ctx.email 或 console 降级，绝不入库）。",
+    " * 顺手惰性清理全部过期行（validateSession 惰性 DELETE 同款：建时即清，无后台任务纪律的延续）。",
+    " */",
+    "export function createAuthToken(db: SqliteDb, userId: number, kind: AuthTokenKind, ttlMs: number): { id: number; token: string; expiresAt: number } {",
+    '  const token = randomBytes(32).toString("hex");',
+    "  const now = Date.now();",
+    '  db.prepare("DELETE FROM auth_tokens WHERE expiresAt <= ?").run(now);',
+    '  const r = db.prepare("INSERT INTO auth_tokens (userId, kind, tokenHash, expiresAt) VALUES (?, ?, ?, ?)").run(userId, kind, hashToken(token), now + ttlMs);',
+    "  return { id: Number(r.lastInsertRowid), token, expiresAt: now + ttlMs };",
+    "}",
+    "",
+    "/**",
+    " * 消费一次性令牌（单次使用）：哈希后按 (tokenHash, kind) 查找 → 已用/过期检查 → 原子认领",
+    " * （UPDATE ... WHERE id = ? AND usedAt IS NULL 抢占式置位，changes=0 = 并发窗口的二次消费）。",
+    " * 不存在/已用/过期/kind 错配**同一失败路径**：恒返 null——流程端点给统一 400 文案，不区分细节。",
+    " */",
+    "export function consumeAuthToken(db: SqliteDb, rawToken: string, kind: AuthTokenKind): { userId: number } | null {",
+    "  const row = db",
+    '    .prepare("SELECT id, userId, expiresAt, usedAt FROM auth_tokens WHERE tokenHash = ? AND kind = ?")',
+    "    .get(hashToken(rawToken), kind) as { id: number; userId: number; expiresAt: number; usedAt: number | null } | undefined;",
+    "  if (row == null) return null;",
+    "  if (row.usedAt != null) return null; // 已用（单次使用）",
+    "  if (Number(row.expiresAt) <= Date.now()) return null; // 过期（建时定格的 expiresAt，改 TTL 不溯及）",
+    '  const r = db.prepare("UPDATE auth_tokens SET usedAt = ? WHERE id = ? AND usedAt IS NULL").run(Date.now(), Number(row.id));',
+    "  if (Number(r.changes) === 0) return null; // 并发二次消费护栏",
+    "  return { userId: Number(row.userId) };",
     "}",
     "",
   ].join("\n");
@@ -317,24 +461,109 @@ function renderAuth() {
   ].join("\n");
 }
 
-function renderEndpoints() {
+function renderEndpoints(flows) {
+  const hasReset = flows.includes("reset");
+  const hasVerify = flows.includes("verify");
+  const flowLabel = [
+    hasReset ? "auth.requestReset / auth.resetPassword（reset）" : null,
+    hasVerify ? "auth.requestVerification / auth.verifyEmail（verify）" : null,
+  ]
+    .filter(Boolean)
+    .join(" + ");
   return [
-    "// @atelier-generated (gen auth) — auth.login / auth.logout / auth.me 端点骨架（§6.1）。",
+    `// @atelier-generated (gen auth) — auth.login / auth.logout / auth.me 端点骨架（§6.1${flows.length > 0 ? `；--flows ${flows.join(",")} 加流程端点：${flowLabel}——B2 落地注记` : ""}）。`,
     "// 契约：input = 就地 FlatSchema 字面量；auth.me 的 output = users rowSchema 的 pick 投影（数据契约同规范单源，§5.1）。",
     "// 角色声明示例：需要角色的端点写 auth: { type: \"session\", role: \"admin\" }——分发层拦截（403 ATR-341），",
     "// handler 内无需重复检查；行级判断读 ctx.auth 显式做（RLS 式隐式策略不做，§6.2）。",
     "// 诚实边界：本文件在 src/server/auth/（§6.1 布局）——gen endpoint 的 api.ts 客户端只扫",
     "// src/server/endpoints/，auth 端点的前端调用走 fetch 或手工并入客户端（v1 边界）。",
     "// regen 语义：每次重写为字节全同内容；手改会被 regen 覆盖（§6.3：regen 前先 git diff 审阅）。",
-    `import { AtrEndpointError, defineCommand, defineQuery, endpointError, type EndpointRegistry } from "${VENDOR_INDEX}";`,
+    `import { AtrEndpointError, defineCommand, defineQuery, endpointError, type EndpointRegistry${flows.length > 0 ? ", type EndpointContext" : ""} } from "${VENDOR_INDEX}";`,
     `import type { SqliteDb } from "${VENDOR_SQLITE}";`,
     `import { pick } from "${VENDOR_DB}";`,
-    'import { createSession, destroySession, findUserByEmail, verifyPasswordEqualized } from "./auth.ts";',
+    `import { createSession, destroySession, findUserByEmail,${hasReset ? " hashPassword," : ""} verifyPasswordEqualized } from "./auth.ts";`,
     'import { clearSessionCookie, serializeSessionCookie } from "./cookie.ts";',
     'import { users } from "./sessions.table.ts";',
+    ...(flows.length > 0
+      ? [
+          `import { consumeAuthToken, createAuthToken${hasReset ? ", RESET_TOKEN_TTL_MS" : ""}${hasVerify ? ", VERIFY_TOKEN_TTL_MS" : ""} } from "./tokens.ts";`,
+        ]
+      : []),
     "",
     "/** auth.me 输出契约：users rowSchema 的列子集投影（pick——契约与数据同规范单源，§5.1） */",
     'const meOutput = pick(users.rowSchema, ["email", "role"]);',
+    ...(hasReset
+      ? [
+          "",
+          "export const RESET_EMAIL_SUBJECT = \"重置你的密码\";",
+        ]
+      : []),
+    ...(hasVerify
+      ? [
+          "",
+          "export const VERIFY_EMAIL_SUBJECT = \"验证你的邮箱\";",
+        ]
+      : []),
+    ...(hasReset
+      ? [
+          "",
+          "// —— B2 流程邮件模板（明文常量/纯函数，agent 可 grep 可改——不引模板引擎，决策 31 边界；",
+          "// regen 会覆盖手改：改 knob 请改生成器模板或 regen 后审阅 diff 重改，§6.3）——",
+          "/** 重置邮件正文（纯文本）：令牌单次使用 + 有效期 + 全端登出语义随行说明 */",
+          "export function resetEmailText(token: string, expiresAt: number): string {",
+          "  return [",
+          '    "有人（应当是你本人）请求重置该邮箱对应账号的登录密码。",',
+          '    "",',
+          "    `重置令牌（单次使用）：${token}`,",
+          "    `有效期至：${new Date(expiresAt).toISOString()}（过期/已用即失效；重置成功后该账号全部会话退出）`,",
+          '    "",',
+          '    "如非本人操作请忽略本邮件——该请求本身不改变你的密码。",',
+          '  ].join("\\n");',
+          "}",
+        ]
+      : []),
+    ...(hasVerify
+      ? [
+          "",
+          "/** 验证邮件正文（纯文本）：令牌单次使用 + 有效期 */",
+          "export function verifyEmailText(token: string, expiresAt: number): string {",
+          "  return [",
+          '    "请验证该邮箱对应的账号所有权。",',
+          '    "",',
+          "    `验证令牌（单次使用）：${token}`,",
+          "    `有效期至：${new Date(expiresAt).toISOString()}（过期/已用即失效）`,",
+          '    "",',
+          '    "如非本人操作请忽略本邮件。",',
+          '  ].join("\\n");',
+          "}",
+        ]
+      : []),
+    ...(flows.length > 0
+      ? [
+          "",
+          "/**",
+          " * 流程邮件投递（B2）：ctx.email 已装配 → 记账投递（B3 atelier_email_log 可审计；投递失败是",
+          " * 记账事实不是异常——send 不抛，status=failed 时 console.warn 指认账面并降级打出令牌，流程",
+          " * 响应不泄漏投递状态）；ctx.email 缺位（可选位未装配）→ **console.warn 可发现通道降级**：",
+          " * 令牌随 warn 打出——dev/测试态据此完成流程，绝不因缺装配炸端点。装配 createHandler({ email })",
+          " * 后自动改走记账投递（两分支二选一）。诚实边界：令牌明文且时效敏感——生产环境务必装配真实",
+          " * transport（warn 通道随装配自动失效）；投递正文（含令牌）按 B3「账即所发」落",
+          " * atelier_email_log.payload——账面读取面 = 邮件读者面，这是可审计性的代价，非疏漏。",
+          " */",
+          "async function deliverFlowEmail(ctx: EndpointContext, to: string, subject: string, text: string, token: string): Promise<void> {",
+          "  if (ctx.email != null) {",
+          "    const r = await ctx.email.send({ to, subject, text });",
+          '    if (r.status === "failed") {',
+          "      console.warn(",
+          "        `[gen auth] 邮件投递失败（status=failed，详见 atelier_email_log）：to=${to} error=${r.error ?? \"\"}\\n令牌（单次使用）：${token}`",
+          "      );",
+          "    }",
+          "    return;",
+          "  }",
+          "  console.warn(`[gen auth] ctx.email 未装配（装配位 createHandler({ email })）——流程邮件降级 console 通道：to=${to} subject=${subject}\\n令牌（单次使用）：${token}`);",
+          "}",
+        ]
+      : []),
     "",
     "/**",
     " * 登录失败锁定（A2 功能批功能8，in-memory v1）：同一登录标识连续失败 LOGIN_LOCKOUT_MAX_FAILURES 次",
@@ -348,7 +577,9 @@ function renderEndpoints() {
     "const loginFailures = new Map<string, { count: number; lockedUntil: number }>();",
     "",
     "/**",
-    " * 注册 auth 端点三件套（装配点显式调用 registerAuthEndpoints(reg)——无 import 副作用魔法）。",
+    flows.length > 0
+      ? ` * 注册 auth 端点族：三件套 + 流程端点（--flows ${flows.join(",")}：${flowLabel}）；装配点显式调用 registerAuthEndpoints(reg)——无 import 副作用魔法。`
+      : " * 注册 auth 端点三件套（装配点显式调用 registerAuthEndpoints(reg)——无 import 副作用魔法）。",
     " * login 失败统一 401 文案（不泄露账号存在性）；本骨架不含注册端点——建户走 createUser（auth.ts）。",
     " */",
     "export function registerAuthEndpoints(reg: EndpointRegistry): void {",
@@ -442,6 +673,124 @@ function renderEndpoints() {
     "      },",
     "    })",
     "  );",
+    ...(hasReset
+      ? [
+          "",
+          "  // auth.requestReset（B2 reset 流）：恒时诚实响应——无论邮箱存在与否响应同形 { ok: true }",
+          "  //（账号枚举防护，A2 恒时纪律延续；本端点两条路径都无 login 式高代价凭据运算，无显著时序",
+          "  // 信道——真实邮箱才建令牌 + 投递，ghost 邮箱零写入零投递）。投递经 ctx.email（B3 可选位），",
+          "  // 缺位走 console.warn 降级（见 deliverFlowEmail）。",
+          "  reg.register(",
+          '    defineCommand("auth.requestReset", {',
+          '      contract: { type: "object", reqProps: { email: { type: "string" } } },',
+          '      output: { type: "object", reqProps: { ok: { type: "boolean" } } },',
+          '      auth: { type: "none" },',
+          "      handler: async (input: { email: string }, ctx) => {",
+          "        const db = ctx.db as SqliteDb;",
+          "        const user = findUserByEmail(db, input.email);",
+          "        if (user != null) {",
+          '          const t = createAuthToken(db, user.id, "reset", RESET_TOKEN_TTL_MS);',
+          "          await deliverFlowEmail(ctx, user.email, RESET_EMAIL_SUBJECT, resetEmailText(t.token, t.expiresAt), t.token);",
+          "        }",
+          "        return { ok: true }; // 恒时诚实：存在与否同形 success（细节只进投递通道，不进响应）",
+          "      },",
+          "    })",
+          "  );",
+          "",
+          "  // auth.resetPassword（B2 reset 流）：消费令牌 → 改密（A2 版本位哈希，hashPassword 同源）→",
+          "  // 全端会话吊销（重置即登出所有设备，安全语义）+ 同用户全部未消费令牌作废（含 verify 令牌——",
+          "  // 安全复位后一律重新申请）。scrypt 在事务外跑（异步代价不占事务窗口）；tx 内 = 认领 + 改密 +",
+          "  // 吊销，任一步失败齐回滚（令牌认领与密码生效要么都发生要么都不发生）。",
+          "  reg.register(",
+          '    defineCommand("auth.resetPassword", {',
+          '      contract: { type: "object", reqProps: { token: { type: "string" }, newPassword: { type: "string", min: 8 } } },',
+          '      output: { type: "object", reqProps: { ok: { type: "boolean" } } },',
+          '      auth: { type: "none" },',
+          "      handler: async (input: { token: string; newPassword: string }, ctx) => {",
+          "        const db = ctx.db as SqliteDb;",
+          "        const passwordHash = await hashPassword(input.newPassword);",
+          "        const claimed = await db.tx(() => {",
+          '          const hit = consumeAuthToken(db, input.token, "reset"); // 不存在/已用/过期/kind 错配统一 null',
+          "          if (hit == null) return null;",
+          '          db.prepare("UPDATE users SET passwordHash = ? WHERE id = ?").run(passwordHash, hit.userId);',
+          '          db.prepare("DELETE FROM sessions WHERE userId = ?").run(hit.userId); // 重置即全端登出',
+          '          db.prepare("DELETE FROM auth_tokens WHERE userId = ?").run(hit.userId); // 未消费令牌一并作废',
+          "          return hit;",
+          "        });",
+          "        if (claimed == null) {",
+          "          throw new AtrEndpointError(",
+          "            endpointError(",
+          '              "ATR-340",',
+          '              "重置链接无效或已过期",',
+          '              "重新发起密码重置（auth.requestReset 换新令牌）；令牌单次有效且有时效——无效/过期/已用统一此文案，不区分细节",',
+          '              ["auth.requestReset"]',
+          "            ),",
+          "            400",
+          "          );",
+          "        }",
+          "        return { ok: true };",
+          "      },",
+          "    })",
+          "  );",
+        ]
+      : []),
+    ...(hasVerify
+      ? [
+          "",
+          "  // auth.requestVerification（B2 verify 流）：需会话（最小安全形态——按 email 无身份的变体",
+          "  // 天然是账号枚举信道，不做）；已验证用户幂等 ok 且不再发信（无邮件噪音）。投递同",
+          "  // auth.requestReset（ctx.email 记账投递 / console.warn 降级）。",
+          "  reg.register(",
+          '    defineCommand("auth.requestVerification", {',
+          '      output: { type: "object", reqProps: { ok: { type: "boolean" } } },',
+          '      auth: { type: "session" },',
+          "      handler: async (_input: Record<string, unknown>, ctx) => {",
+          "        const db = ctx.db as SqliteDb;",
+          "        const auth = ctx.auth!; // 分发层拦截保证非空（§6.2）",
+          '        const user = db.prepare("SELECT id, email, verified FROM users WHERE id = ?").get(auth.userId) as { id: number; email: string; verified: number } | undefined;',
+          "        if (user == null) {",
+          "          throw new AtrEndpointError(",
+          '            endpointError("ATR-340", "会话主体不存在（用户已删除而会话残留）", "重新登录建立会话；此路径出现即数据异常——排查 users/sessions 数据"),',
+          "            401",
+          "          );",
+          "        }",
+          "        if (Number(user.verified) === 1) return { ok: true }; // 已验证：幂等 ok，不再发信",
+          '        const t = createAuthToken(db, user.id, "verify", VERIFY_TOKEN_TTL_MS);',
+          "        await deliverFlowEmail(ctx, user.email, VERIFY_EMAIL_SUBJECT, verifyEmailText(t.token, t.expiresAt), t.token);",
+          "        return { ok: true };",
+          "      },",
+          "    })",
+          "  );",
+          "",
+          "  // auth.verifyEmail（B2 verify 流）：消费令牌 → 标记 user verified（users.verified 列随",
+          "  // --flows verify 的 NNN_users_verified 迁移对落库，存量用户 DEFAULT 0）。诚实边界：verified",
+          "  // 无框架级门禁拦截——拦截策略属应用层（端点自行读 ctx.auth 后查列做行级判断）。",
+          "  reg.register(",
+          '    defineCommand("auth.verifyEmail", {',
+          '      contract: { type: "object", reqProps: { token: { type: "string" } } },',
+          '      output: { type: "object", reqProps: { ok: { type: "boolean" } } },',
+          '      auth: { type: "none" },',
+          "      handler: async (input: { token: string }, ctx) => {",
+          "        const db = ctx.db as SqliteDb;",
+          '        const hit = consumeAuthToken(db, input.token, "verify"); // 不存在/已用/过期/kind 错配统一 null',
+          "        if (hit == null) {",
+          "          throw new AtrEndpointError(",
+          "            endpointError(",
+          '              "ATR-340",',
+          '              "验证链接无效或已过期",',
+          '              "重新发起邮箱验证（登录后调 auth.requestVerification 换新令牌）；无效/过期/已用统一此文案，不区分细节",',
+          '              ["auth.requestVerification"]',
+          "            ),",
+          "            400",
+          "          );",
+          "        }",
+          '        db.prepare("UPDATE users SET verified = 1 WHERE id = ?").run(hit.userId);',
+          "        return { ok: true };",
+          "      },",
+          "    })",
+          "  );",
+        ]
+      : []),
     "}",
     "",
   ].join("\n");
@@ -469,6 +818,47 @@ function renderMigrationDown() {
   ].join("\n");
 }
 
+/* ---------- B2 流程迁移对（追加式；NNN_auth 迁移对不因 --flows 变化——跨态字节稳定） ---------- */
+
+function renderAuthTokenMigrationUp() {
+  return [
+    "-- migration gen auth --flows 骨架（up）：可手改；改后 checksum 即固定（改已应用文件 = ATR-332，§5.4）。",
+    "-- 事务由迁移器逐条包裹：本文件不得自带 BEGIN/COMMIT。",
+    "-- DDL 由 server/db.ts createTableSql 渲染（与数据契约同一真相源）；kind 枚举校验在契约层（DDL 不重复 CHECK）。",
+    createTableSql(AUTH_TOKENS_DEF),
+    "",
+  ].join("\n");
+}
+
+function renderAuthTokenMigrationDown() {
+  return [
+    "-- migration gen auth --flows 骨架（down）：可手改。",
+    "-- 不可逆：DROP TABLE 会丢弃 auth_tokens 全部数据（未消费令牌作废，可重新申请——数据可弃）；确认安全后以 migrate down --force 执行（§18 R7；删本行标记 = 显式声明非破坏）。",
+    dropTableSql(AUTH_TOKENS_DEF),
+    "",
+  ].join("\n");
+}
+
+function renderUsersVerifiedMigrationUp() {
+  return [
+    "-- migration gen auth --flows verify 骨架（up）：可手改；改后 checksum 即固定（改已应用文件 = ATR-332，§5.4）。",
+    "-- 事务由迁移器逐条包裹：本文件不得自带 BEGIN/COMMIT。",
+    "-- users.verified（B2 verify 流）：0=未验证 / 1=已验证；存量用户经 DEFAULT 0 落列（verified 无框架级门禁拦截——策略属应用层）。",
+    "-- 加列无 createTableSql 渲染位（它管建表）——ALTER TABLE 骨架，列形状与 sessions.table.ts 契约一致。",
+    "ALTER TABLE users ADD COLUMN verified INTEGER NOT NULL DEFAULT 0;",
+    "",
+  ].join("\n");
+}
+
+function renderUsersVerifiedMigrationDown() {
+  return [
+    "-- migration gen auth --flows verify 骨架（down）：可手改。",
+    "-- 不可逆：DROP COLUMN 会丢弃 users.verified 全部数据；确认安全后以 migrate down --force 执行（§18 R7；删本行标记 = 显式声明非破坏）。",
+    "ALTER TABLE users DROP COLUMN verified;",
+    "",
+  ].join("\n");
+}
+
 /* ---------- 主入口 ---------- */
 
 function relDisplay(root, file) {
@@ -476,12 +866,17 @@ function relDisplay(root, file) {
 }
 
 /**
- * 纯 API：给定应用根目录，产出鉴权五件套 + 成对迁移骨架（追加式）。
- * regen 幂等：五个 TS 产物全量重写（固定模板 → 字节全同）；迁移对只在 <NNN>_auth 尚不存在时追加，
- * 已存在迁移文件永不重写（§5.4）。返回诚实清单 { written, migrationsAppended }（相对 root 的 posix 路径，
- * 仅本次实际写入的文件）。
+ * 纯 API：给定应用根目录，产出鉴权件 + 成对迁移骨架（追加式）。opts.flows：undefined/"reset"/
+ * "verify"/"reset,verify"（或等价数组，经 parseFlows 规范化；未知旗标 GenAuthError）。
+ *
+ * regen 幂等：TS 产物全量重写（固定模板 → 字节全同）；迁移对按名覆盖位只追加——
+ *   NNN_auth（users+sessions）内容不因 --flows 变化（跨态字节稳定）；流程迁移对独立追加：
+ *   NNN_auth_tokens（reset|verify）→ NNN_users_verified（仅 verify），编号 = 现有最大 NNN 顺延；
+ *   已存在迁移文件永不重写（§5.4）。返回诚实清单 { written, migrationsAppended, flows }
+ *   （相对 root 的 posix 路径，仅本次实际写入的文件）。
  */
-export function genAuth(root) {
+export function genAuth(root, opts = {}) {
+  const flows = Array.isArray(opts.flows) ? parseFlows(opts.flows.join(",")) : parseFlows(opts.flows);
   if (!fs.existsSync(root)) {
     die(`应用根目录不存在：${root}`, "gen auth 以 --root 指向的应用目录为落点——先 init 或传入既有应用目录");
   }
@@ -496,12 +891,13 @@ export function genAuth(root) {
     written.push(relDisplay(root, file));
   };
 
-  put(path.join(authDir, "sessions.table.ts"), renderSessionsTable());
+  put(path.join(authDir, "sessions.table.ts"), renderSessionsTable(flows));
   put(path.join(authDir, "cookie.ts"), renderCookie());
   put(path.join(authDir, "auth.ts"), renderAuth());
-  put(path.join(authDir, "endpoints.ts"), renderEndpoints());
+  if (flows.length > 0) put(path.join(authDir, "tokens.ts"), renderTokens());
+  put(path.join(authDir, "endpoints.ts"), renderEndpoints(flows));
 
-  // 迁移对（追加式）：编号 = 现有最大 NNN+1（与 gen db 同款扫描）；NNN_auth 已存在 → 永不重写
+  // 迁移对（追加式）：编号 = 现有最大 NNN 顺延（与 gen db 同款扫描）；同名覆盖位已存在 → 永不重写
   const existing = fs.existsSync(migDir) ? fs.readdirSync(migDir) : [];
   const nums = existing
     .map((f) => /^(\d+)_/.exec(f))
@@ -509,10 +905,12 @@ export function genAuth(root) {
     .map((m) => Number(m[1]));
   const maxN = nums.length > 0 ? Math.max(...nums) : 0;
   const width = Math.max(3, String(maxN).length);
+  let next = maxN + 1;
   const migrationsAppended = [];
-  const covered = existing.some((f) => /^\d+_auth\.up\.sql$/.test(f));
-  if (!covered) {
-    const num = String(maxN + 1).padStart(width, "0");
+
+  // ① auth 对（users+sessions）：内容不因 --flows 变化（流程表/列走独立迁移对——跨态字节稳定）
+  if (!existing.some((f) => /^\d+_auth\.up\.sql$/.test(f))) {
+    const num = String(next++).padStart(width, "0");
     const up = path.join(migDir, `${num}_auth.up.sql`);
     const down = path.join(migDir, `${num}_auth.down.sql`);
     // 双保险：迁移文件永不重写（§5.4 追加式）——编号推进已保证，仍以防外部并发/手误
@@ -523,7 +921,34 @@ export function genAuth(root) {
     put(down, renderMigrationDown());
     migrationsAppended.push(`${num}_auth`);
   }
-  return { written, migrationsAppended };
+
+  // ② auth_tokens 对（reset|verify 共用一张令牌表）
+  if (flows.length > 0 && !existing.some((f) => /^\d+_auth_tokens\.up\.sql$/.test(f))) {
+    const num = String(next++).padStart(width, "0");
+    const up = path.join(migDir, `${num}_auth_tokens.up.sql`);
+    const down = path.join(migDir, `${num}_auth_tokens.down.sql`);
+    if (fs.existsSync(up) || fs.existsSync(down)) {
+      die(`迁移 ${num}_auth_tokens 已存在，拒绝重写`, "已生成/已应用的迁移永不重写（§5.4）；如需变更请手写新编号迁移");
+    }
+    put(up, renderAuthTokenMigrationUp());
+    put(down, renderAuthTokenMigrationDown());
+    migrationsAppended.push(`${num}_auth_tokens`);
+  }
+
+  // ③ users_verified 对（仅 verify；ALTER TABLE 加列——users 表契约同步带 verified 列）
+  if (flows.includes("verify") && !existing.some((f) => /^\d+_users_verified\.up\.sql$/.test(f))) {
+    const num = String(next++).padStart(width, "0");
+    const up = path.join(migDir, `${num}_users_verified.up.sql`);
+    const down = path.join(migDir, `${num}_users_verified.down.sql`);
+    if (fs.existsSync(up) || fs.existsSync(down)) {
+      die(`迁移 ${num}_users_verified 已存在，拒绝重写`, "已生成/已应用的迁移永不重写（§5.4）；如需变更请手写新编号迁移");
+    }
+    put(up, renderUsersVerifiedMigrationUp());
+    put(down, renderUsersVerifiedMigrationDown());
+    migrationsAppended.push(`${num}_users_verified`);
+  }
+
+  return { written, migrationsAppended, flows };
 }
 
 /* ---------- CLI（独立运行时；纯 API 消费方不走此段） ---------- */
@@ -537,15 +962,24 @@ if (INVOKED_DIRECTLY) {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const root = path.resolve(argOf("--root") ?? process.cwd());
+  const flowsArg = argOf("--flows");
   try {
-    const { written, migrationsAppended } = genAuth(root);
-    console.log(`gen auth：${root}`);
+    const { written, migrationsAppended, flows } = genAuth(root, { flows: flowsArg });
+    console.log(`gen auth：${root}${flows.length > 0 ? `（--flows ${flows.join(",")}）` : ""}`);
     for (const f of written) console.log(`- 写入 ${f}`);
     console.log(
       migrationsAppended.length > 0
         ? `迁移对（追加式，已存在文件永不重写）：${migrationsAppended.join(", ")}`
-        : "迁移对：已存在（NNN_auth 永不重写）"
+        : "迁移对：已存在（同名覆盖位永不重写）"
     );
+    if (flows.length > 0) {
+      const flowEps = [
+        flows.includes("reset") ? "auth.requestReset / auth.resetPassword" : null,
+        flows.includes("verify") ? "auth.requestVerification / auth.verifyEmail" : null,
+      ].filter(Boolean);
+      console.log(`流程端点（B2）：${flowEps.join(" + ")}；令牌只存 sha256（tokens.ts 原语）；投递经 ctx.email（B3 可选位——缺位 console.warn 降级，装配 createHandler({ email }) 改走记账投递）。`);
+      console.log("装配：registerAuthEndpoints(reg) 一并注册流程端点；先 migrate up（users_verified 对仅 verify 流）。");
+    }
     console.log("装配：main-server.ts 里 createHandler({ db, auth: createSessionReader(db) }) + registerAuthEndpoints(reg)——示例见 src/server/auth/auth.ts 头注释。");
     console.log(`done：${written.length} 个文件。regen 幂等：再跑一次应字节全同。`);
   } catch (e) {

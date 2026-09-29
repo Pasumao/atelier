@@ -126,20 +126,36 @@ describe("gen-compile 门禁（§7.3 门禁一：init → 三生成器 → tsc �
 
       // ③ 三生成器全跑（中间零手改）。顺序 db → auth → endpoint 是承重序：gen endpoint 的
       //    扫描面含 src/server/auth/endpoints.ts（FS-M2-d 挂账销账，加法语义）——endpoint
-      //    先于 auth 跑会扫不到 auth 产物，api.ts 缺 auth 客户端（下方断言即机检网）
+      //    先于 auth 跑会扫不到 auth 产物，api.ts 缺 auth 客户端（下方断言即机检网）。
+      //    B2（2026-09-28）：gen auth 跑两态——先缺省（三件套字节不变负例面），再 --flows
+      //    reset,verify（regen 覆写 TS 产物 + 追加流程迁移对），tsc 终态 = flows 态产物
+      //    零诊断（@types/node 真类型面，tokens.ts 的 node:crypto 在内）。
       writeFixtureFiles(root);
       run(process.execPath, [CLI, "gen", "db", "--root", root]);
       run(process.execPath, [CLI, "gen", "auth", "--root", root]);
+      run(process.execPath, [CLI, "gen", "auth", "--root", root, "--flows", "reset,verify"]);
       run(process.execPath, [CLI, "gen", "endpoint", "--root", root]);
 
       // ③' api.ts 含 auth 端点客户端（gen auth 产物三形态投影——authLogin 契约内联字面量
-      //     合成名 + authMe pick 本地表投影；类型渲染与客户端发射的编译性归 ④ tsc 全链零诊断）
+      //     合成名 + authMe pick 本地表投影；类型渲染与客户端发射的编译性归 ④ tsc 全链零诊断。
+      //     B2：--flows 态四流程端点同机制自动纳入——内联契约字面量投影 + 客户端合成名）
       const apiText = fs.readFileSync(path.join(root, "src", "generated", "api.ts"), "utf8");
       expect(apiText).toContain(`export const authLogin = Object.freeze({`);
       expect(apiText).toContain(`name: "auth.login" as const,`);
       expect(apiText).toContain(`export const authMe = Object.freeze({`);
       expect(apiText).toContain(`type AuthLoginInput = { email: string; password: string };`);
       expect(apiText).toContain(`type AuthMeOutput = { email: string; role: string };`);
+      for (const client of ["authRequestReset", "authResetPassword", "authRequestVerification", "authVerifyEmail"]) {
+        expect(apiText).toContain(`export const ${client} = Object.freeze({`);
+      }
+      expect(apiText).toContain(`type AuthRequestResetInput = { email: string };`);
+      expect(apiText).toContain(`type AuthResetPasswordInput = { token: string; newPassword: string };`);
+      expect(apiText).toContain(`type AuthVerifyEmailInput = { token: string };`);
+      // --flows 态产物实体在位（tokens.ts 原语 + users.verified 契约列 + 流程迁移对）
+      expect(fs.existsSync(path.join(root, "src", "server", "auth", "tokens.ts"))).toBe(true);
+      const tableText = fs.readFileSync(path.join(root, "src", "server", "auth", "sessions.table.ts"), "utf8");
+      expect(tableText).toContain(`table("auth_tokens"`);
+      expect(tableText).toContain("verified");
 
       // ④ tsc 严格诊断 = 0（typescript API 直跑；CompilerHost 的 cwd 必须锚到 fixture——
       //    否则 "types": ["node"] 的默认 typeRoots 解析从 vitest 进程 cwd 走查，永远找不到）
