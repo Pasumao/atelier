@@ -2,9 +2,48 @@
 
 本项目的所有显著变更都记录在本文件。
 
-格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)（major = 破坏性变更 / minor = 向后兼容的新增 / patch = 向后兼容的修复）。兼容性的执行器 = `atelier api-diff`（见 `atelier/docs/design-decisions.md` 决策 28）。
+格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)（major = 破坏性变更 / minor = 向后兼容的新增 / patch = 向后兼容的修复）。兼容性的执行器 = `atelier api-diff`（见 `atelier/docs/design-decisions.md` 决策 28）。批合并时同步向 `[Unreleased]` 节添条目（Keep a Changelog 惯例），发版时将 `[Unreleased]` 改名为版本号。
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-09-29
+
+**全站化 server 面从骨架到生产可用。** 1.0.0（合并锚 `6bb411c`，2026-09-27）之后四批（评审批 / 差距批 W1-W9 / 第三批 W10-W13 / MCP 工具族扩张批）的版本化提炼，条目由 `atelier/docs/BACKLOG.md` 四批归档行逐条对账提炼（代表性 git 锚点，经逐枚核验）；minor 判定依据 = 决策 28（api-diff 历次门禁全为 additive 零 breaking：+4 MCP 工具 / `db` CLI 命令 / `StreamError`·`RevertErrorEntry` 导出等纯加法）。本版新增决策 29-34（journal 持久化 / API key / email / 上传 / cache / GET for query）；新能力的使用者视角边界见根 README「Known Limitations」节。
+
+### 安全与加固
+
+- server 安全收口包：scrypt 显式参数+哈希版本位 / SQLite 统一 PRAGMA foreign_keys+busy_timeout / 请求体上限两道闸（413 ATR-346）/ prod 错误收敛+sha256 指纹 / server-status 可选 token 门禁 / 会话过期惰性清理 / 登录枚举恒时校验；新增限流 429（ATR-344）与登录失败锁定 423（ATR-345）——均显式装配缺省不启用（`bc67605`）
+- live 端点×auth≠none 组合注册期 fail-closed 拒绝（ATR-315）+ command journal 敏感键递归脱敏（password/token/secret 等词根值整体替换，server-status/review/MCP 消费链同源受保护）（`81cd008`）
+- dev 面加固：`/__atelier/*` Origin/Host 白名单闸 + 五条 JSON 路由 content-type 415 + token 一次性 HttpOnly cookie 通道 + CDP 随机端口与空闲看门狗（`2ab6545`）
+- 生成器与扫描器输入面收紧：extract-schema 交叉/联合类型尾检查（ATR-102）+ gen-endpoint 端点名字符集闸/48 词保留字表/插值 JSON.stringify（`18ad846`）
+
+### 数据与运维面
+
+- jobs 队列与幂等键：`atelier_jobs`/`atelier_idempotency` 惰性建表 + UPDATE..RETURNING 原子取出 + 指数退避/stale lock 回收 + everyMs recurring + ctx.jobs/ctx.kv 注入（ATR-350/351）（`4747368`）
+- `atelier db backup`：VACUUM INTO 在线快照（读快照不锁写不停机）+ bytes/sha256/quickCheck 自证行（`95d59d5`）
+- command journal 持久化（决策 29）：追加表 `atelier_command_journal` + journalPush 单源双写（脱敏产物直接落库）+ 落库失败 warn 降级（`f226614`）
+- 分页二原语：每张有主键表生成 `<t>ListPaged`/`<t>Count`（LIMIT/OFFSET 全 ? 绑定，负 limit 硬错；keyset 留门）（`87f507a`）
+- FTS5 全文搜索：`table()` opts.fts → external-content 虚表 + 同步触发器三元组（DDL 单源）+ `<t>FtsSearch`（bm25 排序）/`<t>FtsCount`；unicode61 中文整串单 token 边界如实注记（`7805e75`）
+
+### Web 面能力
+
+- 健康端点 `GET <mount>/__atelier/health`：db 探活失败 503 + prod 200×server-status 405 对照 + `createHandler({ version })` 装配自报（`5a952c3`）
+- API key 鉴权（决策 30）：`auth.type: "apikey"` timingSafeEqual 恒时校验 + 会话优先人机双通道 + openapi securitySchemes 投影（`d112eb0`）
+- email 适配边界（决策 31）：显式 EmailTransport + 内建 mockTransport 零发送 + `atelier_email_log` 投递记账 + ctx.email 可选注入（`a7ad785`）
+- 密码重置与邮箱验证流：`gen auth --flows reset,verify`（`auth_tokens` 表只存 sha256 + 四端点对 + 重置全端会话吊销）（`04c09f8`）
+- 上传/资产管道（决策 32）：defineUpload 兄弟注册表 + 零依赖 multipart 单文件解析 + sha256 内容寻址磁盘去重 + `atelier_assets` 记账（`d10f0d2`）
+- cache 档位（决策 33）：query 端点 cache 声明 → `Cache-Control` 注入 + 写端点缓存/live×public 等注册期硬错（ATR-313）（`a732442`）
+- GET for query（决策 34）：`restful: true` query 端点接受 GET?query，鉴权/限流/契约校验与 POST 全同链（`17a528d`）
+
+### AI 工具链（MCP · CLI）
+
+- MCP 工具族 36→40：jobs.status / email.log / uploads.status / server.health 四工具销账差距批遗留 + server-status uploads 内省段（faces/assets/tail 台账）（`4dbe618`、`8bce296`，收口 `b31098d`）
+- MCP callTool 长操作 spawnSync→异步流式收集（checkpoint 601s / git 30s 兜底超时）+ 取消信号直达 tasks.cancel 真树杀终止（`de6afaa`）
+
+### 修复
+
+- runtime：布尔属性 25 项集合 `false`→removeAttribute（disabled/checked 等语义反转修复，dev 态字符串化 ATR-328 警示）+ `$effect` 抛错重订阅恢复 + bindProp 信号泄漏修复 + bind:group 身份键微任务时点定版（`e541db7`，分支头 `2f10c3d`）
+- cli/scripts：die 大一统归一（exit 语义逐点保留）+ bench/snapshot-smoke 失败收口（零孤儿 dev server/零临时目录/零无头浏览器残留）（`a4bec1f`）
 
 ## [1.0.0] - 2026-09-27
 
@@ -63,5 +102,6 @@
 
 1.0.0 = release-ready 口径，不是功能完备声明：npm publish / MCP Registry 提交 / 真实 CI 首跑 / linux·darwin 快照基线 / create-atelier 脚手架均为**发布日外部动作**（本仓未验证，逐项见 `atelier/docs/RELEASE-CHECKLIST.md`）。1.0 已知限制（使用者视角清单）详见根 README「Known Limitations」节；内部缺口、候选池与语义边界台账见 `atelier/docs/BACKLOG.md`。
 
-[Unreleased]: https://github.com/Pasumao/atelier/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Pasumao/atelier/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Pasumao/atelier/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Pasumao/atelier/compare/v0.2.0...v1.0.0

@@ -58,5 +58,6 @@
 - 框架 runtime 只改 `atelier/runtime/`；应用是 init 时点的 vendor 拷贝，不回写框架。改了 dev 面（`atelier/dev/`）同理——已存在的应用要重新同步 scripts/。
 - MCP 工具/命令/错误码三处同步：CLI 表（cli.mjs HELP）/ `atelier/mcp/mcp-definitions.json` / 对应 skill；改后必跑 `node atelier/scripts/check-skills.mjs`。
 - 框架规格文档唯一源在 `atelier/docs/`；缺口与改进队列 = `atelier/docs/BACKLOG.md`。
+- CHANGELOG 随批维护：批合并时同步向仓库根 `CHANGELOG.md` 的 `[Unreleased]` 节添条目（Keep a Changelog 惯例，条目附 git 锚点），发版时将 `[Unreleased]` 改名为版本号（1.1.0 版本批 W-E 根因关闭：1.0 后四批曾致 Unreleased 空挂）。
 - 所有"未确认"结论必须明确标注，不得写成事实；删除文件前先 `checkpoint save`（git 可恢复）。
 - 对外数字单一**生成**源：README/AGENTS 的用例数与工具数是标记位（`<!--@num:tests|tools-->N<!--@/-->`），由 `node atelier/scripts/docs-numbers.mjs` sync 重写 / check 校验（CI 已接）——禁止手写这两个数字（2026-09-06 锐评整改：曾出现 README 93 用例/24 工具与实际失守）；性能数字仍以 README 性能表为唯一人工口径。

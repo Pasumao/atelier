@@ -1,7 +1,7 @@
 {
  "$meta": {
   "name": "atelier-mcp-definitions",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "purpose": "Single source for Atelier built-in MCP tool surface (names/faces/params). Skills and future MCP server must stay consistent with this file (enforced by scripts/check-skills.mjs).",
   "syncWith": [
    "atelier/docs/ARCHITECTURE.md#6-mcp-tool-list",
