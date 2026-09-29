@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-33**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3；决策 32 = 文件上传/资产管道，2026-09-28 差距批 B1；决策 33 = cache 元数据档位，2026-09-29 差距批 A5）；未决项 2 条见文末。
+> 已决 **0-34**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3；决策 32 = 文件上传/资产管道，2026-09-28 差距批 B1；决策 33 = cache 元数据档位，2026-09-29 差距批 A5；决策 34 = GET for query 运行时分发，2026-09-29 差距批 A7）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -483,6 +483,14 @@
 - **取舍与诚实边界**：缓存头投影只做 `private|public, max-age=N` 单形态（`s-maxage`/`stale-while-revalidate`/ETag/条件请求/服务端缓存存储全部不做——要了再加，无隐式默认同款纪律；对象档未知键收紧硬错 = table() opts 同款，静默忽略元数据键 = 声明被吞；maxAge 只认非负整数秒，0 = 显式零秒合法）；OpenAPI 响应 headers 投影 v1 不做，`x-atelier-cache` extension 先行（留门）；Atelier 不内建缓存存储——HTTP 缓存语义交给浏览器/CDN，框架只做显式声明的忠实透传；缓存头是 API 契约非调试面，dev/prod 同语义注入。
 - 测试钉：`tests/cache-meta.test.ts`（13 用例：定义期硬错六例——command×对象档/live×对象档/public×auth 泄露面/maxAge 缺失/maxAge 非负整数守卫/visibility 与档位与未知键；分发三态 + 错误路径无缓存头负例；内省三态；openapi 两态 + 未声明零变化）。
 - 时间：2026-09-29（差距批 A5）。
+
+## 决策 34：GET for query 运行时分发——D-F11 留门的运行时扩张（差距批 A7）
+
+- **定论**：FS-DESIGN §3.4「GET for query〔议〕」的留门就此兑现——`restful: true` 端点级开关（此前只活在 `atelier export openapi` 的文档投影位，投影 description 明写「运行时传输仍为 POST」）扩为**文档+运行时双真**：声明该位的 **query** 端点接受 `GET <mount>/<name>?<query>` 运行时分发，URL 查询串按输入契约显式类型投影后照走既有契约校验。**默认关语义不变**：未声明 restful 的端点零变化（GET 仍落既有 405 ATR-311 兜底）；command 声明 restful = 注册期硬错（ATR-313——写端点没有 GET 分发语义，读写二分纪律不动，export-openapi 扫描器同规则同口径）。**POST 通道保留不撤**——restful 端点双通道并存（GET 是加法不是替换）；batch 仍不做（D-F11 口径不变）。
+- **机制**：①分发路由——restful GET 分支插在 POST 分发兜底 405 之前，与 `/live` SSE 后缀路由天然无冲突（带后缀的请求先被截走走 SSE）；live query 端点声明 restful 时 `GET <name>` 返回普通 JSON（对齐 POST 直调 live 的现状语义）、`GET <name>/live` 仍走 SSE，两不误（用例钉住）。②输入构造（endpoints.ts `buildRestfulInput` 单源）——FlatField 类型全集 string/number/boolean/array 有什么投影什么、不猜：string 原样；number `Number(v)`（空串——`Number("")===0` 的无声陷阱——与 NaN 显式拒绝）；boolean 只认 `"true"/"false"`；array 按重复键收集（`URLSearchParams.getAll`，单值 = 单元素数组）逐元素投影。未知参数、标量字段重复键（get() 取首值是无声猜测）、无契约带参（无投影依据）一律 **400 ATR-312**（传输层输入形态非法槽位——决策 32 multipart 结构非法同码先例）；投影产物照走 validateFlat 同链不绕过——缺必填/范围违规 **ATR-201 与 POST 同码同文风**（GET 与 POST 对同一违约错误逐字一致，用例钉死）。③鉴权/限流/journal/成功响应构造与 POST 全同链——gateAuth 单源（session cookie 与 API key 双通道对 GET 同样开放，role 检查同门，拦截在输入构造之前——「被拒之门前不触碰 handler」同款语义）；限流闸（分发器最前）对 GET 计数；分发 tail 提取为共享闭包 dispatchEndpoint（ctx 装配/handler/输出面检查/command journal 与失效广播/200 响应构造）——A5 Cache-Control 注入、x-atelier-* 头、Set-Cookie 透传、超时 ATR-322 与抛错映射两通道自动零差（cache 联动因此无需第二实现）；query 永不入账（GET query 亦是 query）。
+- **取舍与诚实边界**：未知参数 GET 与 POST **有意分叉**——POST JSON 体的未知键经 validateFlat 静默放行是既有口径（runtime/contract.ts 零改动），GET 查询串显式拒绝：URL 是代理日志/浏览器历史里的公共面，utm_source 等寄生参数静默流进 handler 输入不可接受；推论 = **敏感输入走 POST** 的开发者纪律（GET URL 进代理日志/浏览器历史——鉴权与契约校验照常挡滥用，但输入值本身不再有请求体那层遮蔽，文档/llms.txt 引导敏感查询改 POST）。内省不呈报（EndpointSummary 零形状——restful 已在 OpenAPI/源码可查，v1 不进 server-status，留门）；gen-endpoint 生成的 api.ts 客户端 v1 不扩（仍 POST——触碰面不含生成器，留门）；OpenAPI 响应头（Cache-Control headers）投影 v1 不做维持决策 33 口径。
+- 测试钉：`tests/restful-get.test.ts`（25 用例：路由五态含未知端点 GET 仍 405 顺序保持/显式投影全集两态/未知参数拒绝 vs POST 静默放行两通道差异钉死/缺必填与范围违规 GET-POST 逐字一致/session+apikey 鉴权双通道+handler 不执行/readAuth 每请求恰一次/限流 429 计数/cache 双通道逐字节一致+错误路径无头/live×restful 两不误/journal 零入账/内省零形状负例/node-host serve() 真实端口一轮）+ `tests/openapi-golden.test.ts` restful GET 形翻转（真 loopback server 文档驱动 GET 期望 200 + 响应过输出契约——「文档即真相」机检随运行时扩张自动升级）。
+- 时间：2026-09-29（差距批 A7）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
