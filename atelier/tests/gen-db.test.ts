@@ -101,6 +101,46 @@ describe("gen db 生成器（FS-DESIGN §5.2，FS-M2(m2b)；纯文本扫描 + �
     expect(text).toContain("DELETE FROM messages WHERE id = ?");
   });
 
+  it("crud.ts：分页二原语（B7）——每 PK 表追加 ListPaged/Count、LIMIT/OFFSET 全参数化 + 非负整数硬守卫", () => {
+    const root = makeFixtureRoot(SCHEMA_V1);
+    genDb(root);
+    const text = read(root, "src/generated/db/crud.ts");
+    // 六函数 × 二表：既有四原语不动，ListPaged/Count 同款签名（db: Pick<SqliteDb, "prepare">）
+    for (const t of ["chats", "messages"]) {
+      expect(text).toContain(`export function ${t}ListPaged(db: Pick<SqliteDb, "prepare">, opts: { limit: number; offset?: number }): `);
+      expect(text).toContain(`export function ${t}Count(db: Pick<SqliteDb, "prepare">): number {`);
+    }
+    // 分页 SQL：ORDER BY 主键升序（分页窗口决定论）+ LIMIT/OFFSET 全 ? 绑定（零值拼接红线不因分页破例）
+    expect(text).toContain("SELECT id, name FROM chats ORDER BY id LIMIT ? OFFSET ?");
+    expect(text).toContain('.all(opts.limit, opts.offset ?? 0) as ChatsRow[];');
+    expect(text).toContain("offset 缺省 0"); // offset 缺省 0（opts.offset ?? 0）
+    expect(text).toContain("SELECT COUNT(*) AS n FROM chats");
+    expect(text).toContain("SELECT COUNT(*) AS n FROM messages");
+    expect(text).toContain('(db.prepare("SELECT COUNT(*) AS n FROM chats").get() as { n: number }).n'); // 对齐 GetByPk 取值风格
+    // 负 limit = SQLite 无界查询语义：生成代码内一行显式守卫硬错（不静默），中文报错指明用法
+    expect(text).toContain("Number.isInteger(opts.limit) || opts.limit < 0");
+    expect(text).toContain("Number.isInteger(opts.offset ?? 0) || (opts.offset ?? 0) < 0");
+    expect(text).toContain("throw new Error(");
+    expect(text).toContain("非负整数");
+    expect(text).not.toMatch(/LIMIT\s+\$\{/); // LIMIT 不做插值拼接
+  });
+
+  it("crud.ts：复合主键表 ListPaged——ORDER BY 全主键列（决定论分页窗口）+ Count 同步生成", () => {
+    const root = makeFixtureRoot(`import { table } from "../../vendor/atelier/server/db.ts";
+export const members = table("members", {
+  groupId: { type: "integer", primaryKey: true },
+  userId: { type: "integer", primaryKey: true },
+  role: { type: "text", notNull: true },
+});
+`);
+    genDb(root);
+    const text = read(root, "src/generated/db/crud.ts");
+    expect(text).toContain(
+      "SELECT groupId, userId, role FROM members ORDER BY groupId, userId LIMIT ? OFFSET ?"
+    );
+    expect(text).toContain("SELECT COUNT(*) AS n FROM members");
+  });
+
   it("迁移骨架：拓扑序编号（messages 依赖 chats → 001/002）+ up/down 成对 + 已存在文件永不重写（追加式）", () => {
     const root = makeFixtureRoot(SCHEMA_V1);
     const { written, migrationsAppended } = genDb(root);
