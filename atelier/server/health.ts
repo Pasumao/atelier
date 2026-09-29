@@ -17,8 +17,9 @@
  *   - db：有 db 装配 → 经 ctx 同一连接跑 SELECT 1 快路径探活 → "ok"；探活抛错 → 503 +
  *     ok:false + db:"error"（探活的语义就是非 200 可报警，orchestrator 靠状态码）；未装配 db →
  *     "none" 且仍 200（纯静态应用合法，无库不是病）；
- *   - version：createHandler({ version }) 装配点自报（诚实边界：不是框架版本自动探测——框架
- *     版本注入归 dist 壳发布批；缺省 null）。
+ *   - version：产物壳注入框架版本（build.mjs 时点动态读 atelier/package.json，经
+ *     __ATELIER_VERSION__ 置位先于装配——1.1.0 批 W-A 起）；dev 托管不经壳 = null（诚实：dev
+ *     无版本语义）。
  *
  * 诚实边界：
  * - 非 GET → 405 ATR-311（复用既有「方法不允许」口径，不新配 ATR 码——宁缺不造）；
@@ -48,8 +49,8 @@ type ProbeDb = {
 /**
  * 组装健康应答（endpoints.ts 分发器保留路由调用）。opts.db = createHandler 装配的库句柄
  * （未装配 = db:"none" 仍 200）；opts.startedAtMs = createHandler 装配时刻的 performance.now()
- * 快照（monotonic 起点，endpoints.ts 记一处）；opts.version = createHandler({ version })
- * 装配点自报（缺省 null）。同步函数：探活是单条 SELECT 1 的快路径，无需异步。
+ * 快照（monotonic 起点，endpoints.ts 记一处）；opts.version = 产物壳注入框架版本（build 壳置位；
+ * dev 托管缺省 null）。同步函数：探活是单条 SELECT 1 的快路径，无需异步。
  */
 export function healthResponse(opts: { db?: unknown; version?: string | null; startedAtMs: number }): Response {
   const uptimeMs = Math.max(0, Math.round(performance.now() - opts.startedAtMs));

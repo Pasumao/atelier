@@ -13,11 +13,12 @@
  * 就绪握手：listen 成功后由框架 serve() 向 stdout 打印恰好一行
  *   ATELIER_SERVER_READY {"port":<实际端口>} —— 模板不自己写，父进程按此探活。
  *
- * 健康面（B4 差距批，2026-09-28）：GET <mount>/__atelier/health 恒在（prod 亦可见、不走 token
- *   门），响应 = { ok, uptimeMs, db, version }——version 由本装配点自报（readAppVersion，见下），
- *   orchestrator/docker 的探活口就是它。
+ * 健康面（B4 差距批，2026-09-28；1.1.0 批 W-A 起 version 归产物壳注入）：GET <mount>/__atelier/
+ *   health 恒在（prod 亦可见、不走 token 门），响应 = { ok, uptimeMs, db, version }——version =
+ *   产物壳注入的框架版本（build 时点动态读 atelier/package.json 经 globalThis.__ATELIER_VERSION__
+ *   注入，见下）；dev 托管不经壳 = null（诚实：dev 无版本语义）。orchestrator/docker 的探活口就是它。
  */
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EndpointRegistry, serve } from "../vendor/atelier/server/index.ts";
@@ -61,24 +62,11 @@ registry.register(noteList).register(addNote);
  */
 export function createAppHandler(): (req: Request) => Promise<Response> {
   const mount = process.env.ATELIER_SERVER_MOUNT ?? "/api";
-  return registry.createHandler({ mount, version: readAppVersion() });
-}
-
-/**
- * 应用自报版本（B4 健康面三事实之一，2026-09-28 差距批）：读应用根 package.json 的 version
- * 字段，经 createHandler({ version }) 进 GET <mount>/__atelier/health 响应体。诚实边界：
- * 这是**装配点自报**（应用说自己是几版就是几版），不是框架版本自动探测——框架版本注入归
- * dist 启动壳发布批。读失败/字段缺失（部署布局裁剪等）恒 null 降级——健康面绝不因 version
- * 探测炸掉。用 node:fs 读文件而非 JSON import 属性：后者会碰 tsc 门禁（gen-compile-gate
- * 零诊断红线），前者零诊断。
- */
-function readAppVersion(): string | null {
-  try {
-    const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version?: unknown };
-    return typeof pkg.version === "string" && pkg.version.length > 0 ? pkg.version : null;
-  } catch {
-    return null;
-  }
+  // W-A health version：version = 产物壳注入的框架版本（build.mjs 与 __ATELIER_PROD__ 同段置位、
+  // 先于 await import 装配——同款时序纪律；globalThis 取值 cast 先例 = endpoints.ts isProd 同款）。
+  // dev 托管直跑不经壳 → undefined ?? null = null（诚实：dev 无版本语义）；旧模板应用无注入同归
+  // null——装配形态零迁移、零影响。
+  return registry.createHandler({ mount, version: (globalThis as { __ATELIER_VERSION__?: string | null }).__ATELIER_VERSION__ ?? null });
 }
 
 /** 主模块判定：Node ≥23.7 / Bun 有 import.meta.main；更早的 strip-types 宿主回退 argv[1] 实路径比对。 */
