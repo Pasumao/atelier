@@ -30,7 +30,8 @@
  *   paths        默认 POST（请求体 = 输入契约投影；响应 200 = 输出契约投影；无 output 契约
  *                的端点响应 schema 省略 + description 注记 + x-atelier-output-contract:false）；
  *   restful: true（§3.4 互操作位，默认关）→ 该 query 端点映射 GET + reqProps/optProps →
- *                query parameters（description 注记运行时传输仍为 POST）；
+ *                query parameters（运行时 GET 分发已启用——决策 34，2026-09-29 差距批 A7：
+ *                文档位与运行时分发自此同源双真）；
  *   auth         → components.securitySchemes（session → cookie apiKey 位；apikey → apiKeyAuth
  *                header 位〔A6 决策 30〕；oauth 只预留命名空间占位声明不实现 §6.4；其余类型显式
  *                报错）；端点 → security 引用；
@@ -377,7 +378,7 @@ export function scanOpenApiEndpoints(src, opts = {}) {
     if (restful && kind !== "query") {
       throw exportError(
         `端点 ${name} 是 command，却声明 restful: true`,
-        "restful GET 映射位（§3.4）只许 query 端点声明——写端点保持 POST（读写二分纪律）"
+        "restful GET 分发位（§3.4，决策 34）只许 query 端点声明——写端点保持 POST（读写二分纪律）；运行时 EndpointRegistry.register() 同规则硬错（ATR-313），本处为导出面同口径拦截"
       );
     }
 
@@ -661,7 +662,7 @@ export function buildOpenApi(root, opts = {}) {
       pathItem.get = {
         operationId: ep.name,
         tags: [domain],
-        description: `restful 互操作位（§3.4，默认关）：声明 GET+query 形态供外部 REST 消费者——运行时传输仍为 POST。${liveNote}`.trim(),
+        description: `restful 互操作位（§3.4，默认关）：声明 GET+query 形态供外部 REST 消费者——运行时 GET 分发已启用（决策 34）：GET 请求照走契约校验/鉴权/限流链，查询串按契约显式投影（未知参数显式拒绝）；POST 通道保留不撤。${liveNote}`.trim(),
         ...extensions,
         "x-atelier-restful": true,
         ...(params.length ? { parameters: params } : {}),

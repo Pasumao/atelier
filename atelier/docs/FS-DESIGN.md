@@ -254,6 +254,19 @@ export type EndpointContext<TDb = SqliteDb> = {
 > 名）、非文件 form 字段 v1 忽略、多副本部署需共享磁盘卷；定义 maxBytes > 20MB 须同步上调桥
 > maxBodyBytes。测试：`tests/uploads.test.ts`。
 
+> **落地注记（2026-09-29，差距批 A7，决策 34）**：上方「GET for query〔议〕」的留门就此兑现——
+> `restful: true` 端点级开关从 export-openapi 文档位扩为**文档+运行时双真**：声明该位的 query 端点
+> 接受 `GET <mount>/<name>?<query>` 运行时分发（查询串按契约显式类型投影 buildRestfulInput 单源，
+> 投影产物照走 validateFlat 同链不绕过；未知参数/标量重复键/无契约带参 → 400 ATR-312 显式拒绝，
+> 与 POST JSON 未知键经 validateFlat 静默放行的既有口径**有意分叉**——URL 是代理日志/浏览器历史
+> 里的公共面，寄生参数不得静默流进 handler，**敏感输入走 POST** 的开发者纪律随之成立）。鉴权
+> （gateAuth 单源 session/apikey 双通道）/限流（分发器最前闸）/journal（query 永不入账）/成功响应
+> 构造（含 A5 Cache-Control 注入）与 POST 全同链；live×restful 两不误（`GET <name>` 返回 JSON、
+> `GET <name>/live` 仍走 SSE）。默认关语义不变（未声明端点 GET 仍 405 ATR-311 兜底零变化），POST
+> 通道保留不撤（双通道并存），batch 仍不做。诚实边界：api.ts 生成客户端 v1 不扩（仍 POST，留门）、
+> 内省不呈报（EndpointSummary 零形状，留门）。全量口径见 design-decisions 决策 34；测试
+> `tests/restful-get.test.ts` + openapi-golden restful GET 形翻转（真 server 文档驱动 GET 期望 200）。
+
 ### 3.5 审计 journal 强化〔议：D-F12〕
 
 M1 现状"只记成功写入"（310-320 注释口径）升级为**完整审计语义**：
@@ -1301,7 +1314,7 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 | HTTP/2 | Bun.serve 1.4.1 | Bun 优化态自动获得 | 核心·零依赖 |
 | WebSocket 双向 | — | SSE 下行 + POST 上行够用；双向需求出现再议 | 不做·§3.4 |
 | API 版本化路由 | — | api-diff/openapi 管漂移，无路由魔法 | 不做 |
-| GET for query（REST 互操作） | REST 生态 | OpenAPI `restful` 映射位，默认关 | 留门·D-F11 |
+| GET for query（REST 互操作） | REST 生态 | `restful: true` 声明即运行时 GET 分发 + OpenAPI GET 映射（默认关，未声明零变化） | 核心·决策 34 |
 
 ### 16.5 Agent 与可验证性（报告三）
 

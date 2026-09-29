@@ -14,8 +14,9 @@
  * 逐形态断言：
  *   · POST（query/command 同走 POST）：2xx + x-atelier-endpoint 头 + 响应过框架 validateFlat
  *     二次校验（契约单源经 scanContractSchemas 解析——与导出同一扫描器，无第二真相）；
- *   · restful GET 映射（§3.4 互操作位）：按文档 GET+query parameters 构造真 GET（文档注记
- *     「运行时传输仍为 POST」→ 期望 405 ATR-311），再按注记以同值走 POST 全通；
+ *   · restful GET 映射（§3.4 互操作位）：按文档 GET+query parameters 构造真 GET（决策 34 运行时
+ *     GET 分发已启用——期望 200 + x-atelier-endpoint 头 + 响应过输出契约），再以同值走 POST 全通
+ *     （双通道并存——POST 通道保留不撤）；
  *   · live（x-atelier-live）：GET /live?input=… 读 SSE 流首个 event: data 帧（§4.3 线协议：
  *     首帧 retry: 3000 先行），断言 JSON 可解析 + 过输出契约后关闭；
  *   · 端点集探针：POST 未知路径 → ATR-310 的 context.hints = server 注册表名集 → 与文档
@@ -475,20 +476,31 @@ async function runGoldenHarness(root: string, baseUrl: string, opts: { skipNames
       }
       const body: Record<string, unknown> = {};
       if (op["x-atelier-restful"] === true) {
-        // §3.4 互操作形：按文档 GET+query 映射构造真 GET（文档注记「运行时传输仍为 POST」→ 期望 405 ATR-311）
+        // §3.4 互操作形：按文档 GET+query 映射构造真 GET（决策 34 运行时 GET 分发已启用——期望
+        // 200 + x-atelier-endpoint 头 + 响应过输出契约；POST 通道保留，同值再走 POST 双通道并存）
         const qs = new URLSearchParams();
         for (const p of op.parameters ?? []) if (p.required && p.schema) qs.set(p.name, String(genLeaf(p.schema)));
         try {
           const g = await fetch(`${baseUrl}${pathKey}?${qs.toString()}`);
           const gj: any = await g.json().catch(() => null);
-          if (!(g.status === 405 && gj?.code === "ATR-311")) {
-            f({ endpoint: name, step: "restful GET 形", kind: "status", message: `restful GET 形未按文档注记被拒（期望 405 ATR-311——运行时传输仍为 POST）：HTTP ${g.status}` });
+          if (!(g.status === 200 && gj != null && g.headers.get("x-atelier-endpoint") === name)) {
+            f({ endpoint: name, step: "restful GET 形", kind: "status", message: `restful GET 形未按文档分发成功（期望 200 + x-atelier-endpoint 头——运行时 GET 分发已启用，决策 34）：HTTP ${g.status} ${gj == null ? "(非 JSON)" : JSON.stringify(gj).slice(0, 120)}` });
+          } else {
+            const outRef = op.responses?.["200"]?.content?.["application/json"]?.schema?.$ref;
+            if (outRef) {
+              const flat = contracts[outRef.split("/").pop()!]?.value;
+              if (!flat) f({ endpoint: name, step: "restful GET 形", kind: "contract", message: `GET 响应 $ref ${outRef} 无法从契约单源解析为 FlatSchema` });
+              else {
+                const v = validateFlat(flat, gj as Record<string, unknown>, name);
+                if (!v.ok) f({ endpoint: name, step: "restful GET 形", kind: "contract", message: `restful GET 响应不过输出契约：${v.error?.message}` });
+              }
+            }
           }
         } catch (e) {
           f({ endpoint: name, step: "restful GET 形", kind: "transport", message: (e as Error).message });
         }
         checked.push(`restful:${name}:GET-shape`);
-        for (const p of op.parameters ?? []) if (p.required && p.schema) body[p.name] = genLeaf(p.schema); // 同值按注记走 POST
+        for (const p of op.parameters ?? []) if (p.required && p.schema) body[p.name] = genLeaf(p.schema); // 同值再走 POST（双通道并存）
       } else if (op.requestBody?.content?.["application/json"]?.schema?.$ref) {
         const ident = op.requestBody.content["application/json"].schema!.$ref!.split("/").pop()!;
         const projected = doc.components?.schemas?.[ident];

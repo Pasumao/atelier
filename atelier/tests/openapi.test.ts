@@ -343,13 +343,14 @@ describe("export openapi 端到端（§13：paths / x-atelier / restful / 注记
     expect(Object.keys(doc.paths).some((p) => p.endsWith("/live"))).toBe(false); // SSE 引擎归 FS-7——不导出未实现传输
   });
 
-  it("restful GET 映射（§3.4 互操作位）：reqProps→required 参数、optProps→可选参数、无 requestBody、注记运行时仍 POST", () => {
+  it("restful GET 映射（§3.4 互操作位）：reqProps→required 参数、optProps→可选参数、无 requestBody、注记运行时 GET 分发已启用（决策 34）", () => {
     const { doc } = buildOpenApi(makeApp());
     const item = doc.paths["/api/browse.list"];
     expect(item.get).toBeDefined();
     expect(item.post).toBeUndefined();
     expect(item.get["x-atelier-restful"]).toBe(true);
-    expect(item.get.description).toContain("运行时传输仍为 POST");
+    expect(item.get.description).toContain("运行时 GET 分发已启用（决策 34）"); // A7 连带：旧注记「运行时传输仍为 POST」已随运行时 GET 分发落地改写
+    expect(item.get.description).toContain("POST 通道保留");
     const params = item.get.parameters;
     expect(params).toEqual([
       { name: "chatId", in: "query", required: true, schema: { type: "number", minimum: 1 } },
