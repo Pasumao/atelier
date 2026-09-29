@@ -10,7 +10,7 @@
  * stringArrayOf/matchDelim/walkTsFiles 加法导出，gen-endpoint 行为零改动、生成产物字节不变）。
  * 扫描面：src/server/endpoints/ 递归 + src/server/auth/endpoints.ts（gen auth 产物三件套，
  * 加法语义；openapi-golden auth 联测段先红后绿钉住）。本文件自己的 define* walk 提取 OpenAPI
- * 需要的超集元数据（auth/restful/timeoutMs 值），live/invalidate/emits/idempotent 语义与
+ * 需要的超集元数据（auth/restful/timeoutMs/cache 值），live/invalidate/emits/idempotent 语义与
  * scanEndpointSource 同构（同一原语、同一测试钉住）。泛型标注形态 defineCommand<Input, Output>(…)
  * （模板 example.ts / gen-compile-gate 的应用规范形态）与裸调用形态 defineCommand(…) 都认——
  * golden 机检（tests/openapi-golden.test.ts）先红后绿钉住：泛型形态曾整端点漏导出（文档漏端点 =
@@ -35,6 +35,9 @@
  *                header 位〔A6 决策 30〕；oauth 只预留命名空间占位声明不实现 §6.4；其余类型显式
  *                报错）；端点 → security 引用；
  *   idempotent/timeoutMs/live/kind → x-atelier-* 扩展字段；
+ *   cache（A5 决策 33）→ x-atelier-cache extension（声明了才出现——"none" 字符串或
+ *                { visibility, maxAge } 对象原样；未声明端点投影零变化。响应头 Cache-Control
+ *                的 OpenAPI headers 投影 v1 不做，留门——见 FS-DESIGN §2.2 落地注记/决策 33）；
  *   info.title   取 --name 或应用 package.json name 或目录名。
  *
  * CLI：node atelier/gen/export-openapi.mjs --root <appDir> [--out openapi.json] [--mount /api] [--name <Title>]
@@ -259,9 +262,30 @@ function parseAuthMeta(valueText, endpointName) {
 }
 
 /**
+ * cache 元数据解析（A5 差距批，决策 33）：只认内联字面量 "none"（显式零档）或
+ * { visibility, maxAge } 对象；标识符引用/计算值 → 显式错（parseAuthMeta 同款纪律）。
+ * 形状合法性（visibility 两值/maxAge 非负整数/未知键）由运行时 register() assertCacheMeta
+ * 权威校验——扫描器只做忠实提取不重复立口径（gen-db parseSchema 解析后回灌 defineTable 复验
+ * 同款「单一真相」纪律）；对象内部经 parseFlatLiteral 扁平字面量解析（无 eval、无 TS 解析器）。
+ */
+function parseCacheMeta(valueText, endpointName) {
+  const t = stripComments(valueText ?? "").trim();
+  if (/^(["'`])none\1$/.test(t)) return "none";
+  if (t.startsWith("{")) {
+    const close = matchDelim(t, 0);
+    if (close < 0) throw exportError(`端点 ${endpointName} 的 cache 对象字面量括号不闭合`, "检查端点文件语法");
+    return parseFlatLiteral(t.slice(0, close + 1), `端点 ${endpointName} 的 cache`);
+  }
+  throw exportError(
+    `端点 ${endpointName} 的 cache 声明必须是内联字面量（"none" 或 { visibility, maxAge } 对象），实际「${t.slice(0, 40)}」`,
+    "写成内联字面量（如 cache: { visibility: \"public\", maxAge: 60 }）——cache 元数据是文档化契约位，引用变量超出导出扫描器能力"
+  );
+}
+
+/**
  * 扫一个端点源文件的 defineQuery/defineCommand → OpenAPI 超集端点清单。
  * 与 gen-endpoint scanEndpointSource 同构（同一原语；live/invalidate/emits/idempotent 语义一致），
- * 另提取 auth/restful/timeoutMs 值。行内契约对象字面量不支持 → 显式报错（绝不静默猜）。
+ * 另提取 auth/restful/timeoutMs/cache 值。行内契约对象字面量不支持 → 显式报错（绝不静默猜）。
  *
  * opts（默认缺省 = 原行为零变化）：
  *   allowInlineLiterals — 端点级内联契约字面量放行解析（gen auth 产物形态：自包含生成码，
@@ -348,6 +372,7 @@ export function scanOpenApiEndpoints(src, opts = {}) {
     const timeoutText = props.timeoutMs;
     const timeoutMs = timeoutText != null ? parseNumberMeta(timeoutText, `端点 ${name} 的 timeoutMs`) : null;
     const auth = props.auth != null ? parseAuthMeta(props.auth, name) : null;
+    const cache = props.cache != null ? parseCacheMeta(props.cache, name) : null; // A5 决策 33：声明了才投影（未声明 = null）
     const restful = stripComments(props.restful ?? "").trim() === "true";
     if (restful && kind !== "query") {
       throw exportError(
@@ -369,6 +394,7 @@ export function scanOpenApiEndpoints(src, opts = {}) {
       idempotent: stripComments(props.idempotent ?? "").trim() === "true",
       timeoutMs,
       auth,
+      cache,
       restful,
       line: src.slice(0, m.index).split("\n").length,
     });
@@ -613,6 +639,9 @@ export function buildOpenApi(root, opts = {}) {
       ...(ep.live ? { "x-atelier-live": true } : {}),
       ...(ep.idempotent ? { "x-atelier-idempotent": true } : {}),
       ...(ep.timeoutMs != null ? { "x-atelier-timeout-ms": ep.timeoutMs } : {}),
+      // A5 决策 33：cache 档位 extension——声明了才出现（未声明端点投影零变化，golden 未动）；
+      // 响应头 Cache-Control 的 OpenAPI headers 投影 v1 不做（留门，见文件头注记）
+      ...(ep.cache != null ? { "x-atelier-cache": ep.cache } : {}),
     };
     const liveNote = ep.live ? ` live SSE 订阅通道 GET /${(mount ? mount + "/" : "") + ep.name}/live（FS-DESIGN §4.3；SSE 引擎归 FS-7，本位不进 paths）。` : "";
 

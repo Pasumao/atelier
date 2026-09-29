@@ -42,7 +42,9 @@ import path from "node:path";
 /** 保留内省路径（mount 剥离后的 name 精确匹配；与 /live 后缀同款的分发器保留字） */
 export const INTROSPECT_NAME = "__atelier/server-status";
 
-/** server-status 单端点行：registry.list() 摘要 + 契约体（endpoint.contract 与调试页 schema 展示的数据源） */
+/** server-status 单端点行：registry.list() 摘要 + 契约体（endpoint.contract 与调试页 schema 展示的数据源）。
+ *  A5 差距批（决策 33）：cache 档位随 EndpointSummary 加法透传——未声明无键（零变化）、
+ *  声明 = 值原样（"none" 字符串或 { visibility, maxAge } 对象，诚实呈现）。 */
 export type ServerStatusEndpoint = EndpointSummary & { contract: unknown; output: unknown };
 
 /** dev 面 server-status 快照形状（MCP 消费契约的宿主侧单源） */

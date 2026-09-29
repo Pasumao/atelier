@@ -99,6 +99,12 @@ export const chatAsk = defineCommand("chat.ask", {
 `live` 从 `boolean` 扩展为 `true | { invalidate: string[] }`（boolean 向后兼容 = 无显式键、
 按端点名自键失效）——见 §4.1。
 
+> **落地注记（2026-09-29，差距批 A5，决策 33）**：cache 档位就此落地——形状
+> `cache?: "none" | { visibility: "private" | "public"; maxAge }`（对象档 query-only + live 禁止 +
+> public×auth(≠none) 泄露面互斥注册期硬错、maxAge 非负整数无隐式默认；分发成功路径注入
+> `Cache-Control: private|public, max-age=N`、错误路径不加；内省端点行 `cache` 字段与 OpenAPI
+> `x-atelier-cache` extension；未声明零变化）——机制与取舍全量见 design-decisions 决策 33。
+
 ### 2.3 输出契约与序列化边界〔议，M2 必做件〕
 
 - **为什么**：五用贯通要求客户端拿到 output 类型；OpenAPI 响应 schema 也要求它。没有 output 契约，
