@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-30**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6）；未决项 2 条见文末。
+> 已决 **0-31**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -454,6 +454,17 @@
 - **OpenAPI 投影**：`auth: { type: "apikey" }` 端点在 `atelier export openapi` 产出 securitySchemes **`apiKeyAuth`**（`type: apiKey, in: header, name = 端点 auth 声明 header ?? x-api-key`）+ 各端点 security 引用——方案名与 auth.type 解耦（OpenAPI 社区惯例位名；同应用全部 apikey 端点共用一位，header 以首个声明定名），description 恒明示「实际头名以装配点为准」。文档消费面可读，机器客户端可循文档接线（session cookie 名对拍教训的文档即真相纪律：导出器读不到装配配置，端点 auth 声明的 header 是文档侧镜像位，两处一致性为开发者纪律，description 兜底声明权威——v1 无机检对拍）。
 - 诚实边界：key **无过期、无吊销列表**（换 key = 改装配重启）、**无 per-key 审计主体区分**（principal = 装配级 label ?? "api-key"）、**限流共用全局桶**（key 不单独计桶）、apikey 身份**无角色面**（声明 role 的 apikey 端点对 key 调用恒 403 ATR-341——per-key 角色面远期随 OAuth scope 归 §6.4）。测试钉：`tests/apikey.test.ts`（14 用例：fail-closed/会话优先/类型互斥/自定义头/恒时比较单元/introspect authType 联动）+ `tests/openapi.test.ts`（apiKeyAuth 投影；session/oauth 投影零变化 golden 对照）。
 - 时间：2026-09-28（差距批 A6）。
+
+## 决策 31：email 适配边界——显式 transport 接口 + 内建可验证的投递记账（差距批 B3）
+
+- **定论**：email 适配边界 = **显式 transport 接口**（应用自接 SMTP/Resend/SES 等任意发送通道——实现 `EmailTransport` 接口 `{ name, send(msg) }` 的任意模块，`name` 自报进记账 transport 列，装配点 `createHandler({ email })` 明文接线，无 DI 容器同纪律）+ **内建可验证的投递记账**。**框架不内建真实发送**——同「不内嵌 LLM/不内建云复制」纪律的最小原语切口（发送通道的凭据保管/费率/送达合规是应用运营侧的事）；内建唯一 transport = **mock**（`mockTransport()`：零 IO 恒成功、dev/prod 同语义），应用与测试可从记账表读回投递史——「agent 可验证的投递记账」叙事：发送与否不由框架声称，由库内行背书。
+- **记账 = 追加事件表 `atelier_email_log`**：决策 21/29 同款模式——**追加式**（一行 = 一次投递请求，只 INSERT 不 UPDATE）/ **框架自管**（不进应用迁移序列，应用 schema.ts 零感知）/ **建表在装配期尽力完成**（`CREATE TABLE IF NOT EXISTS` 幂等，jobs.ts startJobs 同款先例；SQLite DDL 事务性——若留到 tx 内首次投递才建，业务回滚会把表面一起卷走，红检实证）。列形状：`id/ts/transport/to/subject/payload/status/error`——payload(JSON) 只收在场可选字段 `from/cc?/bcc?/text?/html?`（缺省不落 null 键）；status CHECK(ok|failed)；**`"to"` 是 SQLite 保留字，DDL 与查询恒双引号**（红检前实证：裸 to 报 syntax error）。行数基裁剪同决策 29（`maxRows` 缺省 1 万，AUTOINCREMENT 单调 → 主键点删最老，写时惰性；时间基 v1 不做）。
+- **send 语义（`tests/email.test.ts` 钉死）**：`createEmailRecorder({ db, transport?, maxRows? })` → `{ send, tail }`——**先 transport 后记账**，成功/失败两态都记；transport 抛错/拒绝 → send **不抛**，resolve `{ id, status: "failed", error }`（error 摘要 2KB 截断）——投递失败是记账事实不是异常，调用方拿 status 自行决定重试/告警（返回值语义非异常语义）；**记账本身失败 → send 原样上抛**（不可记账 ≠ 假账——与 command journal 落库失败 console.warn 降级是有意差异：journal 是旁路审计不挡业务，email 记账是 send 返回值的组成部分，记不上就诚实失败）。
+- **事务边界（诚实声明）**：记账 INSERT 经装配 db 句柄——应用以**同一句柄**装配 `createEmailRecorder({ db })` 与 `createHandler({ db, email })` 时，`ctx.db.tx(() => { 业务写; ctx.email.send(...) })` 内业务写与记账行同事务；**mock 零外部 IO = 完全原子**（同步 send 与调用方同栈，零微任务间隙；用例钉死：tx 抛错业务写与记账行齐回滚，绝无孤儿账）；真实 transport 与 DB 写不同源时**无分布式事务**（决策 29 同款边界）——transport 已发生，回滚只回滚记账行不召回邮件。
+- **脱敏单源**：payload 落库前经 endpoints.ts `redactSensitiveInput`（W2 词根表单源 **import 复用**，非同词根第二实现）——journal input 与 email payload 同一收口，持久层不二次实现脱敏（两处注释互指）；to/subject 列直存不脱敏（收件人与主题是投递事实本体，脱敏它们会让记账不可用）。
+- **内省**：server-status 增可选 `email` 段——装配时尾部 ~20 条六字段投影（id/ts/transport/to/subject/status，不含 payload/error，调试面最小呈现；全量走库直读）；未装配 = 段不出现、装配零投递 = 如实空数组、读失败 = 段缺省（零假数据三态）；prod 隐身语义沿用调试面整体。
+- 诚实边界：**无模板引擎**（subject/body 调用方给，框架不掺渲染 opinion）；**无队列联动强制**（send 是同步记账原语非后台任务，大量发送经 ctx.jobs 自行投递）；**无退订/合规面**（营销邮件退订/合规是应用域）；**mock 表即真信源**（dev 面 review 时间轴消费记账表归后续批）；行数基裁剪最老投递滚出窗口即不可查、库删即史灭（同迁移 journal 口径）。
+- 时间：2026-09-28（差距批 B3）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。

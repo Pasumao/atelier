@@ -33,6 +33,7 @@ import { endpointError, isLiveDeclared } from "./endpoints.ts";
 import { readCommandJournalTail } from "./command-journal.ts";
 import { MIGRATION_JOURNAL_TAIL_LIMIT, migrateStatus } from "./migrate.ts";
 import type { JobsStats } from "./jobs.ts"; // 仅类型——jobs 段数据经 handle.stats() 窄口取，SQL 单源在 jobs.ts
+import type { EmailLogEntry } from "./email.ts"; // 仅类型——email 段数据经 recorder.tail() 窄口取，SQL 单源在 email.ts
 import { timingSafeEqual } from "node:crypto";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -63,7 +64,17 @@ export type ServerStatusSnapshot = {
    * 仅 createHandler({ jobs }) 装配后出现；读失败（表损坏等）= 段缺省——零假数据纪律。
    */
   jobs?: JobsStats;
+  /**
+   * email 段（B3 差距批，§5.8；可选位）：投递记账尾部 ~20 条六字段投影（id/ts(ISO)/transport/
+   * to/subject/status——不含 payload/error，调试面最小呈现；全量与错误详情走库直读）。
+   * 仅 createHandler({ email }) 装配后出现（未装配 = 段整体缺省，零假数据）；读失败 = 段缺省；
+   * prod 隐身语义沿用调试面整体（prod 旗下 introspectResponse 返回 null）。
+   */
+  email?: EmailStatusEntry[];
 };
+
+/** server-status email 段单行（EmailLogEntry 的调试面最小投影——恰六字段，不含 payload/error） */
+export type EmailStatusEntry = Pick<EmailLogEntry, "id" | "ts" | "transport" | "to" | "subject" | "status">;
 
 /** prod 旗（endpoints.ts 同机制同读法——单点复制而非跨模块开私有口，两处注释互指） */
 function isProd(): boolean {
@@ -172,11 +183,12 @@ function introspectMigrations(db: ReadableDb, migrationsDir: string | null) {
  * 组装 server-status 快照。opts.db = createHandler 装配的库句柄（未装配 = db 段诚实缺省）；
  * opts.migrationsDir = 迁移目录（缺省 <cwd>/src/server/db/migrations——dev 托管 spawn cwd=应用根，
  * 直跑 main-server.ts 亦同；§5.4 目录约定单源在 scripts/migrate.mjs）；
- * opts.jobs = createHandler 装配的 jobs 句柄（A1/A4 差距批；未装配 = jobs 段不出现）。
+ * opts.jobs = createHandler 装配的 jobs 句柄（A1/A4 差距批；未装配 = jobs 段不出现）；
+ * opts.email = createHandler 装配的 email recorder（B3 差距批，决策 31；未装配 = email 段不出现）。
  */
 export function serverStatusSnapshot(
   registry: EndpointRegistry,
-  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; jobs?: { stats(): JobsStats } } = {},
+  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; jobs?: { stats(): JobsStats }; email?: { tail(n: number): EmailLogEntry[] } } = {},
 ): ServerStatusSnapshot {
   // 端点全表 = registry.list() 摘要 + 契约体（get() 公开位逐个补全——不为内省开新的注册表写入口）
   const summaries = new Map(registry.list().map((s) => [s.name, s]));
@@ -217,6 +229,25 @@ export function serverStatusSnapshot(
     }
   }
 
+  // email 段（B3 差距批，决策 31）：recorder 在场才出现——经 tail() 窄口读库尾部（EMAIL_STATUS_TAIL_LIMIT
+  // 条）投影为六字段最小呈现（payload/error 不进调试面，全量走库直读）。读失败 = 段缺省（零假数据，
+  // jobs 段同款纪律）；装配但零投递 = 空数组（真实事实非假数据——tail 对未建表返回 []）。
+  let email: ServerStatusSnapshot["email"];
+  if (opts.email != null) {
+    try {
+      email = opts.email.tail(EMAIL_STATUS_TAIL_LIMIT).map((e) => ({
+        id: e.id,
+        ts: e.ts,
+        transport: e.transport,
+        to: e.to,
+        subject: e.subject,
+        status: e.status,
+      }));
+    } catch {
+      email = undefined; // 表损坏/句柄异常——诚实缺省，记账表可经 SQL 直查
+    }
+  }
+
   // journal 段（B5 差距批，决策 29）：db 已装配且持久表存在 → 读库尾部 N 条（N = journalLimit，
   // 与内存环形同界——快照有界，全量走库直读；条目投影与内存条目字段逐一兼容）。表不存在（null）/
   // 未装配 db/读失败 → 回落内存环形（诚实降级，零假数据——回落语义与迁移 journal 段同款纪律）。
@@ -239,8 +270,12 @@ export function serverStatusSnapshot(
     db,
     dbNote,
     ...(jobs != null ? { jobs } : {}),
+    ...(email != null ? { email } : {}),
   };
 }
+
+/** email 段尾部条数（调试面有界呈现——全量走库直读，记账表 atelier_email_log） */
+export const EMAIL_STATUS_TAIL_LIMIT = 20;
 
 /** 进程启动时刻（模块加载 ≈ server 子进程启动；热重启 = 新进程，语义自洽） */
 const STARTED_AT = new Date().toISOString();
@@ -255,7 +290,7 @@ const STARTED_AT = new Date().toISOString();
  */
 export function introspectResponse(
   registry: EndpointRegistry,
-  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; statusToken?: string; req?: Request; jobs?: { stats(): JobsStats } } = {},
+  opts: { db?: unknown; mount?: string; migrationsDir?: string | null; statusToken?: string; req?: Request; jobs?: { stats(): JobsStats }; email?: { tail(n: number): EmailLogEntry[] } } = {},
 ): Response | null {
   if (isProd()) return null;
   if (opts.statusToken != null) {
