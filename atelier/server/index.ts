@@ -115,4 +115,7 @@ export {
   type UploadsFace,
   type CreateUploadsFaceOptions,
   type UploadsDb,
+  UPLOADS_STATUS_TAIL_LIMIT,
+  type UploadsStats,
+  type UploadsAssetEntry,
 } from "./uploads.ts";
