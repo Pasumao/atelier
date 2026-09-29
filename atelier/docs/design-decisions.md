@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-32**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3；决策 32 = 文件上传/资产管道，2026-09-28 差距批 B1）；未决项 2 条见文末。
+> 已决 **0-33**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3；决策 32 = 文件上传/资产管道，2026-09-28 差距批 B1；决策 33 = cache 元数据档位，2026-09-29 差距批 A5）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -475,6 +475,14 @@
 - **auth 缺省 = session（fail-closed）**：上传是写面（落盘+记账），未声明 auth 的上传面**缺省要求会话**（与端点「未声明 = 开放」不同——有意差异，A6 apikey 通道缺省恒拒同款 fail-closed 纪律；`auth: { type: "none" }` 显式声明开放消警）；`auth` 语义复用端点拦截链（gateAuth 单源收口：session/apikey/role 全支持，消息主语「上传面」）。
 - **取舍**：不内建图片处理/缩略图/病毒扫描（应用域）；磁盘直写（S3/OSS 等应用自接——同 email transport 纪律）；v1 单文件每请求（多文件 part 显式 400 拒绝，归后续）；multipart 请求体经桥缓冲后解析（不流式入盘——桥内存上界即粗闸，流式增量请求桥归后续）；非文件 form 字段 v1 忽略不消费（上传是 side-channel，结构化元数据场景等 v2 字段面）；filename 解码尽力（RFC 2231/5987 filename* 优先，解码失败回落 filename，再失败用 fallback 名 "upload"——诚实记录）；多副本部署需共享磁盘卷（本地盘单实例语义）。
 - 时间：2026-09-28（差距批 B1；统筹者拍板契约形态②）。
+
+## 决策 33：cache 元数据档位——显式契约一步到位（差距批 A5）
+
+- **定论**：FS-DESIGN §2.2「位先固化」的 cache 位就此兑现为完整档位——形状 `cache?: "none" | { visibility: "private" | "public"; maxAge: number }`。**无隐式默认**：对象档的 maxAge 必须显式声明（缺失 = 定义期硬错，不给默认值——显式优于隐式正是本决策的存在理由）；Next.js 缓存语义三年三变（§2.2/§16 对表过的教训：默认缓存→默认不缓存→"use cache" 指令再翻面）的根因就是缓存语义隐式随框架版本漂移，Atelier 把缓存做成一步到位的显式契约，端点声明什么就是什么，永不静默。未声明 cache = **零变化**（响应不发 Cache-Control 头，内省/OpenAPI 无键——api-diff 盯住兼容性）。
+- **机制**：①对象档（真实缓存声明）只许 query 端点——command 带 = 写端点缓存响应语义自相矛盾；live query 带 = SSE 通道有自己的头语义（缓存头对失效推送无意义；live×auth 组合互斥 ATR-315 同款先例）——都炸在 `register()` 注册期（**ATR-313** 同码：registerUpload maxBytes/accept 参数校验同码先例，不另开新码；「契约错误炸在定义处」）。`cache: "none"` 显式零档全端点可声明（command/live 亦然——「此端点不缓存」是无缓存声明非缓存声明，无语义矛盾；位先固化形状保持）。②泄露面互斥——`visibility: "public"` × `auth`（type ≠ "none"）注册期硬错：public 允许共享缓存（CDN/代理）暂存响应，鉴权端点的响应按主体变化，被共享缓存命中 = 跨主体泄露面，fail-closed；`private`（仅浏览器/私有缓存）任意 auth 可；public × `auth: { type: "none" }`（显式消警）可。③分发——分发成功路径对声明对象档的 query 端点 200 响应注入 `Cache-Control: private|public, max-age=N`；错误路径（ATR 结构化错误）不加——错误响应不该被缓存。④内省与文档——EndpointSummary/server-status 端点行加法字段 `cache`（未声明无键、声明值原样、`"none"` 诚实呈现三态）；`atelier export openapi` 加 **`x-atelier-cache`** extension（声明了才出现，未声明端点投影零变化——openapi golden 自然覆盖）。
+- **取舍与诚实边界**：缓存头投影只做 `private|public, max-age=N` 单形态（`s-maxage`/`stale-while-revalidate`/ETag/条件请求/服务端缓存存储全部不做——要了再加，无隐式默认同款纪律；对象档未知键收紧硬错 = table() opts 同款，静默忽略元数据键 = 声明被吞；maxAge 只认非负整数秒，0 = 显式零秒合法）；OpenAPI 响应 headers 投影 v1 不做，`x-atelier-cache` extension 先行（留门）；Atelier 不内建缓存存储——HTTP 缓存语义交给浏览器/CDN，框架只做显式声明的忠实透传；缓存头是 API 契约非调试面，dev/prod 同语义注入。
+- 测试钉：`tests/cache-meta.test.ts`（13 用例：定义期硬错六例——command×对象档/live×对象档/public×auth 泄露面/maxAge 缺失/maxAge 非负整数守卫/visibility 与档位与未知键；分发三态 + 错误路径无缓存头负例；内省三态；openapi 两态 + 未声明零变化）。
+- 时间：2026-09-29（差距批 A5）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
