@@ -9,8 +9,10 @@
  *                                vite.config build define 注入 __ATELIER_BUILD_PROD__ → 决策 27
  *                                浏览器面 DCE 通道，dev serve 不注）
  *   <out>/server.mjs             服务端启动壳（生成物）：prod 旗预置（决策 27 服务面激活通道——
- *                                置位先于 await import 装配单源）+ env 三件解析 + withStaticHost
- *                                合成静态/端点双面 + serve()（node-host 单源）监听握手
+ *                                置位先于 await import 装配单源）+ 框架版本注入（__ATELIER_VERSION__，
+ *                                build 时点动态读 package.json——health 面 version 消费）+ env 三件
+ *                                解析 + withStaticHost 合成静态/端点双面 + serve()（node-host 单源）
+ *                                监听握手
  * 装配单源 = 应用 src/server/main-server.ts 的 createAppHandler()（dev 托管与产物同一份端点
  * 注册——绝不生成第二份注册表）。vendor 单源 = src/vendor/atelier/server/{node-host,static-host}.ts。
  *
@@ -116,6 +118,9 @@ if (!fs.existsSync(path.join(outDir, "index.html"))) {
 /* ---------------- ② 服务端启动壳（生成物勿手改；重跑 build 再生） ---------------- */
 
 console.log("[atelier build] ② 产物启动壳 server.mjs（装配单源 createAppHandler + vendor serve 单源）…");
+// W-A health version：build 执行时动态读框架 atelier/package.json 的 version 注入产物壳——绝不硬编码
+// 版本串（跨分支契约：改版本号的分支与本支零耦合）；PKG 即本文件既有的 atelier 根定位。
+const atelierVersion = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8")).version;
 const shell = `/**
  * server.mjs — \`atelier build --target=${target}\` 产物启动壳（D-F14；生成物勿手改，重跑 build 再生）。
  * 单容器双面：静态前端（本目录）+ <mount>/* 端点面——装配单源 = ../src/server/main-server.ts 的
@@ -131,6 +136,11 @@ import { fileURLToPath } from "node:url";
 // 置位必须先于 await import——静态 import 会 ESM 提升到模块顶部，置位将晚于装配链模块 init，
 // 动态读永远赶不上（journal-subprocess.test.ts 生成夹具壳的同类置位陷阱 = 实证先例）。
 globalThis.__ATELIER_PROD__ = true;
+
+// W-A health version：壳注入框架版本（build 时点动态读 atelier/package.json，非硬编码——改版本号
+// 零耦合）。同款时序：置位先于 await import 装配（main-server.ts 装配点读本值进 health 面 version；
+// dev 托管不经壳 = null，旧模板应用无注入同归 null）。
+globalThis.__ATELIER_VERSION__ = ${JSON.stringify(atelierVersion)};
 
 const { serve } = await import("../src/vendor/atelier/server/node-host.ts");
 const { withStaticHost } = await import("../src/vendor/atelier/server/static-host.ts");
