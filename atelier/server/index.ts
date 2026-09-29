@@ -103,3 +103,16 @@ export {
   type CreateEmailRecorderOptions,
   type EmailLogDb,
 } from "./email.ts";
+/* B1 差距批追加（上传/资产管道，2026-09-28，决策 32，只加不改——既有行不动）：defineUpload + 上传面装配单源 */
+export {
+  defineUpload,
+  createUploadsFace,
+  ASSETS_TABLE,
+  ASSETS_DDL,
+  UPLOADS_DEFAULT_MAX_BYTES,
+  type UploadDef,
+  type UploadResult,
+  type UploadsFace,
+  type CreateUploadsFaceOptions,
+  type UploadsDb,
+} from "./uploads.ts";

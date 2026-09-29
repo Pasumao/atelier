@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-31**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3）；未决项 2 条见文末。
+> 已决 **0-32**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3；决策 32 = 文件上传/资产管道，2026-09-28 差距批 B1）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -465,6 +465,16 @@
 - **内省**：server-status 增可选 `email` 段——装配时尾部 ~20 条六字段投影（id/ts/transport/to/subject/status，不含 payload/error，调试面最小呈现；全量走库直读）；未装配 = 段不出现、装配零投递 = 如实空数组、读失败 = 段缺省（零假数据三态）；prod 隐身语义沿用调试面整体。
 - 诚实边界：**无模板引擎**（subject/body 调用方给，框架不掺渲染 opinion）；**无队列联动强制**（send 是同步记账原语非后台任务，大量发送经 ctx.jobs 自行投递）；**无退订/合规面**（营销邮件退订/合规是应用域）；**mock 表即真信源**（dev 面 review 时间轴消费记账表归后续批）；行数基裁剪最老投递滚出窗口即不可查、库删即史灭（同迁移 journal 口径）。
 - 时间：2026-09-28（差距批 B3）。
+
+## 决策 32：文件上传/资产管道——显式注册上传面，资产以 URL/ID 进契约（差距批 B1）
+
+- **定论**：上传契约形态 = **② 显式注册上传面**（side-channel 明示形态，**非契约 bytes 型**）——`defineUpload({ name, accept?, maxBytes?, auth? })` 定义 + `reg.registerUpload(def)` 注册（端点面 `reg.register` 的**兄弟注册表**，不混入端点表：introspect 端点表形状零变化、api-diff/OpenAPI 投影/契约层三层零触碰）；路由 `POST <mount>/upload/<name>` + `GET <mount>/assets/<id>`。**否决①契约 bytes 型**（multipart 直进端点分发器）：FlatSchema 无 bytes 型（超面 = ATR-102 显式 throw 既有纪律），直进要同时动契约层/校验层/OpenAPI 投影三层，爆炸半径大；显式面 = 纯加法、边界清晰，与「执行位置是部署细节不是契约细节」同哲学——**资产引用以 URL/ID 进契约，字节走显式面**（端点 handler 拿 `{ url }` 存库/返回，bytes 永不进 JSON 契约域）。
+- **机制**：`createHandler({ db, uploads: createUploadsFace({ db, dir }) })` 装配（jobs/email 同款 option 注入——endpoints.ts 对 uploads.ts 仅 type-import，运行时单向依赖 uploads.ts → endpoints.ts，零环；应用以同一 db 句柄装配即得记账同连接）。multipart/form-data 专用解析（零依赖最小解析器，单文件字段语义 v1）；磁盘布局 `<uploads.dir>/<yyyy-mm>/<sha256>.<ext>`（**内容寻址 = 天然去重**：同 sha 重传 = 同 id/同 url/单文件单行；行在文件失（备份恢复半态等）→ 重传幂等补写修复）；元数据表 `atelier_assets(id/name(上传名)/mime/size/sha256 UNIQUE/path(相对布局)/created_at)`——**惰性建表 + 装配期尽力**（决策 21/29/31 同款，框架自管不进应用迁移序列）。**原子性两态**：先写临时文件再 rename（半文件不可见）+ 记账失败删孤儿文件；反向「账在盘不在」= 下载 404 + 重传修复（两态都有用例钉住）。下载流式回文件（node:fs createReadStream → Web ReadableStream——live SSE 已证明桥支持流式响应），`content-type` 取元数据 mime + `Cache-Control: public, max-age=31536000, immutable`（内容寻址不可变）。
+- **闸位（两道闸语义）**：A2 maxBodyBytes 机制扩展复用——**桥中途截断粗闸**（node-host：multipart 请求放行到 `max(maxBodyBytes, 20MB)`，JSON 全局闸不动）+ **上传面定义精闸**（`maxBytes` 缺省 20MB，独立于 JSON maxBodyBytes，超限 413 ATR-346 同码）。与 A2「两道都设取小者」不冲突：A2 纪律管同一资源（JSON 体）的两道闸；B1 是不同资源（multipart 走独立上限），粗闸只保证内存上界、精闸按定义生效。诚实边界：定义 maxBytes > 20MB 的部署须同步上调 `createNodeServer/serve({ maxBodyBytes })`（桥面放行上限随之抬升——v1 不单开桥配置位）。
+- **错误码复用（零新码）**：413 ATR-346 超限 / 415 **ATR-415** 非 multipart 或 accept 不匹配（W6/P1-12 dev 面同号同语义——「媒体类型不支持」，HTTP 状态 = 码号惯例）/ 400 ATR-312 multipart 结构非法（缺 boundary/截断/多文件 part——JSON 非法体同槽位）/ 404 ATR-310 未装配面·未知上传面·资产不存在（未知路由资源同槽位）/ 401 ATR-340 + 403 ATR-341 鉴权（拦截链单源复用）/ 500 ATR-320 存储与记账 IO 失败。
+- **auth 缺省 = session（fail-closed）**：上传是写面（落盘+记账），未声明 auth 的上传面**缺省要求会话**（与端点「未声明 = 开放」不同——有意差异，A6 apikey 通道缺省恒拒同款 fail-closed 纪律；`auth: { type: "none" }` 显式声明开放消警）；`auth` 语义复用端点拦截链（gateAuth 单源收口：session/apikey/role 全支持，消息主语「上传面」）。
+- **取舍**：不内建图片处理/缩略图/病毒扫描（应用域）；磁盘直写（S3/OSS 等应用自接——同 email transport 纪律）；v1 单文件每请求（多文件 part 显式 400 拒绝，归后续）；multipart 请求体经桥缓冲后解析（不流式入盘——桥内存上界即粗闸，流式增量请求桥归后续）；非文件 form 字段 v1 忽略不消费（上传是 side-channel，结构化元数据场景等 v2 字段面）；filename 解码尽力（RFC 2231/5987 filename* 优先，解码失败回落 filename，再失败用 fallback 名 "upload"——诚实记录）；多副本部署需共享磁盘卷（本地盘单实例语义）。
+- 时间：2026-09-28（差距批 B1；统筹者拍板契约形态②）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
