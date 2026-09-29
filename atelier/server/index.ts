@@ -7,6 +7,7 @@ export {
   defineCommand,
   endpointError,
   AtrEndpointError,
+  apiKeyMatches,
   type EndpointKind,
   type EndpointDef,
   type EndpointContext,
@@ -15,6 +16,7 @@ export {
   type AuthReader,
   type EndpointJournalEntry,
   type EndpointSummary,
+  type ApiKeysOptions,
 } from "./endpoints.ts";
 export { openSqlite, SqliteUnavailableError, type SqliteDb, type SqliteStatement, type SqliteRunResult } from "./sqlite.ts";
 /* FS-M2(m2b) 数据面追加（只加不改——既有行不动，api-diff 盯兼容性） */

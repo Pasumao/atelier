@@ -31,8 +31,9 @@
  *                的端点响应 schema 省略 + description 注记 + x-atelier-output-contract:false）；
  *   restful: true（§3.4 互操作位，默认关）→ 该 query 端点映射 GET + reqProps/optProps →
  *                query parameters（description 注记运行时传输仍为 POST）；
- *   auth         → components.securitySchemes（session → cookie apiKey 位；oauth 只预留命名
- *                空间占位声明不实现 §6.4；其余类型显式报错）；端点 → security 引用；
+ *   auth         → components.securitySchemes（session → cookie apiKey 位；apikey → apiKeyAuth
+ *                header 位〔A6 决策 30〕；oauth 只预留命名空间占位声明不实现 §6.4；其余类型显式
+ *                报错）；端点 → security 引用；
  *   idempotent/timeoutMs/live/kind → x-atelier-* 扩展字段；
  *   info.title   取 --name 或应用 package.json name 或目录名。
  *
@@ -463,10 +464,12 @@ function normalizeMount(mount) {
 /**
  * securitySchemes：session → cookie apiKey 位（cookie 名实读 gen auth 产物 cookie.ts 的
  * SESSION_COOKIE——曾硬编码 "session" 与实际 "atelier_session" 漂移，openapi-golden auth 联测段
- * 对拍抓出后修复；无 gen auth 产物时回退旧通用名）；oauth → 预留占位声明（§6.4，不实现）
+ * 对拍抓出后修复；无 gen auth 产物时回退旧通用名）；apikey → apiKeyAuth header 位（A6 最小切口，
+ * 2026-09-28，决策 30——name = 端点 auth 声明 header ?? 缺省 x-api-key，description 恒明示装配点
+ * 为实际头名权威）；oauth → 预留占位声明（§6.4，不实现）
  */
-function securitySchemeFor(type, cookieName) {
-  if (type === "session") {
+function securitySchemeFor(auth, cookieName) {
+  if (auth.type === "session") {
     return {
       type: "apiKey",
       in: "cookie",
@@ -474,7 +477,16 @@ function securitySchemeFor(type, cookieName) {
       description: "Atelier session 会话 cookie（gen auth 产物定义 Cookie 名——FS-DESIGN §6.2；本位为互操作投影）",
     };
   }
-  if (type === "oauth") {
+  if (auth.type === "apikey") {
+    return {
+      type: "apiKey",
+      in: "header",
+      name: typeof auth.header === "string" && auth.header !== "" ? auth.header : "x-api-key",
+      description:
+        "Atelier API key（机器客户端通道——FS-DESIGN §6.4 落地注记 2026-09-28，决策 30）：携本头（key 由服务端装配点分发）调用 auth: { type: \"apikey\" } 端点；实际头名以装配点 createHandler({ apiKeys: { header } }) 为准（缺省 x-api-key），端点 auth 声明的 header 字段为文档镜像位",
+    };
+  }
+  if (auth.type === "oauth") {
     return {
       type: "apiKey",
       in: "header",
@@ -484,8 +496,8 @@ function securitySchemeFor(type, cookieName) {
     };
   }
   throw exportError(
-    `不支持的 auth 类型「${type}」（OpenAPI 导出只实现 session；oauth 为预留占位）`,
-    "改用 auth: { type: \"session\" }，或在 FS-DESIGN §6.4 落地后再扩展映射"
+    `不支持的 auth 类型「${auth.type}」（OpenAPI 导出只实现 session/apikey；oauth 为预留占位）`,
+    "改用 auth: { type: \"session\" } 或 auth: { type: \"apikey\" }，或在 FS-DESIGN §6.4 落地后再扩展映射"
   );
 }
 
@@ -588,10 +600,13 @@ export function buildOpenApi(root, opts = {}) {
           "200": { description: "OK（端点未声明 output 契约——响应 schema 省略）", "x-atelier-output-contract": false },
         };
     // auth: { type: "none" } = 显式免鉴权（§6.2 显式消警位）→ 无 security 引用、不进 securitySchemes
-    //（与运行时拦截语义对齐：type "none" 不过分发层鉴权拦截——文档即真相）
+    //（与运行时拦截语义对齐：type "none" 不过分发层鉴权拦截——文档即真相）。
+    // apikey（A6，决策 30）→ 方案名固定 "apiKeyAuth"（OpenAPI 社区惯例位名，与 auth.type 解耦——
+    // 同应用全部 apikey 端点共用一位，header 以首个声明定名）；session/oauth → 方案名 = auth.type。
     const secured = ep.auth != null && ep.auth.type !== "none";
-    const security = secured ? [{ [ep.auth.type]: [] }] : null;
-    if (secured && !securitySchemes[ep.auth.type]) securitySchemes[ep.auth.type] = securitySchemeFor(ep.auth.type, cookieName);
+    const schemeName = secured ? (ep.auth.type === "apikey" ? "apiKeyAuth" : ep.auth.type) : null;
+    const security = secured ? [{ [schemeName]: [] }] : null;
+    if (secured && !securitySchemes[schemeName]) securitySchemes[schemeName] = securitySchemeFor(ep.auth, cookieName);
 
     const extensions = {
       "x-atelier-kind": ep.kind,
