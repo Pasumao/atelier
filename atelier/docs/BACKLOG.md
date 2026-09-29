@@ -126,7 +126,7 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 - ~~本仓 snapshot 基线未武装~~ → **已武装（2026-09-27，m10 批 C）**：`.atr/snapshots/win32/baseline.png` 入库（61KB，check 双 MATCH 字节稳定实证），checkpoint save 快照门在有 dev face 可达时为真比对（不可达仍 vacuous——阶梯语义）。
 - checkpoint.mjs 仓库发现：~~只认 cwd 下 `.git`~~ → **已处置（2026-09-06）**：cwd 无 `.git` 时向上找最近祖先（误建嵌套仓的根因关闭；AGENTS.md"仓库根运行"提示保留为文档）。
 - ~~P1-9 baseline.png 视觉复核留待用户~~ → **已处置（09-06 整理）**：`.dsh-trash/` 全区清除（含 wave-1~5 原始 attempt 产物与 smoke-app；评分事实保留在 `benchmarks/m3/results/` 与 WAVES 报告；视觉基线可随时 `atelier snapshot save` 重生成）。
-- bench.mjs（P0-4 四指标基线）成功路径无显式 `process.exit`：出数落盘后残留句柄（无头浏览器/dev 子进程）吊住事件循环约 8 分钟不自退（2026-09-29 1.1.0 批四指标复测实证；执行时 taskkill 精确收尸，数字不受影响）；修法归 W4「die 大一统」同族（catch/finally 收口 + DieExit），归制作批顺手修，不单开批。
+- ~~bench.mjs（P0-4 四指标基线）成功路径无显式 `process.exit`：出数落盘后残留句柄（无头浏览器/dev 子进程）吊住事件循环约 8 分钟不自退~~ → **已修复（2026-09-29，fix/bench-exit）**：根因三层全修——dev-screenshot `openTransientBrowser().close()` 的 CDP WebSocket 从不 close（事件循环永挂主因）+ win32 `child.kill()` 只杀直属进程且 Edge 启动进程会让位真浏览器后自退（按 debug port LISTENING 反查真浏览器 pid 树杀，child.pid 死根兜底）+ 1.5s rmSync 定时器未 unref；bench 侧成功/失败对称 `flushExit` 显式收口（保 stdout drain 冲刷）+ persistent 实例 `atelier-shot` 标记基线差分补刀（截图常驻实例挂在 vite 进程内，强杀不走 exit 钩必漏；差分不误伤存量实例）。红检 `276f120`/`1d0416b` 先红后绿（探针挂死 30s 被看门狗整树收尸 + 浏览器 16 PID 残留 → 自退约 5s 零残留；E2E 真跑 bench 自退 5.3s exit 0），877 绿+8 skip（875 基线 +2 探针用例）/check-skills 56-0。诚实边界：快速退出的 run 留 atelier-shot 一次性 profile 目录归 OS 清 temp（unref 语义 = 进程要退绝不拦 1.5s）。
 
 ### 挂起区（等 F 线里程碑后启动）
 
