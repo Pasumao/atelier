@@ -160,6 +160,26 @@ async function waitUp(ms) {
   return false;
 }
 
+/* ---------- 无头浏览器残留差分收口（win32） ---------- */
+// ④ 截图回环的 persistent 实例挂在 vite 进程内：bench 对 vite 是 taskkill 强杀
+// （TerminateProcess 不走 exit 钩子，dev-screenshot 的退出清理与空闲看门狗同死）——
+// persistent 浏览器必漏成孤儿（2026-09-29 E2E 实证 16 PID）。杀者侧按 atelier-shot
+// 一次性 profile 标记（dev-screenshot spawn 实例 cmdline 独有，不误伤日常 Edge）做
+// 基线差分：基线外出现的实例都是本 run 产物，逐树 taskkill（根=真浏览器活着，/T 走
+// 得到子树；启动器让位自退后 child.pid 已死，必须按标记反查）。concurrently 存量实例
+// 在基线内，绝不动。
+function listShotBrowserPids() {
+  if (process.platform !== "win32") return [];
+  const ps =
+    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
+    "Where-Object { $_.CommandLine -match 'atelier-shot' } | " +
+    "ForEach-Object { $_.ProcessId }";
+  try {
+    const r = spawnSync("powershell", ["-NoProfile", "-Command", ps], { encoding: "utf8", timeout: 15000 });
+    return String(r.stdout ?? "").split(/\r?\n/).map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
+  } catch { return []; }
+}
+
 /* ---------- dynamic benches (CDP) ---------- */
 async function evalIn(cdp, expression, awaitPromise = false) {
   const r = await cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise }, 30000);
@@ -241,10 +261,13 @@ async function benchBundle() {
 /* ---------- run ---------- */
 const log = (m) => { if (!JSON_OUT) console.error(`[bench] ${m}`); };
 // P1-10：外层 try/catch 收口——die 抛 DieExit 由 catch 记录，finally（关浏览器/killTree/清理）
-// 在任何失败路径都先执行，之后才以非零码退出；成功路径自然落出（stdout JSON 完整冲刷）
+// 在任何失败路径都先执行，之后才以非零码退出。成功/失败对称显式收口（flushExit）：close 已把
+// CDP ws 等句柄面清到最好，但进程退出不再赌「事件循环自然清空」——句柄清空判定不归本进程控制
+// （1.1.0 批出数后挂死 8 分钟实证），成功路径同样显式 exit，仅保 stdout 冲刷先行。
 let exitCode = 0;
 try {
   APP_OK();
+  const shotBaseline = new Set(listShotBrowserPids()); // 差分基线：只收本 run 期间新出现的实例
   const server = startDevServer();
   let cdpSession = null;
   try {
@@ -309,6 +332,13 @@ try {
     try { cdpSession?.close(); } catch { /* already gone */ }
     try { server.killTree(); } catch { /* already gone */ }
     cleanupBenchFiles();
+    // persistent 实例差分补刀（见 listShotBrowserPids 注）：killTree 之后扫，新出现的
+    // atelier-shot 实例逐树 taskkill——已死 pid 报 not found 无害
+    for (const pid of listShotBrowserPids()) {
+      if (!shotBaseline.has(pid)) {
+        try { spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" }); } catch { /* already gone */ }
+      }
+    }
   }
 } catch (e) {
   // die（DieExit）= 已格式化文案直接上报；意外异常 = 连栈上报（诊断面不缩水）；exit 一律非零
@@ -320,4 +350,17 @@ try {
     exitCode = 1;
   }
 }
-if (exitCode) process.exit(exitCode);
+/**
+ * 显式收口（成功/失败对称，P1-10 同一出口）：管道下 stdout 可能尚未冲刷完——writableLength > 0
+ * 时等一次 drain 再退（对端消失则 error/close 兜底同退，绝不因等冲刷引入新挂点），否则直接退。
+ * stderr 同理可略：诊断文案短，无截断之虞。
+ */
+function flushExit(code) {
+  const out = process.stdout;
+  if (out.writableLength <= 0) { process.exit(code); }
+  out.once("drain", () => process.exit(code));
+  out.once("error", () => process.exit(code));
+  out.once("close", () => process.exit(code));
+}
+if (exitCode) flushExit(exitCode);
+flushExit(0);
