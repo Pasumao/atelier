@@ -468,6 +468,8 @@ export const messages = table("messages", {
 
 - 列类型全集（v1）：`integer | text | real | blob`——正好 SQLite 四原始类型 + 参数化友好
   （无 Date/JSON 魔法类型；时间 = integer ms、复合结构 = 手动 JSON 列 + 应用层映射，显式）。
+- `fts` 选装（B6）：第三参 opts 增 `fts: { columns: ["content", ...] }` 声明 FTS5 全文搜索——
+  仅 text 列 + 单列 `integer` 主键表可用（构造期硬错校验，落地口径见 §5.2 注记）。
 - `references` 显式声明关系（生成迁移时产出 FK + 供机检做孤儿写检查的元数据）；**不做**
   关系魔术（无 lazy-load/无 cascade 隐式默认——cascade 必须在迁移 SQL 里显式写）。
 - 表定义与 FlatSchema 的映射：`table()` 产物携带 `rowSchema`（FlatSchema 投影）→ 端点 output
@@ -479,8 +481,8 @@ export const messages = table("messages", {
 | 产物 | 内容 | 门禁 |
 |---|---|---|
 | `src/generated/db/tables.ts` | 每表行类型 + 表元数据常量（显式 import schema.ts） | 零修改可编译 |
-| `src/server/db/migrations/NNN_*.up/.down.sql` | 建表/索引迁移骨架（`--regen` 时**只增不改**——已应用迁移永不重写，见 §5.4） | 成对存在 + checksum |
-| `src/generated/db/crud.ts` | 每表极薄参数化 CRUD：`messagesGetByPk / messagesInsert / messagesUpdate / messagesDelete` + 分页二原语 `messagesListPaged / messagesCount`（B7，见下方落地注记；SQL 字符串内联可读） | 参数化唯一路径（红线） |
+| `src/server/db/migrations/NNN_*.up/.down.sql` | 建表/索引迁移骨架，fts 表自动携带 FTS 虚表 + 触发器三件套（B6；`--regen` 时**只增不改**——已应用迁移永不重写，见 §5.4） | 成对存在 + checksum |
+| `src/generated/db/crud.ts` | 每表极薄参数化 CRUD：`messagesGetByPk / messagesInsert / messagesUpdate / messagesDelete` + 分页二原语 `messagesListPaged / messagesCount`（B7，见下方落地注记）+ 全文搜索二原语 `messagesFtsSearch / messagesFtsCount`（B6，仅 fts 表；SQL 字符串内联可读） | 参数化唯一路径（红线） |
 
 **克制声明**：不做查询构造器（query builder）、不做关系 API、不做懒加载——"贴 SQL"纪律
 （决策 19）；join/聚合/窗口 = 手写 SQL 经 `ctx.db.prepare()` 直用（§5.3）。CRUD 生成只为
@@ -497,6 +499,29 @@ export const messages = table("messages", {
 > limit/offset 为非负整数（`Number.isInteger(x) && x >= 0`），负值硬 throw 中文错误指明用法——
 > SQLite 负 LIMIT 语义 = 无界查询，显式硬错优于静默全表（gen-db 解析器"绝不静默降级"同款
 > 取向）；offset 缺省 0（`opts.offset ?? 0`），Count 无参数零守卫。测试：`tests/gen-db.test.ts`。
+
+> **落地注记（2026-09-29，差距批 B6）**：全文搜索就此补齐——`table()` 增 `opts.fts?: { columns }`
+> （**选装**，与 B7 分页的无条件生成有意相反：搜索不是每张表都要，虚表 + 触发器是真实的存储与
+> 写放大，开关默认关、想要的人一定知道自己在要什么）。声明后 `gen db` 产出两半：①迁移 DDL
+> 三件套（单源在 server/db.ts 的 createTableSql/dropTableSql，迁移骨架自动携带）——FTS5
+> **external-content** 虚表 `<t>_fts`（`content='<t>', content_rowid='<pk>'`）+ 同步触发器三元组
+> `<t>_fts_ai/_ad/_au`（ai 直插 / ad 走 FTS5 特殊 `'delete'` 命令 / au 先 delete 后插）。拍板
+> external-content 的理由：索引存虚表、行值留主表**免双写存储**，读写经 rowid 直连主表、同步由
+> 触发器全自动（应用层零感知）；代价 = content_rowid 需要 rowid 别名列，故主键必须**单列
+> integer**——复合主键/text 主键表构造期硬错并指路（去掉 fts 或走 §5.3 手写 SQL 通道），绝不
+> 静默产出跑不起来的 DDL；down 先 DROP TRIGGER ×3 再虚表最后主表（external-content 虚表不随
+> 主表自动消失）。②CRUD 投影二原语 `<t>FtsSearch(db, query, { limit?, offset? })` 与
+> `<t>FtsCount(db, query)`：`SELECT 主表限定列 FROM <t> JOIN <t>_fts ON 主键 = rowid WHERE
+> <t>_fts MATCH ? ORDER BY bm25(<t>_fts)`——列名必须**表名限定**（external-content 虚表暴露
+> 同名列，裸列名 JOIN ambiguous，真库对拍抓出后修正）；query 是 FTS5 MATCH 语法，应用侧负责
+> 转义与前缀 `*` 拼接，**全程 ? 绑定零拼接**（决策 19），MATCH 语法错误诚实冒泡为 SQLite 异常
+> （生成代码不加 try/catch 掩盖）；bm25 相关度升序（更负 = 更相关）；limit/offset 显式传（B7
+> ListPaged 同款非负整数硬守卫，offset 单传无分页窗口也硬错），**不设隐式 limit**——全量命中
+> 是合理默认（结果量应用侧自知），静默截断才是坑。诚实边界（真 node:sqlite 实证钉进测试）：
+> 默认 unicode61 分词器按空格/标点切词，**连续中文串 = 整串单 token，不按单字切**——整串与前缀
+> `*` 查询可命中、中段子串/单字查询不命中；需真分词/子串检索请应用侧预处理（分词/插空格）或
+> 手改迁移加 tokenize 选项（如 trigram，SQLite ≥3.34）——迁移骨架可手改，改后 checksum 即固定
+> （§5.4）。测试：`tests/db.test.ts` + `tests/gen-db.test.ts`。
 
 ### 5.3 手写 SQL 通道与参数化红线
 
