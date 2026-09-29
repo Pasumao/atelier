@@ -16,7 +16,6 @@
 | `FS-DESIGN.md` | 全站化细化设计：决策 17-23 之下的实现级规格（端点 v2/live/迁移器/生成器/守卫/MCP 工具族/OpenAPI）+ 前沿概念穷尽评估表 + 拍板清单 D-F11+ | v0.1 · 实现级规格全部落地（FS-1~11 销账，落地注记见各 §） |
 | `SKILLS-PLAN.md` | Agent Skills 包规格：八包设计原则 / 行数预算 / 校验门禁 | 已落地转规格（8 包在 `atelier/skills/`；行数预算为 `check-skills.mjs` 硬门禁规格源） |
 | `RELEASE-CHECKLIST.md` | 发布检查单：npm publish 前本地可验项 + 发布日外部动作两段式 | 1.1.0（2026-09-29）· ① 段 13 道 · 复跑留痕收口在档；② 段 9 项待发布日 |
-| `RELEASE-1.1.0-DESIGN.md` | 1.1.0 版本批设计书：101 提交版本化 + health version 注入 + strict 终检首战（任务书 W-A~E / 修改文件清单 18 项 / 三分支执行策略） | 2026-09-29 定稿 · 批次收口后随仓库整理归档（FULLSTACK-DESIGN 先例） |
 
 ## 调研证据（`research/`）
 
@@ -32,6 +31,7 @@
 |---|---|
 | `SPEC-Agentic-DX-v0.1.md`（Agentic DX 规范 v0.1） | 已被 v0.2 取代（决策 17-24 并入；v0.1 内容 = v0.2 的前端段基线）；2026-09-27 仓库整理移出工作区，git 历史可溯 |
 | `FULLSTACK-DESIGN.md`（全站化设计书 v0.2） | 决策定稿 = design-decisions 17-23；执行 = BACKLOG FS 线；不做清单已并入 ROADMAP §6（2026-09-19 整理删除，锚点 `6d25ef7`） |
+| `RELEASE-1.1.0-DESIGN.md`（1.1.0 版本批设计书） | 结论去向 = CHANGELOG `[1.1.0]` 条目 + BACKLOG 1.1.0 归档行 + RELEASE-CHECKLIST ①段第 13 道（strict 终检规矩固化）+ W-A 落地（build 壳 version 注入）；2026-09-29 批次收口删除（git 可溯） |
 | `P3-5-D-SUBSET-RESEARCH.md`（D 子集适配面预研） | 定论在 ROADMAP §5 D-4（不立项深投入，最小切口留观察）（2026-09-19 整理删除） |
 | `TECH-ASSESSMENT.md`（2026-02 技术评估快照） | 定位声明活在 ROADMAP §1 与根 README；可证伪指标在 ROADMAP §7（2026-09-19 整理删除） |
 | `TECH-COMPARISON.md`（逐机制技术对照） | 根源路线选择已被决策 2/3/7 吸收（2026-09-19 整理删除） |
