@@ -25,6 +25,8 @@
  * live SSE 通道不设 per-subscriber 门禁（引擎共享重算 ctx.auth=null）——live×auth(type≠none) 组合
  * 在 register() 即以 ATR-315 拒绝（fail-closed，见 register 内注释），声明不可能被静默忽略。
  * 依赖注入（§3.2）：无 DI 容器——db / auth 由 createHandler 装配点一次性显式注入，装配代码明文可见。
+ * B3 差距批（2026-09-28，决策 31）加 email 装配位：ctx.email = { send }（email.ts 单源——显式
+ * transport 接口 + 投递记账，框架不内建真实发送；本模块只做装配层透传与 introspect 段接线）。
  * v2 边界（诚实）：gen auth 产物（会话原语/cookie/端点骨架）归 FS-5 生成器，本模块只做装配层拦截；
  * live 为全量引擎（FS-7，live.ts 协作对象：SSE 失效-重算-推送——单进程内存订阅、重连全量重算，
  * 诚实边界随 live.ts 文件头）；注册表为单进程内存态；command journal 自 B5 差距批（2026-09-28，
@@ -40,6 +42,7 @@ import { INTROSPECT_NAME, introspectResponse } from "./introspect.ts";
 import { HEALTH_NAME, healthResponse } from "./health.ts";
 import { createCommandJournalSink, type CommandJournalPersistOptions, type CommandJournalSink } from "./command-journal.ts";
 import type { BoundJobs, JobsHandle, KvView } from "./jobs.ts"; // 仅类型——运行时单向依赖 jobs.ts → endpoints.ts，零环
+import type { BoundEmail, EmailRecorder } from "./email.ts"; // 仅类型——运行时单向依赖 email.ts → endpoints.ts（redactSensitiveInput 单源），零环
 
 export type EndpointKind = "query" | "command";
 
@@ -85,6 +88,14 @@ export type EndpointContext<TDb = unknown> = {
    * idempotent 元数据语义**（§3.6 元数据保持纯声明）——handler 显式 setIfAbsent 去重。
    */
   kv?: KvView;
+  /**
+   * email 投递口（B3 差距批，§5.8；可选位——仅 createHandler({ email }) 装配后存在）。
+   * send 直通装配的 recorder（createEmailRecorder 产物）——记账 INSERT 经 ctx.db 同一连接 →
+   * `ctx.db.tx(() => { 业务写; ctx.email.send(...) })` 业务写与记账行同事务（mock transport
+   * 零外部 IO = 完全原子；真实 transport 无分布式事务——回滚只回滚记账不召回邮件，诚实边界
+   * 见 email.ts）。未装配 = ctx.email 不存在（jobs/kv 同款可选位诚实呈现）。
+   */
+  email?: BoundEmail;
 };
 
 /** live/emits 失效键语法（§4.1）：表级或业务键——读写两侧都显式可查，非法 = ATR-314 */
@@ -598,9 +609,13 @@ export class EndpointRegistry {
    * 装配项——auth.type:"apikey" 端点的 key 通道（缺省不启用 = 恒拒 fail-closed；会话优先双通道
    * 并存；timingSafeEqual 恒时比较见 apiKeyMatches；诚实边界 = key 无过期/吊销/管理面，OAuth 全套
    * 仍归 FS-DESIGN §6.4 预留位）。
+   * B3 差距批（2026-09-28，决策 31）：email = createEmailRecorder 产物（email.ts）装配项——
+   * 显式 transport 接口 + 内建可验证的投递记账（框架不内建真实发送，mock 为内建唯一 transport）；
+   * ctx.email = { send } 绑定视图（记账经 ctx.db 同连接，tx 原子性见 EndpointContext.email）；
+   * 未装配 = ctx.email 不存在（行为零变化），introspect email 段同样缺省（零假数据）。
    */
   createHandler(
-    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; apiKeys?: ApiKeysOptions; jobs?: JobsHandle; version?: string | null; journal?: CommandJournalPersistOptions } = {}
+    opts: { mount?: string; db?: unknown; auth?: AuthReader; maxBodyBytes?: number; statusToken?: string; rateLimit?: RateLimitOptions; apiKeys?: ApiKeysOptions; jobs?: JobsHandle; email?: EmailRecorder; version?: string | null; journal?: CommandJournalPersistOptions } = {}
   ): (req: Request) => Promise<Response> {
     const startedAtMs = performance.now(); // B4 健康面 uptime 起点（装配时刻 = handler 体诞生时刻）
     const mount = opts.mount ? "/" + opts.mount.replace(/^\/+|\/+$/g, "") : "";
@@ -625,6 +640,10 @@ export class EndpointRegistry {
     const jobsHandle = opts.jobs;
     const ctxJobs: BoundJobs | undefined = jobsHandle != null ? { enqueue: (job) => jobsHandle.enqueue(job, db as SqliteDb) } : undefined;
     const ctxKv = jobsHandle != null ? jobsHandle.kv.bound(db as SqliteDb) : undefined;
+    // B3 差距批（决策 31）：email recorder → ctx.email 绑定视图（send 直通；记账经 recorder 装配的
+    // db 句柄——应用以同一句柄装配 createHandler({ db }) 与 createEmailRecorder({ db }) 即得 tx 原子性）
+    const emailHandle = opts.email;
+    const ctxEmail: BoundEmail | undefined = emailHandle != null ? { send: (msg) => emailHandle.send(msg) } : undefined;
     this.liveEngine.attach({ db }); // FS-7：live 重算与 POST 分发共用同一装配句柄
     return async (req: Request): Promise<Response> => {
       // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
@@ -662,7 +681,7 @@ export class EndpointRegistry {
       //      A2 硬化5：statusToken 装配项透传——设置后该路由要求 x-atelier-token 头（401 ATR-340），
       //      未设置 = 行为零变化；prod 隐身优先于 token 判定（判定在 introspect 内部）。 ----
       if (req.method === "GET" && name === INTROSPECT_NAME) {
-        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs });
+        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs, email: opts.email });
         if (res) return res;
       }
 
@@ -838,6 +857,8 @@ export class EndpointRegistry {
         },
         // A1/A4 差距批（可选位——未装配 = undefined，与 setCookie 同款防御形态；无 jobs 面零开销）
         ...(ctxJobs != null ? { jobs: ctxJobs, kv: ctxKv } : {}),
+        // B3 差距批（决策 31，可选位——未装配 = ctx.email 不存在，jobs/kv 同款诚实呈现）
+        ...(ctxEmail != null ? { email: ctxEmail } : {}),
       };
       const t0 = performance.now();
       const durMs = (): number => Math.round(performance.now() - t0);

@@ -67,7 +67,9 @@ async function memoryDb(): Promise<SqliteDb> {
 }
 
 function emailRows(db: SqliteDb): { id: number; ts: number; transport: string; to: string; subject: string; payload: string | null; status: string; error: string | null }[] {
-  return db.prepare(`SELECT id, ts, transport, "to" AS to_addr, subject, payload, status, error FROM ${EMAIL_LOG_TABLE} ORDER BY id`).all() as never;
+  // "to" = SQLite 保留字：查询恒双引号（红检实证裸 to 报 syntax error）；引号列投影键 = 裸名 to
+  //（AS to_addr 别名会把键改成 to_addr 与断言面错位——红检阶段抓出后归一，断言契约不变）。
+  return db.prepare(`SELECT id, ts, transport, "to", subject, payload, status, error FROM ${EMAIL_LOG_TABLE} ORDER BY id`).all() as never;
 }
 
 function tableExists(db: SqliteDb): boolean {

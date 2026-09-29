@@ -86,3 +86,20 @@ export {
 } from "./jobs.ts";
 /* B4 差距批追加（健康面，2026-09-28，只加不改——既有行不动）：GET <mount>/__atelier/health 三事实探活口 */
 export { HEALTH_NAME, healthResponse, type HealthSnapshot } from "./health.ts";
+/* B3 差距批追加（email 适配边界，2026-09-28，决策 31，只加不改——既有行不动）：显式 transport 接口 + 内建 mock transport + 投递记账 */
+export {
+  createEmailRecorder,
+  mockTransport,
+  EMAIL_LOG_TABLE,
+  EMAIL_LOG_DDL,
+  DEFAULT_EMAIL_LOG_MAX_ROWS,
+  EMAIL_ERROR_MAX_CHARS,
+  type EmailTransport,
+  type OutgoingEmail,
+  type EmailSendResult,
+  type EmailLogEntry,
+  type EmailRecorder,
+  type BoundEmail,
+  type CreateEmailRecorderOptions,
+  type EmailLogDb,
+} from "./email.ts";
