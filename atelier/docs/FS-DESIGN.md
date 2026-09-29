@@ -227,6 +227,27 @@ export type EndpointContext<TDb = SqliteDb> = {
   魔法多路复用（隐式性违背 Q1）。
 - **HTTP/2**：Bun 宿主自动获得（Bun.serve 1.4.1+），零代码依赖。
 
+> **落地注记（2026-09-28，差距批 B1，决策 32）**：上传/资产通路就此补齐——契约形态拍板
+> **② 显式注册上传面**（side-channel 明示，非契约 bytes 型：FlatSchema 无 bytes 型〔超面 = ATR-102
+> 显式 throw〕，multipart 直进分发器要动契约/校验/OpenAPI 三层，爆炸半径大；显式面 = 纯加法，
+> 资产引用以 URL/ID 进契约、字节走显式面）。路由 `POST <mount>/upload/<name>` +
+> `GET <mount>/assets/<id>`（`defineUpload({ name, accept?, maxBytes?, auth? })` +
+> `reg.registerUpload(def)` 兄弟注册表——不入端点表，introspect 端点表形状零变化）；装配 =
+> `createHandler({ db, uploads: createUploadsFace({ db, dir }) })`（jobs/email 同款 option 注入，
+> 零环）。磁盘布局 `<uploads.dir>/<yyyy-mm>/<sha256>.<ext>`（内容寻址 = 天然去重：同 sha 重传
+> 同 id 同 url；账在盘不在 → 下载 404 + 重传幂等补写）+ `atelier_assets` 记账（惰性建表 +
+> 装配期尽力，决策 21/29/31 同款；写盘先临时文件再 rename、记账失败删孤儿文件——两态用例钉住）。
+> 闸位 = A2 maxBodyBytes 机制扩展：桥中途截断粗闸（multipart 放行到 `max(maxBodyBytes, 20MB)`，
+> JSON 全局闸不动）+ 上传面定义精闸（`maxBytes` 缺省 20MB 独立于 JSON 上限，超限 413 ATR-346）；
+> 非 multipart / accept 不匹配 → 415 ATR-415（W6 dev 面同号同语义）；multipart 结构非法 → 400
+> ATR-312。auth 缺省 = **session**（上传是写面，fail-closed——与端点「未声明 = 开放」有意差异；
+> `auth:{type:"none"}` 显式开放），拦截链 gateAuth 单源复用（401 ATR-340 / 403 ATR-341）。下载
+> 流式回文件 + `Cache-Control: immutable`（内容寻址不可变）。诚实边界：v1 单文件每请求（多文件
+> part 显式拒绝）、无图像处理/病毒扫描、磁盘直写（S3/OSS 应用自接——email transport 同纪律）、
+> 请求体经桥缓冲不流式入盘、filename 解码尽力（RFC 2231/5987 filename* 优先，失败回落 fallback
+> 名）、非文件 form 字段 v1 忽略、多副本部署需共享磁盘卷；定义 maxBytes > 20MB 须同步上调桥
+> maxBodyBytes。测试：`tests/uploads.test.ts`。
+
 ### 3.5 审计 journal 强化〔议：D-F12〕
 
 M1 现状"只记成功写入"（310-320 注释口径）升级为**完整审计语义**：
