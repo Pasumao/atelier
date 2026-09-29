@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-27T03:43:59.717Z",
+  "generatedAt": "2026-09-29T11:56:19.759Z",
   "root": "Agentic",
   "layout": "framework",
   "surfaces": {
@@ -269,6 +269,9 @@
         "id": "compile"
       },
       {
+        "id": "db"
+      },
+      {
         "id": "dev"
       },
       {
@@ -355,6 +358,9 @@
         "id": "docs.search"
       },
       {
+        "id": "email.log"
+      },
+      {
         "id": "endpoint.call"
       },
       {
@@ -376,10 +382,16 @@
         "id": "graph.static"
       },
       {
+        "id": "jobs.status"
+      },
+      {
         "id": "registry.get_component"
       },
       {
         "id": "registry.list_components"
+      },
+      {
+        "id": "server.health"
       },
       {
         "id": "server.introspect"
@@ -431,6 +443,9 @@
       },
       {
         "id": "ui.screenshot"
+      },
+      {
+        "id": "uploads.status"
       }
     ],
     "token-keys": [
