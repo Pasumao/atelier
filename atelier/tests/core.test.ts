@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { $state, $derived, $effect, store } from "../runtime/core";
+import { $state, $derived, $effect, $effectStatic, store, __effectSink } from "../runtime/core";
 
 const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -271,5 +271,76 @@ describe("P1-1 $effect 抛错后可恢复（重订阅并入 finally）", () => {
     src.value = 1;
     await settled();
     expect(runs, "首跑抛错后订阅仍建立：上游再写触发第二跑").toBe(2);
+  });
+});
+
+describe("P-A 支（2026-09-30 第三遍架构评审）runtime 正确性——core 面", () => {
+  it("P1-1 红检：derived 计算抛错后上游翻转仍通知下游（修复前 upSubs 清空后失败路径不重挂 → 永久脱订、UI 永久停在错误卡）", async () => {
+    const src = $state(0);
+    let fail = false;
+    const d = $derived(() => {
+      if (fail) throw new Error("derived-boom");
+      return src.value * 2;
+    });
+    let seen: number | "ERR" = "";
+    $effect(() => {
+      try {
+        seen = d.value;
+      } catch {
+        seen = "ERR"; // 组件错误卡语义：捕获渲染错误而非白屏
+      }
+    });
+    await settled();
+    expect(seen).toBe(0);
+    fail = true;
+    src.value = 1; // 上游写 → derived 重算抛错 → 下游 effect 捕获
+    await settled();
+    expect(seen).toBe("ERR");
+    fail = false;
+    src.value = 2; // 修复前：失败一次后 derived 已与上游脱订——上游再写无人通知，effect 永不重试
+    await settled();
+    expect(seen, "上游恢复后 derived 复活并通知下游").toBe(4);
+  });
+
+  it("P2-R2 红检：$effect 首跑抛错时 dispose 已登记 __effectSink（修复前登记在 sub.run() 之后 → 抛错即跳过，mount 失败回收看不到僵尸 effect）", () => {
+    const src = $state(0);
+    const sunk: Array<() => void> = [];
+    const prev = __effectSink.fn;
+    __effectSink.fn = (d) => sunk.push(d);
+    let threw = false;
+    try {
+      $effect(() => {
+        void src.value;
+        throw new Error("boom-first-run");
+      });
+    } catch {
+      threw = true;
+    } finally {
+      __effectSink.fn = prev;
+    }
+    expect(threw).toBe(true);
+    expect(sunk.length, "首跑抛错前 sink 必须已拿到 dispose").toBe(1);
+    sunk[0]!(); // mount 失败回收路径（template.ts finally 块同款逆序 dispose）
+    expect(src._subs.size, "回收后不留僵尸订阅").toBe(0);
+  });
+
+  it("P2-R2 红检：$effectStatic 首跑抛错同样登记 __effectSink（同款时序缺陷）", () => {
+    const src = $state("p2r2-static");
+    const sunk: Array<() => void> = [];
+    const prev = __effectSink.fn;
+    __effectSink.fn = (d) => sunk.push(d);
+    try {
+      expect(() =>
+        $effectStatic(() => {
+          void src.value;
+          throw new Error("boom-static-first");
+        }, [src]),
+      ).toThrowError(/boom-static-first/);
+    } finally {
+      __effectSink.fn = prev;
+    }
+    expect(sunk.length, "首跑抛错前 sink 必须已拿到 dispose").toBe(1);
+    sunk[0]!();
+    expect(src._subs.size, "回收后不留僵尸订阅").toBe(0);
   });
 });

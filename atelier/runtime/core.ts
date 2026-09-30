@@ -93,15 +93,21 @@ function notify(sig: Signal): void {
   scheduleFlush();
 }
 
-function withTrack<R>(fn: () => R): { result: R; deps: Set<Signal> } {
-  const deps = new Set<Signal>();
+/** 在显式追踪集 deps 里执行 fn（P-A P1-1：compute 失败路径要交出**部分** deps——withTrack
+ * 的返回值结构随异常一起丢弃（解构从未完成），故拆出本变体让调用方自带可变集合） */
+function trackInto<R>(deps: Set<Signal>, fn: () => R): R {
   const prev = tracking;
   tracking = deps;
   try {
-    return { result: fn(), deps };
+    return fn();
   } finally {
     tracking = prev;
   }
+}
+
+function withTrack<R>(fn: () => R): { result: R; deps: Set<Signal> } {
+  const deps = new Set<Signal>();
+  return { result: trackInto(deps, fn), deps };
 }
 
 /** @internal 测试/工具钩子：在显式追踪上下文里执行 fn，返回结果与追踪到的信号集合（F-2 静态/动态依赖对拍用） */
@@ -142,38 +148,56 @@ export function $state<T>(init: T, options?: { equals?: (a: T, b: T) => boolean 
 export function $derived<T>(fn: () => T): Signal<T> {
   let cached!: T;
   let dirty = true;
+  /** P-A P1-1：失败脏旗标——计算抛错留下的 dirty=true 与「上游已失效」的 dirty 语义不同：
+   * 前者下一次上游变化必须照常通知下游（下游错误卡要靠重试复活），若被 onUpstreamChange 的
+   * `if (dirty) return` 同 tick 去重卫卫吞掉，下游 effect 永不再跑——重挂订阅也无人通知。 */
+  let failedDirty = false;
   const subs = new Set<Subscription>(); // 下游订阅者（与 sig._subs 同一引用）
 
   /** 上游变化到来时：同步标脏一次，并把失效沿下游按各自策略继续分发 */
   function onUpstreamChange(): void {
-    if (dirty) return;
+    if (dirty && !failedDirty) return; // 同 tick 去重；失败脏不吞通知（P-A P1-1）
+    failedDirty = false;
     dirty = true;
     const out = [...subs];
     for (const sub of out) deliver(sub);
     scheduleFlush();
   }
 
-  const compute = (): T => {
-    if (!dirty) return cached;
-    for (const [s, e] of upSubs) s._subs.delete(e);
-    upSubs.clear();
-    let result: T;
-    let deps: Set<Signal>;
-    try {
-      ({ result, deps } = withTrack(fn));
-    } catch (e) {
-      // 缓存毒化修复（红检见 tests/core.test.ts）：计算失败保持脏——下次读取重算并重抛，
-      // 绝不把「上一次成功值」当新值静默返回（修复前 dirty 已置 false，抛错后永远返回旧缓存）。
-      dirty = true;
-      throw e;
-    }
-    dirty = false;
-    cached = result;
+  /** 把依赖集合挂回上游订阅。失败路径可能与此刻仍挂着的上一轮条目重叠——复用既有条目，
+   * 绝不重订（重复 add 会让被覆盖的旧条目滞留上游 _subs 成死订阅）。 */
+  function resubscribe(deps: Set<Signal>): void {
     for (const s of deps) {
+      if (upSubs.has(s)) continue;
       const entry: Subscription = { batched: false, run: onUpstreamChange };
       upSubs.set(s, entry);
       s._subs.add(entry);
     }
+  }
+
+  const compute = (): T => {
+    if (!dirty) return cached;
+    let result: T;
+    // P-A P1-1：deps 提到 try 外——修复前 withTrack 的返回值随异常丢弃，catch 拿不到本轮
+    // 已追踪到的部分依赖。上游退订延后到成功路径：失败时旧上游订阅原样保留（那是 derived
+    // 逻辑上仍成立的依赖面），再叠挂本轮部分依赖 ⇒ 上游恢复必能通知下游重试（修复前失败
+    // 一次即与上游永久脱订——下游 effect 只订阅 derived 本身，UI 永久停在错误卡）。
+    const deps = new Set<Signal>();
+    try {
+      result = trackInto(deps, fn);
+    } catch (e) {
+      // 缓存毒化修复（红检见 tests/core.test.ts）：计算失败保持脏——下次读取重算并重抛，
+      // 绝不把「上一次成功值」当新值静默返回（修复前 dirty 已置 false，抛错后永远返回旧缓存）。
+      dirty = true;
+      failedDirty = true;
+      resubscribe(deps); // 部分依赖；与保留的旧订阅重叠时复用既有条目（不重订）
+      throw e;
+    }
+    for (const [s, e] of upSubs) s._subs.delete(e);
+    upSubs.clear();
+    dirty = false;
+    cached = result;
+    resubscribe(deps);
     return cached;
   };
 
@@ -233,13 +257,16 @@ export function $effect(fn: () => void): () => void {
     },
   };
 
-  sub.run();
+  // P-A P2-R2：sink 登记先于 sub.run()——首跑（同步执行）抛错时 dispose 已在实例登记表里，
+  // mount 失败回收/组件析构能看到它（修复前登记在 run 之后被抛错跳过 ⇒ 错误路径僵尸 effect：
+  // 订阅滞留上游、store.graph 出幻影节点）。
   const dispose = () => {
     alive = false;
     for (const d of record.deps) d._subs.delete(sub);
     __effects.delete(record); // v0.3：注销依赖图登记，不驻留死节点
   };
   if (__effectSink.fn) __effectSink.fn(dispose); // P1-4：mount 期间创建的 effect 归属实例，HMR 交换时逐个注销
+  sub.run();
   return dispose;
 }
 
@@ -268,13 +295,14 @@ export function $effectStatic(fn: () => void, deps: Iterable<Signal>): () => voi
     },
   };
   for (const d of record.deps) d._subs.add(sub);
-  sub.run();
+  // P-A P2-R2：sink 登记先于 sub.run()（$effect 同款时序修正——首跑抛错不留僵尸 effect）
   const dispose = () => {
     alive = false;
     for (const d of record.deps) d._subs.delete(sub);
     __effects.delete(record);
   };
   if (__effectSink.fn) __effectSink.fn(dispose);
+  sub.run();
   return dispose;
 }
 

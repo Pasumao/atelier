@@ -895,3 +895,164 @@ describe("R1-B：双 <style> 块全注入（P1 #6 dev/prod 分叉修复）", () 
     expect(r.frames[0]).not.toContain("<style"); // 块本体不落 DOM（解释器 renderNode 同款跳过）
   });
 });
+
+/* ================= P-A 支（2026-09-30 第三遍架构评审）runtime 正确性——模板面 ================= */
+
+describe("P-A P1-2：双 <style scoped> 块作用域以组件为单位（修复前 scopeClasses last-wins）", () => {
+  /** 每块样式各含一个可命中 root 的选择器：修复后两块的前缀类都必须出现在 root class 上
+   * （选择器才可能命中）；修复前每块新铸 atr-scope-N 且 map 同名覆盖，root 只挂末值——
+   * 前序块 CSS 全注入但选择器永不命中（R 批修了注入面，应用面 last-wins 仍在）。 */
+  const TWO_MARKER_RAW =
+    `<style scoped>.mk1 { color: var(--atelier-color-accent); }</style>` +
+    `<style scoped>.mk2 { color: var(--atelier-color-accent); }</style>` +
+    `<p>x</p>`;
+
+  const rootScopeClassOf = (root: { className: string }): string[] =>
+    [...String(root.className).matchAll(/atr-scope-\d+/g)].map((m) => m[0]);
+
+  it("红检：解释器路径——两块的 scope 前缀类都命中 root", () => {
+    tokenState.vars.add("--atelier-color-accent");
+    const before = headStyles().length;
+    const container = makeContainer();
+    const root = mountComponent(
+      { name: "P1TwoScopeInterp", render: () => ({ raw: TWO_MARKER_RAW, scope: {} }) as never },
+      {},
+      container,
+      new Map(),
+      okValidate as never,
+    );
+    const styles = headStyles().slice(before);
+    expect(styles.length, "两块都注入 head（R 批注入面语义保持）").toBe(2);
+    const onRoot = rootScopeClassOf(root);
+    expect(onRoot.length, "root 上有且仅有一个自动作用域类").toBe(1);
+    for (const st of styles) {
+      const m = /\.(atr-scope-\d+) /.exec(String(st.textContent));
+      expect(m, "每块样式都带作用域前缀").toBeTruthy();
+      expect(onRoot, `作用域类 ${m?.[1]} 必须命中 root（否则该块选择器永不生效）`).toContain(m![1]!);
+    }
+  });
+
+  it("红检：编译路径——同款（injectScopedStyle 与 root 挂载为两路共用单点）", () => {
+    tokenState.vars.add("--atelier-color-accent");
+    registerCompiled(compileFunction("P1TwoScopeCompiled", TWO_MARKER_RAW));
+    const before = headStyles().length;
+    const container = makeContainer();
+    const root = mountComponent(
+      { name: "P1TwoScopeCompiled", render: () => ({ raw: TWO_MARKER_RAW, scope: {} }) as never },
+      {},
+      container,
+      new Map(),
+      okValidate as never,
+    );
+    const styles = headStyles().slice(before);
+    expect(styles.length).toBe(2);
+    const onRoot = rootScopeClassOf(root);
+    expect(onRoot.length).toBe(1);
+    for (const st of styles) {
+      const m = /\.(atr-scope-\d+) /.exec(String(st.textContent));
+      expect(m).toBeTruthy();
+      expect(onRoot, `作用域类 ${m?.[1]} 必须命中 root`).toContain(m![1]!);
+    }
+  });
+});
+
+describe("P-A P1-3：字面量 < 按文本保真（解析器不再静默丢弃；解释器/编译共用解析器双路同源）", () => {
+  it("红检：golden parity——a < b 与 x <= y 文本完整渲染", async () => {
+    const raw = `<p>a < b 与 x <= y 尾</p>`;
+    const r = await parity("ParityLiteralLt", raw, () => ({ scope: {}, steps: [] }));
+    expect(r.frames[0]).toContain('"a < b 与 x <= y 尾"');
+  });
+
+  it("红检：真标签与残缺闭合语义不受影响（<b> 仍是标签；</ 后无标签名仍显式拒绝）", () => {
+    const ast = parseTemplate(`x <b>y</b>`);
+    expect(ast).toHaveLength(2); // "x " 文本 + <b> 元素（真标签不退化为文本）
+    expect((ast[0] as { kind: string }).kind).toBe("text");
+    expect((ast[1] as { kind: string; tag: string }).tag).toBe("b");
+    let thrown: { code?: string } | undefined;
+    try {
+      parseTemplate(`<p>x</ div>`);
+    } catch (e) {
+      thrown = e as never;
+    }
+    expect(thrown?.code, "残缺闭合保持显式拒绝（ATR-101）").toBe("ATR-101");
+  });
+});
+
+describe("P-A P2 组（2026-09-30 第三遍架构评审）模板面红检", () => {
+  const setProd = (v: boolean): void => {
+    (globalThis as unknown as Record<string, unknown>).__ATELIER_PROD__ = v;
+  };
+  const getLast = (): { code?: string } | undefined =>
+    (globalThis as unknown as { __ATELIER_LAST_ERROR__?: { code?: string } }).__ATELIER_LAST_ERROR__;
+  const setLast = (v: unknown): void => {
+    (globalThis as unknown as Record<string, unknown>).__ATELIER_LAST_ERROR__ = v;
+  };
+
+  it("P2-R1 红检：bind:value × <select> 初始选中不丢失（下行 effect 微任务定版；双路径 golden parity）", async () => {
+    const raw = `<div><select bind:value={sel}><option value="a">A</option><option value="b">B</option></select><p>{sel.value}</p></div>`;
+    const r = await parity("P2BindSelect", raw, () => {
+      const sel = $state("b");
+      return { scope: { sel }, steps: [async () => {}] }; // 一步空变更 + flush：给微任务定版机会
+    });
+    // 修复前：bindTwoWay 在 attrs 循环内同步首跑，select.value 写不中任何 option（子节点
+    // 尚未 append）⇒ 无 option 带 selected，初始选中静默丢失
+    expect(r.frames.at(-1)).toMatch(/<option value="b" selected/);
+    expect(r.frames.at(-1)).toContain('"b"'); // 插值面照常
+  });
+
+  it("P2-R3 红检：bindAttr 错误路径——错误哨兵不流入属性（disabled 摘除而非存在即真；dev 不再把错误文案写成属性值）", () => {
+    const raw = `<div><button disabled={p.value}>Go</button><span data-x={p.value}>s</span></div>`;
+    // p 持有 Promise → evalExpr 出口 ATR-323 抛出（bindExpr catch 路径，属性挂点走 onError）
+    const mountBtn = (name: string, compiled: boolean) => {
+      if (compiled) registerCompiled(compileFunction("P2AttrErrCompiled", raw));
+      const p = $state(Promise.resolve(1));
+      const container = makeContainer();
+      const def: ComponentDef = { name, render: () => ({ raw, scope: { p } }) as never };
+      mountComponent(def, { name: "Atelier" }, container, new Map(), okValidate as never);
+      return findByTag(container, "button")[0] as { hasAttribute: (n: string) => boolean } | undefined;
+    };
+    setLast(undefined);
+    try {
+      for (const prod of [false, true]) {
+        setProd(prod);
+        for (const compiled of [false, true]) {
+          const btn = mountBtn(compiled ? "P2AttrErrCompiled" : "P2AttrErrInterp", compiled);
+          expect(btn, "元素照常渲染").toBeTruthy();
+          expect(
+            btn!.hasAttribute("disabled"),
+            `prod=${prod} compiled=${compiled}：错误态 disabled 必须被摘除（修复前：dev 写入 ⚠ 文案、prod 写入空串——布尔属性存在即真 ⇒ 元素被错误禁用）`,
+          ).toBe(false);
+        }
+        if (prod) expect(getLast()?.code, "prod 记录不静默").toBe("ATR-323");
+      }
+    } finally {
+      setProd(false);
+      setLast(undefined);
+    }
+  });
+
+  it("P2-R5a 红检：keyed each 删首行后幸存行 idx 更新为新序号（双路径 golden parity）", async () => {
+    const raw = `<ul>{#each rows.value as r, idx by r.id}<li data-i={idx}>{r.name}</li>{/each}</ul>`;
+    const r = await parity("P2KeyedIdx", raw, () => {
+      const rows = $state([
+        { id: "a", name: "A" },
+        { id: "b", name: "B" },
+        { id: "c", name: "C" },
+      ]);
+      return {
+        scope: { rows },
+        steps: [
+          async () => {
+            rows.value = rows.value.slice(1); // 删首行：key b/c 命中复用 DOM
+          },
+        ],
+      };
+    });
+    expect(r.frames[0]).toContain('data-i="0"');
+    // 修复前：key 命中复用 DOM，幸存行 {idx} 永远停在建行时旧序号（B=1、C=2）
+    expect(r.frames.at(-1), "幸存行 B 的 idx 应更新为 0").toContain('data-i="0"');
+    expect(r.frames.at(-1), "幸存行 C 的 idx 应更新为 1").toContain('data-i="1"');
+    expect(r.frames.at(-1), "不得残留陈旧序号 2").not.toContain('data-i="2"');
+    expect(r.frames.at(-1)).not.toContain('"A"');
+  });
+});

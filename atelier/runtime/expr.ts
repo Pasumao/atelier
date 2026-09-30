@@ -2,7 +2,8 @@
  * Atelier prototype — 模板表达式迷你求值器。
  * 替代 new Function/eval（决策 12：产物零 eval 精神）；
  * 支持子集：属性访问 / 索引 / 字符串数字布尔字面量 / 数组与对象字面量（F-4 第二期，含 {a} 简写
- * 与 ({...}).x 成员链）/ === == != !== > < >= <= && || ! ?: + - * /
+ * 与 ({...}).x 成员链）/ === == != !== > < >= <= && || ! ?: + - * / / 一元 +/-/! 与 not 关键字
+ * （P-A P2-R5b）
  * FS-11（§8.4，方向=显式拒绝）：求值结果为 Promise → ATR-323 四段式拒绝（异步不进响应式图）。
  * 完整版：编译器将表达式转换为直接闭包调用（本原型为解释求值）。
  */
@@ -249,6 +250,12 @@ class Parser {
       if (t.v === "false") return () => false;
       if (t.v === "null") return () => null;
       if (t.v === "undefined") return () => undefined;
+      // P-A P2-R5b：not 关键字兑现——KEYWORDS 一直广告它（and/or 早已在 and()/or() 落地），
+      // 此前却抛「不支持关键字 not」。映射为 ! 同款语义/语法位（primary 前缀一元）。
+      if (t.v === "not") {
+        const inner = this.primary();
+        return (s) => !booly(inner(s));
+      }
       throw new Error(`ATR-301: 不支持关键字 ${t.v}`);
     }
     if (t.t === "op" && t.v === "(") {
@@ -259,6 +266,13 @@ class Parser {
     if (t.t === "op" && t.v === "!") {
       const inner = this.primary();
       return (s) => !booly(inner(s));
+    }
+    // P-A P2-R5b：一元 +/-（与 ! 同一语法位）——修复前 {-n} 报 ATR-301「意外的符号 -」且 fix
+    // 不指路。-x ⇒ -(x)、+x ⇒ +(x)；链式 --x 合法（递归 primary，双重否定）。
+    if (t.t === "op" && (t.v === "-" || t.v === "+")) {
+      const inner = this.primary();
+      if (t.v === "-") return (s) => -(inner(s) as number);
+      return (s) => +(inner(s) as number);
     }
     if (t.t === "op" && t.v === "{") return this.objectLiteral();
     if (t.t === "op" && t.v === "[") return this.arrayLiteral();
