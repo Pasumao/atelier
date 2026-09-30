@@ -76,6 +76,27 @@ if (target !== "node" && target !== "bun") {
   );
 }
 
+/* ---------------- --out 根目录关系守卫（P1-4：--emptyOutDir 不得清应用源码）----------------
+ * vite 以 --emptyOutDir 清空 outDir——outDir 一旦就是 root 本体、越出 root、或覆盖 root 的
+ * package.json/src，被清的就是应用源码（"--out ." 实证先例）。backup.mjs 同径「连 --force 也
+ * 拒」守卫先例：坏输入在动手前即拦。产物壳以 ../src 相对引用 vendor（单容器整目录部署语义），
+ * outDir 本就必须是 root 内 src 的兄弟目录——严在内不是过严而是语义要求。 */
+function outDirGuardError(rootDir, out) {
+  const rel = path.relative(rootDir, out);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+    return `error: --out 越出应用目录：${out}（root=${rootDir}）——outDir 必须严格位于 root 内且 ≠ root；vite 以 --emptyOutDir 清空 outDir，outDir 越界时被清的是应用源码本体\nfix: --out 用应用内目录（缺省 dist）——产物壳以 ../src 相对引用 vendor（单容器整目录部署语义），产物本就必须与 src/ 同居一个 root`;
+  }
+  for (const guarded of ["package.json", "src"]) {
+    const vrel = path.relative(path.join(rootDir, guarded), out);
+    if (vrel === "" || (!vrel.startsWith("..") && !path.isAbsolute(vrel))) {
+      return `error: --out 覆盖应用要件：${out} 含或等于应用 ${guarded}——--emptyOutDir 先清空 outDir 再写产物，要件会被一并清掉\nfix: --out 用应用内独立目录（缺省 dist）——不要指向 src/、package.json 或其任何上层目录`;
+    }
+  }
+  return null;
+}
+const outGuard = outDirGuardError(root, outDir);
+if (outGuard) die(outGuard, 2);
+
 /* ---------------- 应用前提检查（诚实红：缺件指路，绝不猜） ---------------- */
 
 if (!fs.existsSync(path.join(root, "package.json"))) {

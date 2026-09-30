@@ -38,7 +38,7 @@ import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
 import { parseTemplate } from "../runtime/template.ts";
-import { extractComponentDecls, extractPropsSchemas } from "./extract-schema.mjs";
+import { codeMaskOf, extractComponentDecls, extractPropsSchemas } from "./extract-schema.mjs";
 
 const SCHEMA = "atelier-ast-dump/0.1";
 
@@ -65,13 +65,17 @@ function* findAtrFiles(dir, depth = 0) {
 /* ---------- html`` literal extraction (bounded scanner, no eval) ----------
  * Mode-stack scanner: frames are template-text / interpolation / quoted-string, so
  * arbitrary nesting (html` … ${`… ${x} …`} … `) survives. Returns the RAW template
- * text (joined strings, exactly what the interpreter sees). */
+ * text (joined strings, exactly what the interpreter sees).
+ * P1-5：命中位先查 codeMaskOf 掩码——注释/字符串里的 html`（如注释掉的旧模板）不是真
+ * 模板：裸 indexOf 会产幻影模板（含未闭合块时整场 hard die），注释里的未闭合块还会把
+ * 下一个真模板整体吞掉。掩码误命中 → 跳过（extract-schema.mjs decl 同款先例）。 */
 export function extractHtmlLiterals(src) {
   const out = [];
+  const mask = codeMaskOf(src);
   let i = 0;
   while ((i = src.indexOf("html`", i)) >= 0) {
     const prev = i > 0 ? src[i - 1] : "";
-    if (/[\w$]/.test(prev)) { i += 5; continue; } // e.g. `someHtml\`` identifier — not the tag
+    if (/[\w$]/.test(prev) || !mask[i]) { i += 5; continue; } // `someHtml\`` 标识符前缀 / 注释·字符串内命中——都不是真模板
     const start = i + 5;
     let j = start;
     const stack = [{ kind: "tpl" }]; // outer template text frame
@@ -149,7 +153,16 @@ function main() {
   const warnings = [];
   for (const file of files) {
     const src = fs.readFileSync(file, "utf8");
-    const decls = extractComponentDecls(src);
+    const rawDecls = extractComponentDecls(src);
+    /* ---------- P1-5：decl regex 遗留命中但落在注释/字符串（codeMask 判非代码区）→ 不进
+     * owner 归属面——否则注释掉的 export const X = component( 产幻影 owner，把别人的模板
+     * 挂到幽灵名下。warn 跳过同 extract-schema.mjs 先例（schema 侧对同一 decl 已另发 warn）。 ---------- */
+    const mask = codeMaskOf(src);
+    const decls = [];
+    for (const d of rawDecls) {
+      if (mask[d.offset]) decls.push(d);
+      else warnings.push(`${path.relative(ROOT, file)}: 组件声明 ${d.name} 位于注释/字符串等非真实代码区（decl regex 遗留命中）——不作为模板归属 owner`);
+    }
     /* ---------- 决策 26：(props: {...}) 注解 → FlatSchema。超面 ATR-102 四段式上 stderr（die），
      * 无注解/参数名非 props → warn 收进既有 warnings（同款 warn: 前缀输出）。 ---------- */
     let propResults;
