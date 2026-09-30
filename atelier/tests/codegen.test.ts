@@ -895,3 +895,85 @@ describe("R1-B：双 <style> 块全注入（P1 #6 dev/prod 分叉修复）", () 
     expect(r.frames[0]).not.toContain("<style"); // 块本体不落 DOM（解释器 renderNode 同款跳过）
   });
 });
+
+/* ================= P-A 支（2026-09-30 第三遍架构评审）runtime 正确性——模板面 ================= */
+
+describe("P-A P1-2：双 <style scoped> 块作用域以组件为单位（修复前 scopeClasses last-wins）", () => {
+  /** 每块样式各含一个可命中 root 的选择器：修复后两块的前缀类都必须出现在 root class 上
+   * （选择器才可能命中）；修复前每块新铸 atr-scope-N 且 map 同名覆盖，root 只挂末值——
+   * 前序块 CSS 全注入但选择器永不命中（R 批修了注入面，应用面 last-wins 仍在）。 */
+  const TWO_MARKER_RAW =
+    `<style scoped>.mk1 { color: var(--atelier-color-accent); }</style>` +
+    `<style scoped>.mk2 { color: var(--atelier-color-accent); }</style>` +
+    `<p>x</p>`;
+
+  const rootScopeClassOf = (root: { className: string }): string[] =>
+    [...String(root.className).matchAll(/atr-scope-\d+/g)].map((m) => m[0]);
+
+  it("红检：解释器路径——两块的 scope 前缀类都命中 root", () => {
+    tokenState.vars.add("--atelier-color-accent");
+    const before = headStyles().length;
+    const container = makeContainer();
+    const root = mountComponent(
+      { name: "P1TwoScopeInterp", render: () => ({ raw: TWO_MARKER_RAW, scope: {} }) as never },
+      {},
+      container,
+      new Map(),
+      okValidate as never,
+    );
+    const styles = headStyles().slice(before);
+    expect(styles.length, "两块都注入 head（R 批注入面语义保持）").toBe(2);
+    const onRoot = rootScopeClassOf(root);
+    expect(onRoot.length, "root 上有且仅有一个自动作用域类").toBe(1);
+    for (const st of styles) {
+      const m = /\.(atr-scope-\d+) /.exec(String(st.textContent));
+      expect(m, "每块样式都带作用域前缀").toBeTruthy();
+      expect(onRoot, `作用域类 ${m?.[1]} 必须命中 root（否则该块选择器永不生效）`).toContain(m![1]!);
+    }
+  });
+
+  it("红检：编译路径——同款（injectScopedStyle 与 root 挂载为两路共用单点）", () => {
+    tokenState.vars.add("--atelier-color-accent");
+    registerCompiled(compileFunction("P1TwoScopeCompiled", TWO_MARKER_RAW));
+    const before = headStyles().length;
+    const container = makeContainer();
+    const root = mountComponent(
+      { name: "P1TwoScopeCompiled", render: () => ({ raw: TWO_MARKER_RAW, scope: {} }) as never },
+      {},
+      container,
+      new Map(),
+      okValidate as never,
+    );
+    const styles = headStyles().slice(before);
+    expect(styles.length).toBe(2);
+    const onRoot = rootScopeClassOf(root);
+    expect(onRoot.length).toBe(1);
+    for (const st of styles) {
+      const m = /\.(atr-scope-\d+) /.exec(String(st.textContent));
+      expect(m).toBeTruthy();
+      expect(onRoot, `作用域类 ${m?.[1]} 必须命中 root`).toContain(m![1]!);
+    }
+  });
+});
+
+describe("P-A P1-3：字面量 < 按文本保真（解析器不再静默丢弃；解释器/编译共用解析器双路同源）", () => {
+  it("红检：golden parity——a < b 与 x <= y 文本完整渲染", async () => {
+    const raw = `<p>a < b 与 x <= y 尾</p>`;
+    const r = await parity("ParityLiteralLt", raw, () => ({ scope: {}, steps: [] }));
+    expect(r.frames[0]).toContain('"a < b 与 x <= y 尾"');
+  });
+
+  it("红检：真标签与残缺闭合语义不受影响（<b> 仍是标签；</ 后无标签名仍显式拒绝）", () => {
+    const ast = parseTemplate(`x <b>y</b>`);
+    expect(ast).toHaveLength(2); // "x " 文本 + <b> 元素（真标签不退化为文本）
+    expect((ast[0] as { kind: string }).kind).toBe("text");
+    expect((ast[1] as { kind: string; tag: string }).tag).toBe("b");
+    let thrown: { code?: string } | undefined;
+    try {
+      parseTemplate(`<p>x</ div>`);
+    } catch (e) {
+      thrown = e as never;
+    }
+    expect(thrown?.code, "残缺闭合保持显式拒绝（ATR-101）").toBe("ATR-101");
+  });
+});
