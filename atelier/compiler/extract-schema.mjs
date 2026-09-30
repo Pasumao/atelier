@@ -342,6 +342,15 @@ export function extractPropsSchemas(src) {
     for (const chunk of splitTopLevel(src.slice(open + 1, close))) {
       const pm = /^([A-Za-z_$][\w$]*)\s*(\?)?\s*:\s*([\s\S]+)$/.exec(chunk.trim());
       if (!pm) throw atr102(decl.name, null, chunk.trim());
+      // P2-G4：__proto__ 属性名显式拒绝（ATR-102 款）——reqProps/optProps 挂普通对象，该键
+      // 赋值静默改写原型而非声明字段（属性无声消失，schema 与组件真值分叉）；全族「显式 die」
+      // 口径（gen-db/export-openapi 同款，标识符最终以裸名进生成代码，护解析面不护产物面）。
+      if (pm[1] === "__proto__") {
+        throw Object.assign(
+          new Error(`组件 ${decl.name} 属性 __proto__ 是原型保留键——普通对象上该键静默改写原型而非声明字段（属性无声消失，schema 与组件真值分叉）`),
+          { code: "ATR-102", fix: "改属性名避开 __proto__（原型通道不是合法 props 键）" },
+        );
+      }
       const field = mapType(pm[3], decl.name, pm[1]);
       if (pm[2]) optProps[pm[1]] = field;
       else reqProps[pm[1]] = field;

@@ -228,7 +228,8 @@ export function projectJsonSchema(flat, target = "draft-2020-12", opts = {}) {
   const properties = {};
   const required = [];
   for (const [k, f] of Object.entries(req)) {
-    if (k in opt) {
+    // P2-G4：hasOwn 替代 in——toString 等继承键不再被误判成 optProps 声明（误报 ATR-107 声明冲突）
+    if (Object.hasOwn(opt, k)) {
       fail(`${at}：属性 "${k}" 同时出现在 reqProps 与 optProps（声明冲突）`, "从 optProps 删除该属性（validateFlat 按 req 优先合并，歧义声明不投影）", { at, key: k });
     }
     properties[k] = projectFlatField(f, target, { label: `${at}.reqProps.${k}` });

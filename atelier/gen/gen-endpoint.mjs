@@ -932,6 +932,23 @@ export function generateApi(root, opts = {}) {
     }
     seenEndpoints.set(e.name, e);
   }
+  // P2-G2 派生标识符撞名闸：精确重名闸只挡同名——chat.ask / chat-ask / chat_ask 派生同
+  // ChatAsk，api.ts 会重复声明 type 别名与 export const（编译不过，恰是上方重名闸 die 文案
+  // 要防的终态）。产产物前对 pascalOf 派生建 seen-set（camel 只差首字母大小写，撞 pascal ⟺
+  // 撞 camel）；撞名 ATR-313 四段式 die 列两个源名（gen-db:591-598 函数名撞名闸同型先例）。
+  const seenDerived = new Map();
+  for (const e of endpoints) {
+    const p = pascalOf(e.name);
+    const prev = seenDerived.get(p);
+    if (prev != null) {
+      die(
+        "ATR-313",
+        `端点 ${prev} 与 ${e.name} 派生出同一 TS 标识符（${p}Input/${p}Output/${p}Call 等）——api.ts 会重复声明编译不过（生成器侧镜像运行时 ATR-313 语义）`,
+        `改其一端点名使 PascalCase 化后不同名（如 chat-ask → chat.reply）；本次扫描到的端点：${endpoints.map((x) => x.name).join(", ")}`
+      );
+    }
+    seenDerived.set(p, e.name);
+  }
   const contracts = scanContracts(root);
   const genDir = path.join(root, "src", "generated");
   const notes = [];
