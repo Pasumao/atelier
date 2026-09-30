@@ -142,15 +142,27 @@ function matchBraceAt(src, start) {
   return -1;
 }
 
-/* ---------- 签名搜索：只在真实代码区 [from, to) 找首个 `( props : {`（token 级空白跨越，
- * 等价 /\(\s*props\s*:\s*{/ 且 props 带标识符边界），返回注解体 `{` 的偏移，无命中 → -1。
- * 起点必须是 code 区的 `(`——`(` 与 `props` 之间只允许空白，故命中段的其余 token 必然同在
- * code 区，无需逐位查 mask。opts 实参 {name, schema} 不以 (props 开头，首个命中即函数签名；
- * 搜索上界 = 下一组件声明偏移——首参注解必落在自身 component(...) 调用内、先于后续声明，
- * 无注解组件绝不窃取他人注解。 ---------- */
+/* ---------- 签名搜索（REL-A A2 收口）：命中位限定 = decl 已匹配的 component( 调用之后首个
+ * 代码区 `(`。decl regex 保证 [from..] 形如 `export const X = component\s*\(`——标识符段无括号，
+ * 自 from 起首个代码区 ( 即调用开括号；其后首个代码区 ( 即注解头（component(function X(props:…){…})
+ * 的参数表头与 component("tag", (props:…) => …) 的注解头同在此位——字符串实参内容不在 code 区被
+ * 跳过；opts 实参 {name, schema} 该位为 `{` 非 (props 形 → 不命中）。唯一候选位认 `( props : {`
+ * （token 级空白跨越，等价 /\(\s*props\s*:\s*{/ 且 props 带标识符边界），命中返回注解体 `{` 偏移；
+ * 候选位非该形 / 超界扫不到 → -1（调用方降 warn 跳过）。旧实现全域扫首个 (props: {——组件体内层
+ * 签名（内层箭头函数参数 (props: {…})）会被误当签名：错 schema 静默生效（无 warn 无 ATR-102），
+ * 经 dump→compiledSchema→组件校验一路穿透；现体内注解永不窥探，绝不静默产出错 schema。 ---------- */
 function findPropsSig(src, from, to, mask) {
+  let call = -1;
   for (let i = from; i < to; i++) {
+    if (mask[i] && src[i] === "(") {
+      call = i; // decl 已匹配 component\s*\( ——首个代码区 ( 即调用开括号
+      break;
+    }
+  }
+  if (call < 0) return -1;
+  for (let i = call + 1; i < to; i++) {
     if (!mask[i] || src[i] !== "(") continue;
+    // 唯一候选位 = 调用开括号后首个代码区 (（首实参头/注解头）——只认这一位，绝不深入组件体
     let j = i + 1;
     while (j < to && /\s/.test(src[j])) j++;
     if (src.startsWith("props", j) && !/[\w$]/.test(src[j + 5] || "")) {
@@ -162,6 +174,7 @@ function findPropsSig(src, from, to, mask) {
         if (src[m] === "{") return m;
       }
     }
+    return -1; // 候选位非 (props: { ——无内联注解或首参名非 props → warn 跳过
   }
   return -1;
 }
@@ -293,7 +306,7 @@ function mapType(typeText, compName, propName) {
 
 /* ---------- 主入口：.atr.ts 全文 → 每组件 {name, schema, warn?}。
  * decl regex 遗留命中但落在注释/字符串里（codeMask 判非代码区）→ schema:null + warn 跳过；
- * 真实 decl 在 [decl.offset, 下一 decl.offset) 的 code 区找首个 ( props : { 签名 →
+ * 真实 decl 在 component( 调用开括号后的首个实参头（唯一候选位，REL-A A2）认 ( props : { 签名 →
  * matchBraceAt 取注解体（体闭合后尾残留 = ATR-102，见头注 P1-7）→ 逐属性切分 → 类型映射；
  * `prop: T` 入 reqProps、`prop?: T` 入 optProps
  * （optProps 空时省略，对齐 FlatSchema）。无签名 / 注解花括号未闭合 → schema:null + warn（跳过）；

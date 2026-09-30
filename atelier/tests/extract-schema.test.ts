@@ -201,6 +201,57 @@ describe("extractPropsSchemas 跳过路径（向后兼容，非错误）", () =>
   });
 });
 
+describe("REL-A A2 签名命中位限定：组件体内层 (props: {…}) 绝不误当签名（错 schema 静默生效缺口）", () => {
+  /** 体内带内层 (props: {…}) 箭头函数的组件源（首实参形态由用例定） */
+  const withInnerArrow = (head: string, body: string) =>
+    [
+      'import { component, html } from "atelier/runtime";',
+      `export const W = component(${head} {`,
+      `  ${body}`,
+      "  return html`<p>hi</p>`;",
+      '}, { name: "W" });',
+    ].join("\n");
+
+  it("内层先于真签名（首实参位是携带 (props:{…}) 参数的辅助调用）：绝不取内层——修前误提 {fake} 错 schema 静默生效", async () => {
+    const { extractPropsSchemas } = await mod();
+    const src = [
+      'import { component, html } from "atelier/runtime";',
+      'export const W = component("w", decorate((props: { fake: string }) => null), (props: { title: string }) => {',
+      "  return html`<p>hi</p>`;",
+      "});",
+    ].join("\n");
+    const rs = extractPropsSchemas(src);
+    expect(rs[0].name).toBe("W");
+    expect(rs[0].schema, "修前红态：内层 (props:{fake}) 被误当签名——错 schema 经 dump→compiledSchema 静默生效").toBeNull();
+    expect(rs[0].warn).toContain("W");
+  });
+
+  it("无签名 + 体内内层箭头函数 (props: {…})：schema null + warn（修前误提 {fake}）", async () => {
+    const { extractPropsSchemas } = await mod();
+    const src = withInnerArrow("function W()", 'const row = (props: { fake: string }) => props;');
+    const rs = extractPropsSchemas(src);
+    expect(rs[0].schema, "修前红态：体内首个 (props:{ 命中即错 schema").toBeNull();
+    expect(rs[0].warn).toContain("W");
+    expect(rs[0].warn).toContain("props");
+  });
+
+  it("真签名为具名类型（props: Props 非内联对象）+ 体内内层 (props: {…})：schema null + warn（修前误提 {fake}）", async () => {
+    const { extractPropsSchemas } = await mod();
+    const src = withInnerArrow("function W(props: Props)", 'const row = (props: { fake: string }) => props;');
+    const rs = extractPropsSchemas(src);
+    expect(rs[0].schema, "修前红态：具名类型签名不匹配扫描模式 → 深入体内取内层注解").toBeNull();
+    expect(rs[0].warn).toContain("W");
+  });
+
+  it("真签名内联先于内层（回归钉）：真签名照常提取，体内内层不串味", async () => {
+    const { extractPropsSchemas } = await mod();
+    const src = withInnerArrow("function W(props: { title: string })", 'const row = (props: { fake: string }) => props;');
+    const rs = extractPropsSchemas(src);
+    expect(rs[0].schema).toEqual({ type: "object", reqProps: { title: { type: "string" } } });
+    expect(rs[0].warn).toBeUndefined();
+  });
+});
+
 describe("extractPropsSchemas 恶劣输入（扫描器守卫钉桩）", () => {
   it("字符串与模板文本里的假注解不命中（引号/模板感知签名搜索）", async () => {
     const { extractPropsSchemas } = await mod();
