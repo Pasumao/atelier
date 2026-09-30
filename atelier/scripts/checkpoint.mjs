@@ -40,7 +40,9 @@ import url from "node:url";
 import { spawnSync } from "node:child_process";
 // m10 批 C：快照门基线路径消费 snapshot.mjs 单源导出（per-platform + legacy 回退，
 // 替换原先双文件重复的路径构造——语义阶梯不变：无基线→vacuous / 不可达→vacuous / MISMATCH→拒锚）
-import { currentPathFor, resolveBaseline } from "./snapshot.mjs";
+// R3 结构债（评审 §4.8）：sourceFingerprint 同批单源化——原先 checkpoint 内联逐行同构副本靠
+// 「MUST stay in sync」注释维系，现改为消费 snapshot.mjs 同一导出（对拍钉 = tests/source-fingerprint-parity）
+import { currentPathFor, resolveBaseline, sourceFingerprint } from "./snapshot.mjs";
 
 const STORE_DIR = ".atelier";
 const STORE_FILE = path.join(STORE_DIR, "checkpoints.jsonl");
@@ -184,28 +186,9 @@ async function snapshotGate(repo, skip) {
   const base = resolved.path;
   const sha256File = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
   const baseSha = sha256File(base);
-  // source fingerprint — MUST stay in sync with scripts/snapshot.mjs sourceFingerprint()
-  const sourceFingerprint = () => {
-    const h = crypto.createHash("sha256");
-    const files = [];
-    const walk = (dir, depth) => {
-      if (depth > 6 || !fs.existsSync(dir)) return;
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (e.isDirectory()) {
-          if (e.name === "node_modules" || e.name.startsWith(".") || e.name === "dist") continue;
-          walk(path.join(dir, e.name), depth + 1);
-        } else if (/\.atr\.ts$|\.atr\.md$|\.css$|\.json$/.test(e.name) || e.name === "main.ts") files.push(path.join(dir, e.name));
-      }
-    };
-    walk(path.join(repo, "src"), 0);
-    for (const f of ["atelier.config.json", "index.html"]) files.push(path.join(repo, f));
-    files.sort();
-    for (const f of files) {
-      try { h.update(path.relative(repo, f) + ":" + fs.statSync(f).size + ":" + fs.readFileSync(f)); } catch { /* vanished */ }
-    }
-    return h.digest("hex").slice(0, 16);
-  };
-  const curFp = sourceFingerprint();
+  // source fingerprint — snapshot.mjs 单源导出（R3 结构债：内联逐行同构副本已删；对拍钉 =
+  // tests/source-fingerprint-parity.test.ts——checkpoint 门消费的指纹值与 snapshot.mjs 逐位一致）
+  const curFp = sourceFingerprint(repo);
   // fast path: a fresh MATCH receipt against the SAME baseline AND the SAME sources satisfies the
   // gate without a recapture — a source change since the check forces a live capture (that is the
   // exact agent loop: edit → checkpoint, which a stale receipt must never wave through).

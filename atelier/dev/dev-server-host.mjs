@@ -10,6 +10,8 @@
  *     原样错误（如 EADDRINUSE 就换 server.port / 释放端口，绝不静默换口）；
  *   - <mount>/* 反向代理：方法/头/体透传、双向流式（req.pipe 上行、proxyRes writeHead+pipe 下行，
  *     SSE live 端点靠不缓冲自然流式）；未就绪/未托管/连接被拒 → 503 JSON（ATR-403，短暂、诚实）；
+ *     上游响应头等待有界（UPSTREAM_HEADERS_TIMEOUT_MS → 504，头后流式期零超时——SSE 长连接不误杀）、
+ *     客户端中断即销毁上游（live 生成器不滞留——R3 结构债批 §4.6）；
  *     P1 #3 起 Origin/Host 白名单闸（镜像 P1-12，原语单源本文件）——承载写副作用的反代面不再是
  *     跨站 no-cors 写的免检通道；
  *   - 热重启：调用方（dev 插件 watcher）debounce 后调 restart(reason)——停旧（SIGTERM，1.5s 后
@@ -348,12 +350,27 @@ export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPa
  * 单请求反向代理（独立导出便于单测）：同路径转发到 http://127.0.0.1:<targetPort>，
  * 方法/头/体透传、双向流式（req.pipe 上行、proxyRes writeHead+pipe 下行——SSE 靠不缓冲自然流式）。
  * 连接失败（ECONNREFUSED 等）→ 503 ATR-403 JSON；响应已开始后中途断流只能如实 destroy（改不了头）。
+ *
+ * R3 结构债批 §4.6 代理韧性（评审：无代理超时、客户端中断不销毁上游——SSE 场景滞留）：
+ *   · 上游响应头超时（UPSTREAM_HEADERS_TIMEOUT_MS，可 options.headersTimeoutMs 覆盖直测）：只约束
+ *     「发出请求 → 收到上游响应头」窗口，超时 proxyReq.destroy() + 504 ATR JSON（错误码沿用
+ *     ATR-403 族，不新增错误码——contract-checks CHECK 1 对账面）。SSE 豁免论证：SSE 端点在
+ *     listen 后立即回写响应头——头到达即撤闸，头之后的流式期（含完全空闲）不受任何超时约束，
+ *     长连接绝不误杀（tests/proxy-resilience 用例 C：200ms 级闸下流存活 >1s 实证）。
+ *   · 客户端中断 → 销毁上游：res close 且响应未写完（!writableEnded）= 下游真断开 → 上游
+ *     proxyReq 一并销毁，server 面 live 生成器随之收尾，不再滞留。正常完成（writableEnded）与
+ *     客户端在位的长连接零影响。
  */
-export function forwardRequest(targetPort, req, res) {
+export const UPSTREAM_HEADERS_TIMEOUT_MS = 15000;
+
+export function forwardRequest(targetPort, req, res, options = {}) {
+  const headersTimeoutMs = Number(options.headersTimeoutMs ?? UPSTREAM_HEADERS_TIMEOUT_MS);
+  let timedOut = false; // 超时路径已应答 504——error 事件（destroy 的直接后果）不再二次处置
   const proxyReq = http.request(
     `http://127.0.0.1:${targetPort}${req.url ?? "/"}`,
     { method: req.method, headers: req.headers, agent: PROXY_AGENT },
     (proxyRes) => {
+      clearTimeout(headersTimer); // 头已到达 → 响应头等待闸即撤（SSE 长连接自此零超时约束）
       if (res.headersSent) {
         proxyRes.destroy();
         return;
@@ -362,7 +379,28 @@ export function forwardRequest(targetPort, req, res) {
       proxyRes.pipe(res);
     },
   );
+  // 响应头等待闸（仅头等待期生效——SSE 透传路径豁免论证见上方函数注释）
+  const headersTimer = setTimeout(() => {
+    timedOut = true;
+    proxyReq.destroy(); // 上游 socket 一并销毁（滞留窗口归零）
+    if (res.headersSent || res.writableEnded) {
+      res.destroy();
+      return;
+    }
+    res.statusCode = 504;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: `ATR-403: server 面上游超时（${headersTimeoutMs}ms 未返回响应头——子进程卡死或热重启窗口；SSE 长连接不受影响——闸只在响应头等待期生效）`,
+        fix: "看控制台 [server] 前缀行定位子进程状态；短暂重试通常即恢复（热重启秒级完成）",
+      }),
+    );
+  }, headersTimeoutMs);
+  headersTimer.unref?.();
   proxyReq.on("error", (e) => {
+    clearTimeout(headersTimer);
+    if (timedOut) return; // 超时路径已如实应答 504 且上游已销毁——不覆盖、不二次处置
     if (res.headersSent || res.writableEnded) {
       res.destroy();
       return;
@@ -377,6 +415,16 @@ export function forwardRequest(targetPort, req, res) {
       }),
     );
   });
+  // 客户端中断 → 销毁上游（§4.6：SSE 场景滞留根除）。res close 且 !writableEnded = 下游真断开
+  // （正常完成的响应 writableEnded=true 零影响；客户端在位的长连接不触发 close）。
+  const killUpstream = () => {
+    clearTimeout(headersTimer);
+    if (!proxyReq.destroyed) proxyReq.destroy();
+  };
+  res.on("close", () => {
+    if (!res.writableEnded) killUpstream();
+  });
+  req.on("error", killUpstream); // 上行中断（客户端上传途中断开）同样不留悬挂上游
   req.pipe(proxyReq); // 上行流式
   return proxyReq;
 }

@@ -44,13 +44,16 @@ function readLines(p) {
   }
 }
 
-function probeChecks(root) {
-  /** Each finding: { id, layer, severity|null(null==ok), detail, fix? } */
-  const f = [];
-  const add = (o) => f.push(o);
-  const has = (rel) => fs.existsSync(path.join(root, rel));
+/* ---------- R3 结构债（评审 §6 R3「probeChecks 八层各一函数」/ §2.2 风险 2）：八层探针 ----------
+ * 原 probeChecks 约 394 行平铺 if-chain → 每层一个探针函数（签名统一 (root, add)，add 追加
+ * finding 的顺序即报告顺序）+ LAYER_PROBES 表驱动分派。行为逐字节等价的门 = struct 既有测试
+ * （struct-guards / mcp-vendor structure.map / checkpoint 联动）断言零修改全绿 +
+ * tests/struct-layers.test.ts（表形状 / 层隔离 / 表序直调 ≡ inspectStructure 全量输出三钉）。
+ * 导出面：LAYER_PROBES 与各探针供直测（每层可单独调）——巨型平铺函数从此有可测试面。 */
 
-  /* ---- 1 entry ---- */
+/* ---- 1 entry ---- */
+export function probeEntryLayer(root, add) {
+  const has = (rel) => fs.existsSync(path.join(root, rel));
   const agents = path.join(root, "AGENTS.md");
   if (has("AGENTS.md")) {
     const n = readLines(agents);
@@ -80,8 +83,11 @@ function probeChecks(root) {
       detail: "llms.txt (machine API index) not present",
       fix: "render templates/llms.txt.template when the framework API surface stabilizes",
     });
+}
 
-  /* ---- 2 knowledge (progressive disclosure) ---- */
+/* ---- 2 knowledge (progressive disclosure) ---- */
+export function probeKnowledgeLayer(root, add) {
+  const has = (rel) => fs.existsSync(path.join(root, rel));
   const skillsRoots = ["atelier/skills", ".agents/skills", ".dsh/skills", "skills"].filter((p) => has(p));
   const packs = [];
   for (const r of skillsRoots) {
@@ -116,8 +122,11 @@ function probeChecks(root) {
       detail: `oversized docs (progressive-disclosure drift): ${bigDocs.join("; ")}`,
       fix: "split into topic files and leave a routing stub behind",
     });
+}
 
-  /* ---- 3 facts (SSOT) ---- */
+/* ---- 3 facts (SSOT) ---- */
+export function probeFactsLayer(root, add) {
+  const has = (rel) => fs.existsSync(path.join(root, rel));
   const cfgPath = path.join(root, "atelier.config.json");
   if (has("atelier.config.json")) {
     try {
@@ -190,8 +199,11 @@ function probeChecks(root) {
   } catch {
     /* config 不可解析已由 FACT_CONFIG_PARSE 报告，此处不重复 */
   }
+}
 
-  /* ---- 4 intent ---- */
+/* ---- 4 intent ---- */
+export function probeIntentLayer(root, add) {
+  const has = (rel) => fs.existsSync(path.join(root, rel));
   const coSpecs = [...findSuffixDeep(root, ".atr.md", 6)];
   const coSpecTests = [...findSuffixDeep(root, ".atr.spec.ts", 6)];
   if (has("specs")) {
@@ -213,8 +225,11 @@ function probeChecks(root) {
   }
   if (coSpecs.length > 0 && coSpecTests.length === 0)
     add({ id: "INTENT_SPEC_NO_TEST", layer: 4, severity: "INFO", detail: `${coSpecs.length} *.atr.md but no co-located *.atr.spec.ts — acceptance list may be human-only`, fix: "mirror each machine-checkable acceptance item as <Component>.atr.spec.ts" });
+}
 
-  /* ---- 5 errors ---- */
+/* ---- 5 errors ---- */
+export function probeErrorsLayer(root, add) {
+  const has = (rel) => fs.existsSync(path.join(root, rel));
   const errCatalog =
     has("atelier/skills/atelier-error-codes/SKILL.md") ||
     has(".dsh/skills/atelier-error-codes/SKILL.md") ||
@@ -224,8 +239,10 @@ function probeChecks(root) {
       ? { id: "ERR_CATALOG", layer: 5, severity: null, detail: "error catalog reachable (failure = navigation)" }
       : { id: "ERR_CATALOG", layer: 5, severity: "INFO", detail: "no error-code catalog yet", fix: "ships with the skills package (atelier-error-codes)" },
   );
+}
 
-  /* ---- 6 timeline ---- */
+/* ---- 6 timeline ---- */
+export function probeTimelineLayer(root, add) {
   const tl = path.join(root, ".atelier", "checkpoints.jsonl");
   if (fs.existsSync(tl)) {
     const rows = fs.readFileSync(tl, "utf8").split("\n").filter(Boolean);
@@ -234,10 +251,12 @@ function probeChecks(root) {
   } else {
     add({ id: "TIMELINE_STORE", layer: 6, severity: "INFO", detail: "no checkpoint timeline yet", fix: "anchor the current state: node atelier/cli.mjs checkpoint save \"baseline\"" });
   }
+}
 
-  /* ---- 7 boundary（server 边界层，FS-DESIGN §9.1/§9.2/§6.2/§3.5，FS-M2-a）----
-   * 分级哲学照旧：健康的部分建成不得炸门禁——每条规则只在其对象文件存在时激活
-   * （无 src/main.ts / 无 src/server/** / 无 package.json → 整条静默，零 finding）。 */
+/* ---- 7 boundary（server 边界层，FS-DESIGN §9.1/§9.2/§6.2/§3.5，FS-M2-a）----
+ * 分级哲学照旧：健康的部分建成不得炸门禁——每条规则只在其对象文件存在时激活
+ * （无 src/main.ts / 无 src/server/** / 无 package.json → 整条静默，零 finding）。 */
+export function probeBoundaryLayer(root, add) {
   const rel = (p) => path.relative(root, p).replaceAll("\\", "/");
   const mainEntry = path.join(root, "src", "main.ts");
   const serverRoot = path.join(root, "src", "server");
@@ -352,8 +371,10 @@ function probeChecks(root) {
       );
     } catch { /* package.json 坏 → 由包管理器/tsc 报告，此处不重复 */ }
   }
+}
 
-  /* ---- 8 data（数据契约层，FS-DESIGN §5.4，FS-M2-a）---- */
+/* ---- 8 data（数据契约层，FS-DESIGN §5.4，FS-M2-a）---- */
+export function probeDataLayer(root, add) {
   const migrationsDir = path.join(root, "src", "server", "db", "migrations");
   const migrationFiles = fs.existsSync(migrationsDir)
     ? fs.readdirSync(migrationsDir).filter((f) => /^\d+_.*\.up\.sql$/.test(f) || /^\d+_.*\.down\.sql$/.test(f))
@@ -431,6 +452,29 @@ function probeChecks(root) {
       }
     } catch { /* 打开失败 → 静默跳过 */ }
   }
+}
+
+/** 八层探针表（R3 结构债：probeChecks 的分派单源——表序 = 层序 = 报告顺序；直测面见
+ * tests/struct-layers.test.ts：表形状 / 层隔离 / 表序直调 ≡ inspectStructure 全量输出）。 */
+export const LAYER_PROBES = [
+  { layer: 1, name: "entry", probe: probeEntryLayer },
+  { layer: 2, name: "knowledge", probe: probeKnowledgeLayer },
+  { layer: 3, name: "facts", probe: probeFactsLayer },
+  { layer: 4, name: "intent", probe: probeIntentLayer },
+  { layer: 5, name: "errors", probe: probeErrorsLayer },
+  { layer: 6, name: "timeline", probe: probeTimelineLayer },
+  { layer: 7, name: "boundary", probe: probeBoundaryLayer },
+  { layer: 8, name: "data", probe: probeDataLayer },
+];
+
+function probeChecks(root) {
+  /** Each finding: { id, layer, severity|null(null==ok), detail, fix? } */
+  const f = [];
+  const add = (o) => f.push(o);
+  const has = (rel) => fs.existsSync(path.join(root, rel));
+
+  // R3 结构债：表驱动分派（原 394 行平铺 → 八层各一函数）；表序 = 层序 = 报告顺序
+  for (const { probe } of LAYER_PROBES) probe(root, add);
 
   /* ---- global trust rule ---- */
   if (has("AGENTS.md") && !has(".gitignore")) {

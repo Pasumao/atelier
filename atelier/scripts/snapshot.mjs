@@ -89,7 +89,8 @@ export function resolveBaseline(root = process.cwd(), platform = process.platfor
 
 const sha256 = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 
-/** render-relevant source fingerprint (P2-2 gate) — MUST stay in sync with scripts/checkpoint.mjs */
+/** render-relevant source fingerprint (P2-2 gate) — R3 结构债起为唯一实现：checkpoint.mjs 快照门
+ * 消费本导出（原 checkpoint 内联逐行同构副本已删——对拍钉见 tests/source-fingerprint-parity.test.ts） */
 export function sourceFingerprint(root = process.cwd()) {
   const h = crypto.createHash("sha256");
   const files = [];
