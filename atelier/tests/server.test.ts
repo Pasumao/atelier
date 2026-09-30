@@ -152,6 +152,40 @@ describe("atelier-server 端点运行时（决策 18/20，FS-1）", () => {
     expect(arr.status).toBe(400);
     expect((await arr.json()).code).toBe("ATR-312");
   });
+
+  // ---- P2-S1（2026-09-30 第三遍架构复校 §2.1）：契约分支把 JSON 标量/null 体直接传进
+  // validateFlat → contract.ts `k in data` 对原始值抛 TypeError（调用点在解析 try 块之外）
+  // → 分发 promise 拒绝 = 线上 500，未鉴权即可远程触发；同文件无契约分支反而有 ATR-312
+  // 形状闸——两分支口径分叉。目标：形状闸提升到 contract 分支之前，标量/null 体一律
+  // 400 ATR-312（鉴权前后同口径）。红态：分发 promise 直接 reject（TypeError 逃逸）。----
+  it("红（P2-S1）：契约端点接受 JSON 标量/null 体 → 400 ATR-312（红态：validateFlat `k in data` 抛 TypeError——分发 promise 拒绝 = 线上 500，未鉴权可远程触发）", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("echo.strict", { contract: echoContract, handler: (input) => input }));
+    const handler = reg.createHandler();
+    for (const scalar of [7, -1.5, "plain", true, false, null]) {
+      const res = await handler(
+        new Request("http://local.test/echo.strict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(scalar) })
+      );
+      expect(res.status, `标量体 ${JSON.stringify(scalar)} 应 400 族（红态：TypeError 逃逸）`).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe("ATR-312");
+    }
+  });
+
+  it("红（P2-S1）：鉴权端点同口径——apikey 闸通过后标量体仍 400 ATR-312（鉴权前后都能安全拒绝；无 key 时 401 先于形状闸不变）", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("secure.echo", { contract: echoContract, auth: { type: "apikey" }, handler: (input) => input }));
+    const handler = reg.createHandler({ apiKeys: { keys: ["k-p2s1"] } });
+    const denied = await handler(
+      new Request("http://local.test/secure.echo", { method: "POST", headers: { "content-type": "application/json" }, body: "7" })
+    );
+    expect(denied.status).toBe(401); // 被拒之门前不触碰输入——鉴权闸先于形状闸（既有闸序零变化）
+    expect(((await denied.json()) as { code: string }).code).toBe("ATR-340");
+    const ok = await handler(
+      new Request("http://local.test/secure.echo", { method: "POST", headers: { "content-type": "application/json", "x-api-key": "k-p2s1" }, body: "7" })
+    );
+    expect(ok.status).toBe(400); // 红态：TypeError 逃逸
+    expect(((await ok.json()) as { code: string }).code).toBe("ATR-312");
+  });
 });
 
 // node:sqlite 仅 Node ≥22.5 内建；本环境 Node 24 可用。Bun 不在场——bun:sqlite 路径

@@ -220,6 +220,24 @@ describeSqlite("A1 jobs：失败退避 / 重试 / 终态", () => {
     expect(err).toContain("ghost.task");
     expect(err).toContain("未注册");
   });
+
+  // ---- P2-S2（2026-09-30 第三遍架构复校 §2.1）：handlers 是普通对象字面量，`handlers[row.type]`
+  // 走原型链——type:"constructor"/"toString"/"valueOf" 等取到继承可调用对象，`handler == null` 闸
+  // 被穿透，调用成功假象 → 任务零执行落 done（假成功），违背同文件「绝不静默吞行」承诺。
+  // type 闸（assertJobType）只查长度/控制字符，拦不住这些键。目标：Object.hasOwn 判未注册，
+  // 原型链键走既有未注册失败路径。红态：status 落 done（假成功）。----
+  it("红（P2-S2）：原型链键 type:\"constructor\" 不得取到继承可调用对象——按未注册失败路径（红态：调用成功假象 → 任务假成功落 done、零执行零报错）", async () => {
+    const db = await memoryDb();
+    const h = startJobs({ db, handlers: {}, backoffMs: () => 5, poll: POLL });
+    openHandles.push(h);
+    h.enqueue({ type: "constructor", payload: {}, maxAttempts: 1 });
+    await waitFor(() => jobRow(db, "constructor")!.status === "failed", 3000);
+    const r = jobRow(db, "constructor")!;
+    expect(r.status).toBe("failed"); // 红态：done（假成功——Object 构造器被当 handler 调用）
+    const err = String(r.last_error);
+    expect(err).toContain("constructor");
+    expect(err).toContain("未注册");
+  });
 });
 
 /* ================= A1：recurring 定时任务 ================= */

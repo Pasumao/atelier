@@ -444,6 +444,32 @@ describeSqlite("B1 下载：200 流式 / 头面 / 404 未知 id / 账在盘不�
     const healed = await handler(new Request(`http://local.test/api/assets/${up.sha256}`, { method: "GET" }));
     expect(healed.status).toBe(200);
   });
+
+  // ---- P2-S3（2026-09-30 第三遍架构复校 §2.1）：下载响应恒发 `public, max-age=31536000,
+  // immutable`——与端点面「public × auth(≠none) ATR-313 硬拒」的 fail-closed 原则自相矛盾：
+  // 共享缓存（CDN/代理）可暂存鉴权资产的响应并跨主体命中 = 授权旁路面。目标：按下载面合取
+  // 鉴权声明派生缓存档——全 none 才 public immutable，否则 private immutable（内容寻址不可变
+  // 语义保留）。红态：鉴权面下载仍 public。----
+  it("红（P2-S3）：鉴权面（apikey 下载闸）资产下载 → private immutable（红态：恒 public = 共享缓存旁路授权）；显式 none 面照常 public", async () => {
+    const uploaded = async (h: Awaited<ReturnType<typeof fixtureHandler>>["handler"], name: string) => {
+      const data = new TextEncoder().encode(`p2s3-${name}`);
+      const up = (await (await h.post(`upload/${name}`, multipartBody([{ name: "file", filename: "a.txt", contentType: "text/plain", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { sha256: string };
+      return up.sha256;
+    };
+    // 鉴权面：downloadAuth apikey + 装配 apiKeys——闸通过后下载仍不得发 public
+    const secured = await fixtureHandler({ name: "sec", downloadAuth: { type: "apikey" } }, { apiKeys: { keys: ["k-dl"] } });
+    const secSha = await uploaded(secured.handler, "sec");
+    const gated = await secured.handler(new Request(`http://local.test/api/assets/${secSha}`, { method: "GET", headers: { "x-api-key": "k-dl" } }));
+    expect(gated.status).toBe(200);
+    expect(gated.headers.get("cache-control")).toBe("private, max-age=31536000, immutable"); // 红态：public
+
+    // 显式 none 面（downloadAuth 显式消警）→ public immutable 不变（内容寻址语义保留）
+    const open = await fixtureHandler({ name: "open", downloadAuth: { type: "none" } });
+    const openSha = await uploaded(open.handler, "open");
+    const pub = await open.handler(new Request(`http://local.test/api/assets/${openSha}`, { method: "GET" }));
+    expect(pub.status).toBe(200);
+    expect(pub.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+  });
 });
 
 /* ================= ⑦ 原子性两态：记账失败删孤儿 / rename 注入失败 ================= */
