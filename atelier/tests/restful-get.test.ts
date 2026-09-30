@@ -154,6 +154,17 @@ describe("restful GET 输入构造（显式类型投影——有什么类型投�
     expect(((await empty.json()) as { code: string }).code).toBe("ATR-312");
   });
 
+  it("红（R1-A §4.5）：非有限数拒绝——?chatId=1e999 / -1e999 / Infinity → 400 ATR-312 且 message 点明非有限（红态：Number(\"1e999\")=Infinity 溜过 Number.isNaN 闸放行 200，进 handler 后 JSON.stringify 静默变 null）", async () => {
+    const { handler } = restfulReg();
+    for (const v of ["1e999", "-1e999", "Infinity"]) {
+      const res = await get(handler, `http://local.test/browse.list?chatId=${v}`);
+      expect(res.status).toBe(400); // 红态：200
+      const err = (await res.json()) as { code: string; message: string };
+      expect(err.code).toBe("ATR-312");
+      expect(err.message).toContain("有限");
+    }
+  });
+
   it("boolean 只认 \"true\"/\"false\"：两值各投影为真 boolean；\"1\"/\"yes\" → 400 ATR-312（不猜）", async () => {
     const { handler, seen } = restfulReg();
     expect((await get(handler, "http://local.test/browse.list?chatId=1&flag=true")).status).toBe(200);

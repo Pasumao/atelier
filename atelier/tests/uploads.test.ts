@@ -744,3 +744,98 @@ describeSqlite("MCP批A 内省：server-status uploads 段两态（装配 / 未�
     expect((snap.endpoints as { name: string }[]).map((e) => e.name)).toEqual(["q.plain"]); // W9 既有负例照旧
   });
 });
+
+/* ================= R1-A（2026-09-30 架构评审 P1 #1/#2/#14 红检）：资产下载面收口 ================= */
+
+describeSqlite("R1-A 红检：下载闸 fail-closed（P1#1）+ sha 内容寻址（P1#1）+ 下载响应头闸（P1#2）+ mount 边界（P1#14）", () => {
+  const MP = "multipart/form-data; boundary=b1test";
+
+  it("红（P1#1 下载闸）：缺省 session 上传面的资产，匿名 GET → 401 ATR-340（现状下载路由直通 handleDownload 零鉴权 200——顺序整数 id 可匿名枚举私有文件）", async () => {
+    const db = await fixtureDb();
+    const reg = new EndpointRegistry();
+    reg.registerUpload(defineUpload({ name: "u" })); // 未声明 auth——缺省 session（上传侧 fail-closed 已有专项核验；下载侧现状无闸）
+    const auth = (req: Request) => (req.headers.get("x-token") === "good" ? { type: "session", principal: "u1" } : null);
+    const handler = reg.createHandler({ db, uploads: createUploadsFace({ db, dir: fixtureDir() }), mount: "/api", auth: auth as (req: Request) => never });
+    const data = new TextEncoder().encode("private-bytes");
+    const up = await handler(new Request("http://local.test/api/upload/u", { method: "POST", headers: { "content-type": MP, "x-token": "good" }, body: multipartBody([{ name: "file", filename: "p.bin", contentType: "application/octet-stream", data }], "b1test") }));
+    expect(up.status).toBe(200); // 带有效会话上传成功——资产已存在
+    const out = (await up.json()) as { url: string };
+    const anon = await handler(new Request(`http://local.test${out.url}`, { method: "GET" })); // 匿名下载
+    expect(anon.status).toBe(401); // 红态：200——下载路由无任何闸，私有资产匿名可读
+    expect(((await anon.json()) as { code: string }).code).toBe("ATR-340");
+  });
+
+  it("红（P1#1 downloadAuth 声明位）：上传面 auth none + downloadAuth session → 匿名下载 401（现状 downloadAuth 无消费点，声明被无视直通 200）", async () => {
+    const db = await fixtureDb();
+    const reg = new EndpointRegistry();
+    reg.registerUpload(defineUpload({ name: "u", auth: { type: "none" }, downloadAuth: { type: "session" } }));
+    const auth = (req: Request) => (req.headers.get("x-token") === "good" ? { type: "session", principal: "u1" } : null);
+    const handler = reg.createHandler({ db, uploads: createUploadsFace({ db, dir: fixtureDir() }), mount: "/api", auth: auth as (req: Request) => never });
+    const data = new TextEncoder().encode("tightened-bytes");
+    const up = await handler(new Request("http://local.test/api/upload/u", { method: "POST", headers: { "content-type": MP }, body: multipartBody([{ name: "file", filename: "t.bin", contentType: "application/octet-stream", data }], "b1test") }));
+    expect(up.status).toBe(200); // 上传面 none——匿名上传放行
+    const out = (await up.json()) as { url: string };
+    const anon = await handler(new Request(`http://local.test${out.url}`, { method: "GET" }));
+    expect(anon.status).toBe(401); // 红态：200——下载闸收紧声明不生效
+    expect(((await anon.json()) as { code: string }).code).toBe("ATR-340");
+    const held = await handler(new Request(`http://local.test${out.url}`, { method: "GET", headers: { "x-token": "good" } }));
+    expect(held.status).toBe(200); // 有效会话放行（闸只拦匿名）
+  });
+
+  it("红（P1#1 sha 寻址）：上传响应无整数 id 字段且 url = <mount>/assets/<sha256hex>（内容寻址下载句柄；红态 url = /api/assets/<int> 且多 id 字段）", async () => {
+    const { handler } = await fixtureHandler({ name: "u" });
+    const data = new TextEncoder().encode("sha-handle-me");
+    const res = await handler.post("upload/u", multipartBody([{ name: "file", filename: "s.bin", contentType: "application/x-demo", data }], "b1test"), MP);
+    expect(res.status).toBe(200);
+    const sha = sha256Hex(data);
+    const out = (await res.json()) as Record<string, unknown>;
+    expect(out).toEqual({ name: "s.bin", mime: "application/x-demo", size: data.byteLength, sha256: sha, url: `/api/assets/${sha}` }); // 红态：{ id, …, url: "/api/assets/1" }
+  });
+
+  it("红（P1#1 id 退役）：旧整数 id 与非法形态不再可下载——GET /api/assets/1 与 /api/assets/xyz → 404 ATR-310（红态：整数 id 200 可下载；xyz 落 405「改 POST」误导）", async () => {
+    const { handler } = await fixtureHandler({ name: "u" });
+    const data = new TextEncoder().encode("id-retire-me");
+    const up = await handler.post("upload/u", multipartBody([{ name: "file", filename: "r.bin", contentType: "application/octet-stream", data }], "b1test"), MP);
+    expect(up.status).toBe(200); // 首传——内部主键 id = 1
+    const intId = await handler(new Request("http://local.test/api/assets/1", { method: "GET" }));
+    expect(intId.status).toBe(404); // 红态：200——AUTOINCREMENT 顺序 id 直接命中下载
+    expect(((await intId.json()) as { code: string }).code).toBe("ATR-310");
+    const bad = await handler(new Request("http://local.test/api/assets/xyz", { method: "GET" }));
+    expect(bad.status).toBe(404); // 红态：405 ATR-311「改为 POST」误导（非 sha 形态落非 POST 兜底）
+    expect(((await bad.json()) as { code: string }).code).toBe("ATR-310");
+  });
+
+  it("红（P1#2 响应头闸）：下载响应恒带 X-Content-Type-Options: nosniff；危险 mime（text/html / image/svg+xml / application/xhtml+xml，含参数形态）缺省 Content-Disposition: attachment；正常 mime 无 attachment", async () => {
+    const { handler } = await fixtureHandler({ name: "u" });
+    const post = (ct: string, bytes: string) => handler.post("upload/u", multipartBody([{ name: "file", filename: "f.bin", contentType: ct, data: bytes }], "b1test"), MP);
+    // 每次内容不同（内容寻址去重——同字节只会记首传 mime）
+    const samples: [string, string][] = [
+      ["text/html", "<h1>html-1</h1>"],
+      ["image/svg+xml", "<svg>svg-2</svg>"],
+      ["application/xhtml+xml", "<xhtml-3/>"],
+      ["text/html; charset=utf-8", "<h1>html-4</h1>"], // media type 解析先于参数——带参同判危险
+      ["IMAGE/SVG+XML", "<svg>svg-5</svg>"], // 大小写归一——自报 mime 不可信
+    ];
+    for (let i = 0; i < samples.length; i++) {
+      const [ct, bytes] = samples[i]!;
+      const up = (await (await post(ct, bytes)).json()) as { url: string };
+      const dl = await handler(new Request(`http://local.test${up.url}`, { method: "GET" }));
+      expect(dl.status).toBe(200);
+      expect(dl.headers.get("x-content-type-options")).toBe("nosniff"); // 红态：null——无 nosniff，同源嗅探执行面
+      expect(dl.headers.get("content-disposition")).toBe("attachment"); // 红态：null——svg/html 可内联导航执行脚本
+    }
+    const pngUp = (await (await post("image/png", "normal-bytes-6")).json()) as { url: string };
+    const png = await handler(new Request(`http://local.test${pngUp.url}`, { method: "GET" }));
+    expect(png.headers.get("x-content-type-options")).toBe("nosniff"); // 恒加——正常 mime 也有
+    expect(png.headers.get("content-disposition")).toBeNull(); // 非危险 mime 行为不变（红绿同态钉）
+  });
+
+  it("红（P1#14 mount 边界）：/apiupload/x 不得命中上传面 x（现状裸 startsWith 切成 upload/x——上传面媒介闸 415 答话即命中实证）", async () => {
+    const { handler } = await fixtureHandler({ name: "x" });
+    const res = await handler(new Request("http://local.test/apiupload/x", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
+    expect(res.status).toBe(404); // 红态：415 ATR-415——上传面 x 被裸前缀命中（未知端点才是 404 ATR-310）
+    expect(((await res.json()) as { code: string }).code).toBe("ATR-310");
+    const ok = await handler(new Request("http://local.test/api/upload/x", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
+    expect(ok.status).toBe(415); // 正控：真前缀 /api/upload/x 照常进上传面媒介闸
+  });
+});
