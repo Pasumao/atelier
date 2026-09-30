@@ -277,9 +277,15 @@ describeSqlite("A1 jobs：recurring（cron:<name> 行，完成即重排 / misfir
     const t = Date.now();
     db.prepare("UPDATE atelier_jobs SET run_at = ? WHERE type = 'cron:gc'").run(t - 1000); // 欠 ~5 个周期
     const before = runs;
-    await waitFor(() => runs === before + 1); // 恰好追一次
-    await sleep(150); // < everyMs 窗口：若补差应有 4+ 轮；从 now 续期则静默
-    expect(runs).toBe(before + 1);
+    // REL-A A5 事件化断言（替代 sleep 观察窗）：旧口径 waitFor(runs===before+1) 的观测点可滞后于
+    // 补跑完成任意久（并行负载拉长调度），随后 sleep(150) < everyMs 的窗口里 recurring 合法再触发
+    // 一轮即被误判为「补差」→ expected 2 received 3 随机红。现等「补跑已触发 + 重排已落定为
+    // 完成时刻 + everyMs 的未来锚」——jobs.ts:26 完成即重排语义；补差形态（欠账轮数连烧）的
+    // run_at 会锚在 ≈t（过去）→ 未来锚谓词永不满足直至 deadline 红，断言只读行状态、不依赖观测窗长短。
+    await waitFor(() => runs >= before + 1 && Number(jobRow(db, "cron:gc")!.run_at) > t);
+    // 计数面上界（宽裕版）：观测点距补跑完成 < 一个周期，此间合法续期至多一轮（200ms 周期 +
+    // 观测滞后容差）；补差（欠 5 轮）必然 ≥ before+4——上界与补差下界间隔两轮，陌生负载下不误判。
+    expect(runs).toBeLessThanOrEqual(before + 2);
     const r = jobRow(db, "cron:gc")!;
     expect(r.status).toBe("pending");
     expect(Number(r.run_at)).toBeGreaterThanOrEqual(t); // 从完成时刻起算

@@ -323,9 +323,11 @@ switch (cmd) {
     break;
   }
 
-  /* ---------- stubs (honest) ---------- */
+  /* ---------- stubs (honest) ----------
+     REL-A A6：case "review" 摘除——review 已是 MINI 实装（上方 case "review" 命中并 break），
+     此处不可达死分支；且 STUB_NOTES 无 review 键，一旦重排触达即迭代 undefined TypeError 崩栈
+     （tests/cli-die.test.ts A6 结构自检：STUB 分支集 ⊆ STUB_NOTES 键集 防复发）。 */
   case "package":
-  case "review":
   case "e2e":
   case "lint": {
     console.error(`[atelier] "${cmd}" is not implemented yet.`);

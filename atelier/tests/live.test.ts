@@ -198,6 +198,27 @@ describe("live 引擎：SSE 线协议与首连（FS-DESIGN §4.3）", () => {
     expect((await miss.json()).code).toBe("ATR-201");
   });
 
+  it("REL-A A1 形状闸归一（P2-S1 POST 面同口径）：带契约 live 端点 + 标量/数组 input → 400 ATR-312（形状闸在契约分支之前，绝不进 validateFlat 炸 TypeError → 宿主兜底 500）", async () => {
+    const reg = makeReg();
+    const echo: FlatSchema = { type: "object", reqProps: { k: { type: "number" } } };
+    reg.register(defineQuery("q.echo", { contract: echo, live: true, handler: (input) => ({ got: input.k }) }));
+    const handler = reg.createHandler();
+
+    // live×auth 恒被 ATR-315 注册期拒绝 ⇒ 该面恒为免鉴权可远程触发——形状必须与 POST 面同闸
+    const scalar = await get(handler, `http://local.test/q.echo/live?input=${encodeURIComponent("5")}`);
+    expect(scalar.status, "红态：标量 input 直进 validateFlat，`k in 5` TypeError 裸抛（宿主兜底 500）").toBe(400);
+    expect((await scalar.json()).code).toBe("ATR-312");
+
+    const arr = await get(handler, `http://local.test/q.echo/live?input=${encodeURIComponent("[1,2]")}`);
+    expect(arr.status).toBe(400);
+    expect((await arr.json()).code).toBe("ATR-312");
+
+    // null 保持放行 = 缺省体语义（POST 面同口径）：(null ?? {}) → 契约校验 ATR-201 缺必填
+    const nul = await get(handler, `http://local.test/q.echo/live?input=${encodeURIComponent("null")}`);
+    expect(nul.status).toBe(400);
+    expect((await nul.json()).code).toBe("ATR-201");
+  });
+
   it("心跳注释行（§4.3 防代理断连）：heartbeatMs 到点推 : ping", async () => {
     const reg = makeReg({ heartbeatMs: 10 });
     reg.register(defineQuery("chat.list", { live: { invalidate: ["table:messages"] }, handler: () => ({ count: 0, items: [] }) }));

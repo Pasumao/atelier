@@ -355,6 +355,13 @@ async function snapshotDiffHandler(name, args, ctx) {
   }).catch((e) => {
     throw toolError(`ATR-4xx-dev: dev surface unreachable at ${ctx.devUrl} (${e.cause?.code ?? e.name})`, "start the dev server ('atelier dev' inside your Atelier app dir) first");
   });
+  if (shot.status === 401) {
+    // REL-A A7（P2-M1「认证失败恒 ATR-405」清扫残端）：snapshotDiffHandler 直连 screenshot 的
+    // 401 原被 !j.ok 折叠进 ATR-4xx-dev capture failed 族——与 devJson/callDevFaceTool/
+    // endpoint-tools.fetchServerStatus 三条 401 路径口径分裂。同款补钉：认证失败恒 ATR-405
+    // （ATR-402 归 confirm 档拒绝），文案对齐既有三处。
+    throw toolError("ATR-405: dev token rejected", "读取应用根 .atelier/dev-token 作为 x-atelier-token（dev 面 token 门内资源）");
+  }
   const j = await shot.json();
   if (!j.ok) throw toolError("ATR-4xx-dev: capture failed", j.error ?? "inspect dev server logs");
   const layout = snapshotLayout(ctx.projectRoot);

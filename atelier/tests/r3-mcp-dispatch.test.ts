@@ -129,6 +129,21 @@ describe("P2-M1 MCP 面认证失败恒 ATR-405（R3 402→405 拆分漏改两处
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("REL-A A7 清扫残端：snapshotDiffHandler 直连 /__atelier/screenshot 的 401 → ATR-405（红态：折叠进 ATR-4xx-dev capture failed 族，与三条既有 401 路径口径分裂）", async () => {
+    const root = tmpRoot();
+    writeApp(root);
+    const ctx = { projectRoot: root, devUrl: unauthUrl, devToken: "wrong-token" };
+    try {
+      for (const name of ["snapshot.diff", "snapshot.review_diff"] as const) {
+        const err = await callTool(name, {}, ctx).catch((e: any) => e);
+        expect(err?.atr?.code, `红态：${name} 的 401 被 !j.ok 折叠进 capture failed（atr.code = ATR-4xx-dev）`).toBe("ATR-405");
+        expect(err?.message).toContain("dev token rejected");
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("P2-M2 ATELIER_TOOLSETS 执行闸：广告面 = 可执行面（单一口径）", () => {

@@ -230,3 +230,29 @@ describe("P-C 支：CLI 缺值守卫与旗标透传（review / struct / sync 三
     expect(out.modelVersion).toBeDefined();
   });
 });
+
+/* ================= REL-A A6：cli 结构自检（STUB 面一致性） ================= */
+
+describe("REL-A A6 cli 结构自检：STUB 分支集 ⊆ STUB_NOTES 键集 + stub 块无死分支", () => {
+  const src = fs.readFileSync(CLI, "utf8");
+  const notesBody = src.match(/const STUB_NOTES = \{([\s\S]*?)\};/)?.[1] ?? "";
+  const keys = [...notesBody.matchAll(/^\s*([A-Za-z_$][\w$]*):/gm)].map((m) => m[1]);
+  // 锚定到 stub 组头段（stub 注释 → 组体首个 `{` 之间），只取落入 stub 处理块的 fallthrough 标签。
+  // 评审 N1 教训：旧版精确匹配单行注释全文 + 切片到文件尾——注释一改多行即 indexOf=-1 空转绿；
+  // 故锚用前缀、域用头段，并在用例内对解析面做 toEqual 健全性断言，解析失配时显式红而非静默空转。
+  const stubStart = src.indexOf("/* ---------- stubs");
+  const stubHeader = src.slice(stubStart, src.indexOf("{", stubStart));
+  const stubCases = [...stubHeader.matchAll(/case "([^"]+)":/g)].map((m) => m[1]);
+
+  it("STUB 分支集 ⊆ STUB_NOTES 键集（缺键 = 一旦重排触达该分支即迭代 undefined TypeError 崩栈）", () => {
+    expect(keys, "STUB_NOTES 键集解析面 sanity").toEqual(expect.arrayContaining(["package", "e2e", "lint"]));
+    expect(stubCases, "stub 组头段解析面 sanity（失配 = 结构自检空转，先红于此）").toEqual(["package", "e2e", "lint"]);
+    for (const c of stubCases) {
+      expect(keys, `stub case "${c}" 缺 STUB_NOTES 键（红态：A6——case "review" 在 stub 块内而 STUB_NOTES 无 review 键）`).toContain(c);
+    }
+  });
+
+  it("stub 块无死分支：review 已是 MINI 实装（前置 case 命中并 break），stub 块不得再收留 review", () => {
+    expect(stubCases, "红态：A6——stub 块内 case \"review\" 不可达死分支").not.toContain("review");
+  });
+});
