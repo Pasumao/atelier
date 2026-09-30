@@ -246,10 +246,13 @@ export function spawnCaptured(cmd, args, { cwd, timeoutMs, shell = false, signal
 }
 
 /** run scripts/checkpoint.mjs in the app root; its --json payload is stdout (pretty for list, single-line for save/rollback)
- *  P1-11：异步 spawn（门禁内建跑全量测试套件，601s 兜底超时防无限悬挂）；signal 供 Tasks cancel 树杀。 */
-async function checkpointCli(args, cwd, signal = null) {
+ *  P1-11：异步 spawn（门禁内建跑全量测试套件，CHECKPOINT_TIMEOUT_MS 兜底超时防无限悬挂）；signal 供 Tasks cancel 树杀。
+ *  R3 收口：超时字面值提为 CHECKPOINT_TIMEOUT_MS 单源（TOOL_META checkpoint.source_* 三件与
+ *  diff.report 的 list 前置同源引用——字面值不变，只收敛声明位）。 */
+const CHECKPOINT_TIMEOUT_MS = 601_000;
+async function checkpointCli(args, cwd, signal = null, timeoutMs = CHECKPOINT_TIMEOUT_MS) {
   const script = path.join(HERE, "..", "scripts", "checkpoint.mjs");
-  const r = await spawnCaptured(process.execPath, [script, ...args], { cwd, timeoutMs: 601_000, signal });
+  const r = await spawnCaptured(process.execPath, [script, ...args], { cwd, timeoutMs, signal });
   if (r.error) {
     if (r.error.code === "ETIMEDOUT") {
       throw toolError("ATR-4xx-checkpoint: checkpoint run timed out after 601s", "run checkpoint via CLI ('atelier checkpoint <verb>') to inspect — the gate suite may be hung");
@@ -271,83 +274,216 @@ async function checkpointCli(args, cwd, signal = null) {
   try { return JSON.parse(last); } catch { return { ok: true, raw: last }; }
 }
 
-export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
-  const PROJECT_ROOT = ctx.projectRoot;
-  /** P1-11：可选取消信号（Tasks 扩展 server 主导创建时经 http.mjs 注入）——长操作子进程随
-   * tasks.cancel 即时树杀；stdio 直调不传，行为与既有完全一致。 */
-  const signal = opts?.signal ?? null;
+/* ---- R3 收口（评审 §2.2 风险 2 / §6 批次 R3）：callTool 分发 Map + per-tool 元数据 ----
+ * 原形：callTool 约 430 行七段 if-chain——bridge / local spawn / state+docs+test / snapshot /
+ * FS6 / tasks / dev-face 通用路径全部名字平铺。现在：TOOL_HANDLERS = Map<工具名, handler>，
+ * 键集 = tools/list 广告实现面（一件不缺、一件不幻影——tests/r3-mcp-dispatch.test.ts 机检）；
+ * confirm 三档闸与 _approval 剥离留在 Map 之前的公共闸位（对全部工具一致——闸序零变化）；
+ * 未命中 Map 的名字落既有兜底链（未知 404 / pending 诚实报错 / no-route 报错 → dev-face 通用
+ * 路径）。TOOL_META = per-tool 元数据：timeoutMs（该工具**自有**下游 spawn/fetch 的兜底超时——
+ * handler 从表取值，字面值与收口前逐字节一致）+ args（参数白名单位：handler 逐名消费的入参键，
+ * 透传页面桥的桥接工具额外标 passthrough——消费面 ⊆ 广告面，机检钉死 §4.1「广告参数静默丢弃」
+ * 的反向漂移）。FS6 工具族消费面元数据在 endpoint-tools.mjs 单源（不入本表——两处手抄即漂移温床）。 ---- */
+const TOOL_META = {
+  "checkpoint.list": { args: [] },
+  "checkpoint.rollback": { args: ["id"], passthrough: true }, // args 整体透传页面桥（桥侧按名取用）
+  "state.time_travel": { args: ["id"], passthrough: true },
+  "state.graph": { args: [] },
+  "state.journal": { args: ["lines"] },
+  "ui.a11y": { args: [] },
+  "audit.log": { args: ["lines"] },
+  "structure.map": { args: ["root"] },
+  "structure.check": { args: ["root"] },
+  "checkpoint.source_list": { args: [], timeoutMs: CHECKPOINT_TIMEOUT_MS },
+  "checkpoint.source_commit": { args: ["message"], timeoutMs: CHECKPOINT_TIMEOUT_MS },
+  "checkpoint.source_rollback": { args: ["id"], timeoutMs: CHECKPOINT_TIMEOUT_MS },
+  "graph.static": { args: ["root"], timeoutMs: 60_000 },
+  "state.get": { args: ["path"] },
+  "docs.search": { args: ["q"] },
+  "test.run": { args: ["filter"], timeoutMs: 180_000 },
+  "diff.report": { args: [], timeoutMs: 30_000 },
+  "feedback.read": { args: [] },
+  "snapshot.diff": { args: [], timeoutMs: 60_000 },
+  "snapshot.review_diff": { args: [], timeoutMs: 60_000 },
+  "tasks.get": { args: ["taskId"] },
+  "tasks.update": { args: ["taskId", "ttlMs"] },
+  "tasks.cancel": { args: ["taskId"] },
+  // dev-face 通用路径五件（路由单源 = ENDPOINT_MAP；fetch 兜底超时原通用路径内联 4s）
+  "registry.list_components": { args: [], timeoutMs: 4_000 },
+  "registry.get_component": { args: ["name"], timeoutMs: 4_000 },
+  "tokens.list": { args: [], timeoutMs: 4_000 },
+  "state.snapshot": { args: [], timeoutMs: 4_000 },
+  "ui.screenshot": { args: [], timeoutMs: 4_000 },
+};
 
-  /* ---- confirm 三档（决策 15 + FS-M6 §10.2 多轮审批）：deny 墙语义照旧；ask 档走
-   *      InputRequiredResult + requestState 两轮——首轮不执行只发审批句柄，二轮携
-   *      _approval{requestState, decision} 放行/拒绝；审批动作全量入审计。 ---- */
-  const verdict = approvalVerdict(readAgentConfig(PROJECT_ROOT), name, args, { secret: approvalSecret(PROJECT_ROOT) });
-  if (verdict.kind === "deny" || verdict.kind === "refused") {
-    auditApproval(PROJECT_ROOT, {
-      event: verdict.code === "ATR-402" ? "denied" : "refused",
-      tool: name,
-      code: verdict.code,
-      reason: verdict.message,
-    });
-    throw toolError(`${verdict.code}: ${verdict.message}`, verdict.fix);
-  }
-  if (verdict.kind === "inputRequired") {
-    auditApproval(PROJECT_ROOT, { event: "requested", tool: name, expiresAt: verdict.expiresAt });
-    return {
-      [INPUT_REQUIRED_TAG]: true,
-      tool: name,
-      requestState: verdict.requestState,
-      message: verdict.message,
-      context: verdict.context,
-      expiresAt: verdict.expiresAt,
-    };
-  }
-  if (verdict.kind === "execute") {
-    auditApproval(PROJECT_ROOT, { event: "granted", tool: name, decision: "approve" });
-  }
-  if (args && typeof args === "object" && "_approval" in args) {
-    const { _approval, ...rest } = args; // 审批参数只服务闸门，绝不进工具实现
-    args = rest;
-  }
+/* ---- R3 收口（评审 §4.1 末件）：snapshot.diff 基线路径平台感知 ----
+ * dev 面/CLI 已平台感知（scripts/snapshot.mjs m10 批 C 单源：.atr/snapshots/<platform>/
+ * baseline.png，旧平铺 baseline.png 只读回落）——MCP 侧此前写死平铺，per-platform 布局下失明，
+ * 口径三处分裂。本函数对表 scripts/snapshot.mjs 的 platformKey/snapshotsDir/baselinePathFor/
+ * currentPathFor/legacyBaselinePath 内联同构；vendor 闭包红线（mcp-vendor.test.ts 机械核对：
+ * 相对 import 闭包 = vendor 名单精确相等）禁止新增本地 import，故 MUST stay in sync with
+ * scripts/snapshot.mjs——漂移由 tests/r3-mcp-dispatch.test.ts 布局形状用例 +
+ * tests/snapshot-paths.test.ts（CLI 侧既有单源）两侧钉住。 */
+export function snapshotLayout(root, platform = process.platform) {
+  const dir = path.join(root, ".atr", "snapshots", platform);
+  return {
+    dir,
+    baseline: path.join(dir, "baseline.png"),
+    current: path.join(dir, "current.png"),
+    legacyBaseline: path.join(root, ".atr", "snapshots", "baseline.png"), // 旧平铺（pre-m10）：只读回落位，绝不自动迁移
+  };
+}
 
+/** snapshot.diff / snapshot.review_diff 共享 handler（R3 收口：基线解析与 CLI resolveBaseline
+ * 同阶梯——平台基线胜出 → 仅旧平铺在 = 只读回落并标 paths.legacy → 都缺 = 引导 note；
+ * verdict 阶梯同 scripts/snapshot.mjs（P1-8：MATCH/PIXMATCH/MISMATCH）不变）。 */
+async function snapshotDiffHandler(name, args, ctx) {
+  const shot = await fetch(`${ctx.devUrl}/__atelier/screenshot?compare=1`, {
+    signal: AbortSignal.timeout(TOOL_META["snapshot.diff"].timeoutMs),
+    headers: { "x-atelier-token": ctx.devToken },
+  }).catch((e) => {
+    throw toolError(`ATR-4xx-dev: dev surface unreachable at ${ctx.devUrl} (${e.cause?.code ?? e.name})`, "start the dev server ('atelier dev' inside your Atelier app dir) first");
+  });
+  const j = await shot.json();
+  if (!j.ok) throw toolError("ATR-4xx-dev: capture failed", j.error ?? "inspect dev server logs");
+  const layout = snapshotLayout(ctx.projectRoot);
+  fs.mkdirSync(layout.dir, { recursive: true });
+  fs.writeFileSync(layout.current, Buffer.from(j.imageBase64, "base64"));
+  const platBase = fs.existsSync(layout.baseline);
+  const legacyBase = !platBase && fs.existsSync(layout.legacyBaseline); // 旧平铺只读回落（不迁移不晋升）
+  const out = {
+    paths: {
+      current: layout.current,
+      baseline: platBase || legacyBase ? (platBase ? layout.baseline : layout.legacyBaseline) : null,
+      ...(legacyBase ? { legacy: true } : {}),
+    },
+  };
+  if (!platBase && !legacyBase) {
+    out.match = null;
+    out.note = "no baseline yet — review current; promote intentionally via 'atelier snapshot check --update' or save a first baseline";
+  } else {
+    const h = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+    const byteSame = h(layout.current) === h(out.paths.baseline);
+    const threshold = Number(j.threshold ?? 0.12);
+    const ratio = j.pixelDiff ? j.pixelDiff.mismatchRatio : null;
+    // same verdict ladder as scripts/snapshot.mjs (P1-8): MATCH / PIXMATCH / MISMATCH
+    out.byteMatch = byteSame;
+    out.pixelDiff = j.pixelDiff ?? null;
+    out.threshold = threshold;
+    out.verdict = byteSame ? "MATCH" : ratio !== null && !j.pixelDiff.dimsDiffer && ratio <= threshold ? "PIXMATCH" : "MISMATCH";
+    out.note = out.verdict === "MATCH"
+      ? "pixel-stable against baseline"
+      : out.verdict === "PIXMATCH"
+        ? `bytes differ but mismatchRatio ${ratio.toExponential(2)} ≤ ${threshold} (fonts/AA jitter is not a regression)`
+        : `differs from baseline${ratio !== null ? ` (mismatchRatio ${ratio.toExponential(2)} > ${threshold})` : ""} — review both images side by side; promotion is a CLI/human act`;
+  }
+  if (name === "snapshot.review_diff") out.imageBase64 = j.imageBase64;
+  return out;
+}
+
+/** FS-M6③ Tasks 扩展同名点工具（SEP-2133）共享 handler：stdio/HTTP 共用同一存储视图；
+ * 创建是服务端主导（长操作获准执行时），故无 tasks.create——这里只读写已有句柄。 */
+function tasksToolHandler(name, args, ctx) {
+  const store = ctx.tasks ?? defaultTaskStore();
+  const id = String(args?.taskId ?? "");
+  if (!id) {
+    throw toolError(
+      `ATR-401: ${name} requires args.taskId`,
+      "task 句柄由服务端在长操作获准执行时创建并随 tools/call 结果返回（stateless HTTP 通道主导）",
+    );
+  }
+  let t = null;
+  try {
+    t = name === "tasks.get" ? store.get(id) : name === "tasks.cancel" ? store.cancel(id) : store.update(id, args ?? {});
+  } catch (e) {
+    if (e?.atr) throw toolError(e.message, e.atr.fix ?? "见 tasks 扩展文档");
+    throw e;
+  }
+  if (!t) {
+    throw toolError(
+      `ATR-401: task "${id}" 未找到（或保留窗已过）`,
+      "任务句柄只在创建它的实例上可解析（dev 面 = 单实例）；重新发起长操作获取新句柄",
+    );
+  }
+  return t;
+}
+
+/** dev-face 通用路径单源（原 callTool 尾段提取）：ENDPOINT_MAP 路由 + per-tool 兜底超时
+ * （TOOL_META）+ 401/非 ok 映射 + registry.get_component 名字过滤投影。五件 dev-face 工具
+ * 的 Map 条目与「已实现已广告但无 handler」兜底共用本函数。 */
+async function callDevFaceTool(name, args, ctx) {
+  const route = ENDPOINT_MAP[name];
+  // fetch the route; never interpolate raw values into paths except whitelisted query params below
+  const res = await fetch(ctx.devUrl + route, {
+    signal: AbortSignal.timeout(TOOL_META[name]?.timeoutMs ?? 4000),
+    headers: { "x-atelier-token": ctx.devToken },
+  }).catch((e) => {
+    throw toolError(
+      `ATR-4xx-dev: dev surface unreachable at ${ctx.devUrl} (${e.cause?.code ?? e.name})`,
+      "start the dev server ('atelier dev' inside your Atelier app dir) or set ATELIER_DEV_URL",
+    );
+  });
+  if (res.status === 401) {
+    throw toolError("ATR-402: dev token rejected", "read .atelier/dev-token next to the app root and send it as x-atelier-token");
+  }
+  if (!res.ok) {
+    throw toolError(`ATR-4xx-dev: dev surface returned HTTP ${res.status} for ${route}`, "check dev server logs");
+  }
+  const body = await res.text();
+  let data;
+  try { data = JSON.parse(body); } catch { data = body; }
+
+  if (name === "registry.get_component") {
+    const wanted = args?.name;
+    const list = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.components)
+        ? data.components
+        : [];
+    const hit = list.find((c) => c?.name === wanted || c?.id === wanted);
+    if (!hit) {
+      throw toolError(
+        `ATR-401: component "${wanted ?? "(none)"}" not registered`,
+        `registered names: ${list.map((c) => c?.name ?? c?.id).join(", ") || "(empty)"} — import the component file and pass opts.name explicitly`
+      );
+    }
+    return hit;
+  }
+  return data;
+}
+
+/* ---- 分发 Map（键集 = tools/list 广告实现面，40 件）：各 handler 语句 = 原 if 段逐字搬运 ---- */
+const TOOL_HANDLERS = new Map([
   /* ---- downlink-executed tools (runtime lives in the open page; P0-1 SSE channel) ---- */
-  if (name === "checkpoint.list") return bridgeCall("checkpoint.list", {}, ctx);
-  if (name === "checkpoint.rollback") return bridgeCall("checkpoint.rollback", args ?? {}, ctx);
-  if (name === "state.time_travel") return bridgeCall("state.time_travel", args ?? {}, ctx);
-  if (name === "state.graph") return bridgeCall("state.graph", {}, ctx); // P2-1：依赖图（F-1 收尾）
-  if (name === "state.journal")
-    return bridgeCall("state.journal", { lines: Math.max(1, Math.min(500, Number(args?.lines ?? 100))) }, ctx);
-  if (name === "ui.a11y") {
-    const j = await devJson("/__atelier/a11y", {}, ctx); // P2-2③：无障碍树文本化
-    return j;
-  }
-  if (name === "audit.log") {
-    const j = await devJson(`/__atelier/audit?lines=${Math.max(1, Math.min(500, Number(args?.lines ?? 50)))}`, {}, ctx);
-    return j.rows;
-  }
+  ["checkpoint.list", (args, ctx) => bridgeCall("checkpoint.list", {}, ctx)],
+  ["checkpoint.rollback", (args, ctx) => bridgeCall("checkpoint.rollback", args ?? {}, ctx)],
+  ["state.time_travel", (args, ctx) => bridgeCall("state.time_travel", args ?? {}, ctx)],
+  ["state.graph", (_args, ctx) => bridgeCall("state.graph", {}, ctx)], // P2-1：依赖图（F-1 收尾）
+  ["state.journal", (args, ctx) => bridgeCall("state.journal", { lines: Math.max(1, Math.min(500, Number(args?.lines ?? 100))) }, ctx)],
+  ["ui.a11y", (_args, ctx) => devJson("/__atelier/a11y", {}, ctx)], // P2-2③：无障碍树文本化
+  ["audit.log", (args, ctx) => devJson(`/__atelier/audit?lines=${Math.max(1, Math.min(500, Number(args?.lines ?? 50)))}`, {}, ctx).then((j) => j.rows)],
 
   /* ---- locally computed tools (no dev-surface round trip) ---- */
-  if (name === "structure.map") return inspectStructure(args?.root ?? PROJECT_ROOT);
-  if (name === "structure.check") {
-    const res = inspectStructure(args?.root ?? PROJECT_ROOT);
+  ["structure.map", (args, ctx) => inspectStructure(args?.root ?? ctx.projectRoot)],
+  ["structure.check", (args, ctx) => {
+    const res = inspectStructure(args?.root ?? ctx.projectRoot);
     return { verdict: res.summary.errors > 0 ? "FAILED" : "PASSED", ...res };
-  }
+  }],
   /* decision-15 source checkpoints: thin spawn over scripts/checkpoint.mjs — same code path as the
    * CLI, so the P2-2 未检不锚 snapshot gate applies identically to MCP-originated anchors. No
    * --no-gate over the wire: the escape hatch stays a human CLI act. */
-  if (name === "checkpoint.source_list") return checkpointCli(["list", "--json"], PROJECT_ROOT, signal);
-  if (name === "checkpoint.source_commit") {
-    return checkpointCli(["save", String(args?.message ?? `AI turn ${new Date().toISOString()}`), "--json"], PROJECT_ROOT, signal);
-  }
-  if (name === "checkpoint.source_rollback") {
+  ["checkpoint.source_list", (args, ctx, opts) => checkpointCli(["list", "--json"], ctx.projectRoot, opts?.signal ?? null)],
+  ["checkpoint.source_commit", (args, ctx, opts) => checkpointCli(["save", String(args?.message ?? `AI turn ${new Date().toISOString()}`), "--json"], ctx.projectRoot, opts?.signal ?? null)],
+  ["checkpoint.source_rollback", (args, ctx, opts) => {
     if (!args?.id) throw toolError("ATR-401: checkpoint.source_rollback requires args.id", "pick one from checkpoint.source_list output");
-    return checkpointCli(["rollback", String(args.id), "--json"], PROJECT_ROOT, signal);
-  }
+    return checkpointCli(["rollback", String(args.id), "--json"], ctx.projectRoot, opts?.signal ?? null);
+  }],
 
   /* ---- F-2 二期：构建期静态依赖图查询（read-only，不跑应用、不需要 dev face）----
    * thin spawn over compiler/codegen.mjs --graph-only（单源 = 同一收集器），读 stage ② dump
    * 出组件级 deps 清单；无 dump 时结构化报错指路 compile。 */
-  if (name === "graph.static") {
-    const root = path.resolve(String(args?.root ?? PROJECT_ROOT));
+  ["graph.static", async (args, ctx, opts) => {
+    const root = path.resolve(String(args?.root ?? ctx.projectRoot));
     const astDir = path.join(root, ".atr", "ast");
     if (!fs.existsSync(path.join(astDir, "index.json"))) {
       throw toolError(
@@ -356,7 +492,7 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
       );
     }
     const codegen = path.join(HERE, "..", "compiler", "codegen.mjs");
-    const r = await spawnCaptured(process.execPath, [codegen, "--ast", astDir, "--graph-only", "--quiet"], { timeoutMs: 60000, signal });
+    const r = await spawnCaptured(process.execPath, [codegen, "--ast", astDir, "--graph-only", "--quiet"], { timeoutMs: TOOL_META["graph.static"].timeoutMs, signal: opts?.signal ?? null });
     if (r.error) {
       if (r.error.code === "ETIMEDOUT") {
         throw toolError("ATR-500: static graph build failed (ETIMEDOUT after 60s)", "inspect .atr/ast dump integrity — codegen --graph-only did not finish within 60s");
@@ -373,10 +509,10 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
     } catch {
       throw toolError("ATR-500: graph payload unparseable", "rerun graph.static; if it persists, check codegen.mjs --graph-only output");
     }
-  }
+  }],
 
   /* ---- P0 backlog 批次转绿（2026-08-29）：state.get / test.run / diff.report / feedback.read / docs.search ---- */
-  if (name === "state.get") {
+  ["state.get", async (args, ctx) => {
     const p = String(args?.path ?? "").trim();
     if (!p) {
       throw toolError(
@@ -412,9 +548,10 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
       value = value[seg];
     }
     return { path: p, signalKey: sig.key, value, snapshotAt: snap.at, href: snap.href };
-  }
+  }],
 
-  if (name === "docs.search") {
+  ["docs.search", (args, ctx) => {
+    const PROJECT_ROOT = ctx.projectRoot;
     const q = String(args?.q ?? "").trim().toLowerCase();
     if (!q) throw toolError("ATR-401: docs.search requires args.q", 'e.g. "HMR state preserve" or "ATR-204"');
     const terms = q.split(/\s+/).filter(Boolean);
@@ -461,17 +598,17 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
       results: top,
       note: top.length ? undefined : `no hit for ${JSON.stringify(q)} in framework docs / skill packages / AGENTS.md / llms.txt`,
     };
-  }
+  }],
 
-  if (name === "test.run") {
+  ["test.run", async (args, ctx, opts) => {
     const filter = args?.filter ? String(args.filter).trim() : "";
     if (/["'`|;&<>]/.test(filter)) {
       throw toolError("ATR-401: test.run filter must be a plain file-name pattern", `got ${JSON.stringify(filter)} — no shell metacharacters; e.g. "contract" or "src/greeting"`);
     }
     // 与应用 package.json "test" 同一表面（vitest run）；filter 作 vitest 位置参数（文件名过滤）。
-    // P1-11：异步 spawn + 180s 兜底超时；signal 使 tasks.cancel 真正树杀 pnpm 子进程树。
+    // P1-11：异步 spawn + 兜底超时（TOOL_META 单源 180s）；signal 使 tasks.cancel 真正树杀 pnpm 子进程树。
     const r = await spawnCaptured("pnpm", filter ? ["test", filter] : ["test"], {
-      cwd: PROJECT_ROOT, timeoutMs: 180000, signal,
+      cwd: ctx.projectRoot, timeoutMs: TOOL_META["test.run"].timeoutMs, signal: opts?.signal ?? null,
       shell: process.platform === "win32", // pnpm 在 Windows 是 .cmd
     });
     if (r.error) {
@@ -495,11 +632,13 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
       },
       outputTail: lines.filter(Boolean).slice(-60),
     };
-  }
+  }],
 
-  if (name === "diff.report") {
+  ["diff.report", async (args, ctx, opts) => {
     // 基线 = 最近一条 source checkpoint 锚点；本工具提供机器可核的文件级事实
     //（per-change 语义摘要由发起评审的 agent 附在报告后），落盘 .atelier/diff-report.md 供人审。
+    const PROJECT_ROOT = ctx.projectRoot;
+    const signal = opts?.signal ?? null;
     const cps = await checkpointCli(["list", "--json"], PROJECT_ROOT, signal);
     // checkpoints.jsonl 的锚字段是 sha（旧条目兼容 commit）；回滚条目无 sha，自然被过滤
     const base = [...(Array.isArray(cps) ? cps : [])].reverse().find((c) => c?.sha || c?.commit) ?? null;
@@ -510,8 +649,8 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
     const baseId = base.id ?? "?";
     const baseName = base.name ?? "";
     const git = async (gitArgs) => {
-      // P1-11：git 补 30s 兜底超时（修前无超时——网络盘/钩子卡死即永久冻结宿主）；signal 同参透传
-      const g = await spawnCaptured("git", gitArgs, { cwd: PROJECT_ROOT, timeoutMs: 30000, signal });
+      // P1-11：git 补兜底超时（TOOL_META 单源 30s——修前无超时：网络盘/钩子卡死即永久冻结宿主）；signal 同参透传
+      const g = await spawnCaptured("git", gitArgs, { cwd: PROJECT_ROOT, timeoutMs: TOOL_META["diff.report"].timeoutMs, signal });
       if (g.status !== 0) {
         throw toolError(`ATR-4xx-git: git ${gitArgs[0]} failed`, (g.stderr ?? "").trim() || "run inside a git-managed app workspace");
       }
@@ -549,10 +688,10 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
     fs.writeFileSync(reportPath, report, "utf8");
     return { reportPath, baseline: { id: baseId, commit: baseCommit, name: baseName }, report };
-  }
+  }],
 
-  if (name === "feedback.read") {
-    const specsDir = path.join(PROJECT_ROOT, "specs");
+  ["feedback.read", (args, ctx) => {
+    const specsDir = path.join(ctx.projectRoot, "specs");
     const rows = [];
     try {
       const jl = fs.readFileSync(path.join(specsDir, "feedback.jsonl"), "utf8");
@@ -575,79 +714,78 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
         ? undefined
         : 'no human feedback recorded yet. Convention: append one JSON line per verdict to specs/feedback.jsonl ({at, verdict: "approve"|"disapprove", target, note}) or drop a free-form specs/<name>.feedback.md — the review UI (P2-5) writes the same format',
     };
-  }
-  if (name === "snapshot.diff" || name === "snapshot.review_diff") {
-    const shot = await fetch(`${ctx.devUrl}/__atelier/screenshot?compare=1`, {
-      signal: AbortSignal.timeout(60000),
-      headers: { "x-atelier-token": ctx.devToken },
-    }).catch((e) => {
-      throw toolError(`ATR-4xx-dev: dev surface unreachable at ${ctx.devUrl} (${e.cause?.code ?? e.name})`, "start the dev server ('atelier dev' inside your Atelier app dir) first");
+  }],
+
+  /* ---- snapshot 对比（R3 收口：基线路径平台感知——见 snapshotLayout/snapshotDiffHandler） ---- */
+  ["snapshot.diff", (args, ctx) => snapshotDiffHandler("snapshot.diff", args, ctx)],
+  ["snapshot.review_diff", (args, ctx) => snapshotDiffHandler("snapshot.review_diff", args, ctx)],
+
+  /* ---- FS-M6③ Tasks 扩展同名点工具（SEP-2133）——共享 handler 见 tasksToolHandler ---- */
+  ["tasks.get", (args, ctx) => tasksToolHandler("tasks.get", args, ctx)],
+  ["tasks.update", (args, ctx) => tasksToolHandler("tasks.update", args, ctx)],
+  ["tasks.cancel", (args, ctx) => tasksToolHandler("tasks.cancel", args, ctx)],
+
+  /* ---- dev-face 通用路径五件（ENDPOINT_MAP 路由单源，共享 handler 见 callDevFaceTool） ---- */
+  ["registry.list_components", (args, ctx) => callDevFaceTool("registry.list_components", args, ctx)],
+  ["registry.get_component", (args, ctx) => callDevFaceTool("registry.get_component", args, ctx)],
+  ["tokens.list", (args, ctx) => callDevFaceTool("tokens.list", args, ctx)],
+  ["state.snapshot", (args, ctx) => callDevFaceTool("state.snapshot", args, ctx)],
+  ["ui.screenshot", (args, ctx) => callDevFaceTool("ui.screenshot", args, ctx)],
+]);
+
+/* ---- FS-6（§10.1）：L3 全栈工具族 —— live 组消费 dev 面 server-status（§10.3），
+ *      endpoint.impact 走 gen/impact.mjs 静态两跳链（不依赖 dev 面）；
+ *      endpoint.call 的 confirm 三档已在闸口收口。实现见 mcp/endpoint-tools.mjs ----
+ *      R3 收口：整族入分发 Map（消费面元数据单源在 endpoint-tools.mjs，不入 TOOL_META）。 */
+for (const fs6Name of FS6_TOOLS) {
+  TOOL_HANDLERS.set(fs6Name, (args, ctx) => callEndpointTool(fs6Name, args, { devUrl: ctx.devUrl, devToken: ctx.devToken, projectRoot: ctx.projectRoot }));
+}
+
+export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
+  /** P1-11：可选取消信号（Tasks 扩展 server 主导创建时经 http.mjs 注入）——长操作子进程随
+   * tasks.cancel 即时树杀；stdio 直调不传，行为与既有完全一致。 */
+  const signal = opts?.signal ?? null;
+
+  /* ---- confirm 三档（决策 15 + FS-M6 §10.2 多轮审批）：deny 墙语义照旧；ask 档走
+   *      InputRequiredResult + requestState 两轮——首轮不执行只发审批句柄，二轮携
+   *      _approval{requestState, decision} 放行/拒绝；审批动作全量入审计。 ---- */
+  const verdict = approvalVerdict(readAgentConfig(ctx.projectRoot), name, args, { secret: approvalSecret(ctx.projectRoot) });
+  if (verdict.kind === "deny" || verdict.kind === "refused") {
+    auditApproval(ctx.projectRoot, {
+      event: verdict.code === "ATR-402" ? "denied" : "refused",
+      tool: name,
+      code: verdict.code,
+      reason: verdict.message,
     });
-    const j = await shot.json();
-    if (!j.ok) throw toolError("ATR-4xx-dev: capture failed", j.error ?? "inspect dev server logs");
-    const dir = path.join(PROJECT_ROOT, ".atr", "snapshots");
-    fs.mkdirSync(dir, { recursive: true });
-    const curPath = path.join(dir, "current.png");
-    const basePath = path.join(dir, "baseline.png");
-    fs.writeFileSync(curPath, Buffer.from(j.imageBase64, "base64"));
-    const out = { paths: { current: curPath, baseline: fs.existsSync(basePath) ? basePath : null } };
-    if (!fs.existsSync(basePath)) {
-      out.match = null;
-      out.note = "no baseline yet — review current; promote intentionally via 'atelier snapshot check --update' or save a first baseline";
-    } else {
-      const h = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
-      const byteSame = h(curPath) === h(basePath);
-      const threshold = Number(j.threshold ?? 0.12);
-      const ratio = j.pixelDiff ? j.pixelDiff.mismatchRatio : null;
-      // same verdict ladder as scripts/snapshot.mjs (P1-8): MATCH / PIXMATCH / MISMATCH
-      out.byteMatch = byteSame;
-      out.pixelDiff = j.pixelDiff ?? null;
-      out.threshold = threshold;
-      out.verdict = byteSame ? "MATCH" : ratio !== null && !j.pixelDiff.dimsDiffer && ratio <= threshold ? "PIXMATCH" : "MISMATCH";
-      out.note = out.verdict === "MATCH"
-        ? "pixel-stable against baseline"
-        : out.verdict === "PIXMATCH"
-          ? `bytes differ but mismatchRatio ${ratio.toExponential(2)} ≤ ${threshold} (fonts/AA jitter is not a regression)`
-          : `differs from baseline${ratio !== null ? ` (mismatchRatio ${ratio.toExponential(2)} > ${threshold})` : ""} — review both images side by side; promotion is a CLI/human act`;
-    }
-    if (name === "snapshot.review_diff") out.imageBase64 = j.imageBase64;
-    return out;
+    throw toolError(`${verdict.code}: ${verdict.message}`, verdict.fix);
+  }
+  if (verdict.kind === "inputRequired") {
+    auditApproval(ctx.projectRoot, { event: "requested", tool: name, expiresAt: verdict.expiresAt });
+    return {
+      [INPUT_REQUIRED_TAG]: true,
+      tool: name,
+      requestState: verdict.requestState,
+      message: verdict.message,
+      context: verdict.context,
+      expiresAt: verdict.expiresAt,
+    };
+  }
+  if (verdict.kind === "execute") {
+    auditApproval(ctx.projectRoot, { event: "granted", tool: name, decision: "approve" });
+  }
+  if (args && typeof args === "object" && "_approval" in args) {
+    const { _approval, ...rest } = args; // 审批参数只服务闸门，绝不进工具实现
+    args = rest;
   }
 
-  /* ---- FS-6（§10.1）：L3 全栈工具族 —— live 组消费 dev 面 server-status（§10.3），
-   *      endpoint.impact 走 gen/impact.mjs 静态两跳链（不依赖 dev 面）；
-   *      endpoint.call 的 confirm 三档已在闸口收口。实现见 mcp/endpoint-tools.mjs ---- */
-  if (FS6_TOOLS.has(name)) {
-    return callEndpointTool(name, args, { devUrl: ctx.devUrl, devToken: ctx.devToken, projectRoot: PROJECT_ROOT });
-  }
+  /* ---- R3 收口：分发 Map（公共闸位之后）——confirm 闸对全部工具一致（闸序零变化）；
+   *      signal 仅透传给声明了它的 handler（opts 原样下传）。 ---- */
+  const handler = TOOL_HANDLERS.get(name);
+  if (handler != null) return handler(args, ctx, { signal });
 
-  /* ---- FS-M6③ Tasks 扩展同名点工具（SEP-2133）：stdio/HTTP 共用同一存储视图；
-   *      创建是服务端主导（长操作获准执行时），故无 tasks.create——这里只读写已有句柄 ---- */
-  if (name === "tasks.get" || name === "tasks.update" || name === "tasks.cancel") {
-    const store = ctx.tasks ?? defaultTaskStore();
-    const id = String(args?.taskId ?? "");
-    if (!id) {
-      throw toolError(
-        `ATR-401: ${name} requires args.taskId`,
-        "task 句柄由服务端在长操作获准执行时创建并随 tools/call 结果返回（stateless HTTP 通道主导）",
-      );
-    }
-    let t = null;
-    try {
-      t = name === "tasks.get" ? store.get(id) : name === "tasks.cancel" ? store.cancel(id) : store.update(id, args ?? {});
-    } catch (e) {
-      if (e?.atr) throw toolError(e.message, e.atr.fix ?? "见 tasks 扩展文档");
-      throw e;
-    }
-    if (!t) {
-      throw toolError(
-        `ATR-401: task "${id}" 未找到（或保留窗已过）`,
-        "任务句柄只在创建它的实例上可解析（dev 面 = 单实例）；重新发起长操作获取新句柄",
-      );
-    }
-    return t;
-  }
-
+  /* ---- 兜底链（未命中 Map 的名字）：未知 404 → pending 诚实报错 → no-route 报错 → dev-face
+   *      通用路径。当前 40 件广告实现工具全数入 Map，本链对既有工具面是不可达防线——防未来
+   *      新增工具漏接（tests/r3-mcp-dispatch.test.ts 键集机检先红）。 ---- */
   const def = DEFS.tools.find((t) => t.name === name);
   if (!def) {
     throw toolError(`ATR-404: unknown tool "${name}"`, "pick a tool from tools/list output");
@@ -658,50 +796,13 @@ export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
       `implement its route in the dev plugin (see mcp-definitions.json summary), then run 'atelier dev'; usage guidance: skill "atelier-mcp-tools"`
     );
   }
-  let route = ENDPOINT_MAP[name];
-  if (!route) {
+  if (!ENDPOINT_MAP[name]) {
     throw toolError(
       `ATR-4xx-dev: no route mapped for "${name}"`,
       "add it to ENDPOINT_MAP in mcp/server.mjs once the dev endpoint exists"
     );
   }
-  // fetch the route; never interpolate raw values into paths except whitelisted query params below
-  const res = await fetch(ctx.devUrl + route, {
-    signal: AbortSignal.timeout(4000),
-    headers: { "x-atelier-token": ctx.devToken },
-  }).catch((e) => {
-    throw toolError(
-      `ATR-4xx-dev: dev surface unreachable at ${ctx.devUrl} (${e.cause?.code ?? e.name})`,
-      "start the dev server ('atelier dev' inside your Atelier app dir) or set ATELIER_DEV_URL",
-    );
-  });
-  if (res.status === 401) {
-    throw toolError("ATR-402: dev token rejected", "read .atelier/dev-token next to the app root and send it as x-atelier-token");
-  }
-  if (!res.ok) {
-    throw toolError(`ATR-4xx-dev: dev surface returned HTTP ${res.status} for ${route}`, "check dev server logs");
-  }
-  const body = await res.text();
-  let data;
-  try { data = JSON.parse(body); } catch { data = body; }
-
-  if (name === "registry.get_component") {
-    const wanted = args?.name;
-    const list = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.components)
-        ? data.components
-        : [];
-    const hit = list.find((c) => c?.name === wanted || c?.id === wanted);
-    if (!hit) {
-      throw toolError(
-        `ATR-401: component "${wanted ?? "(none)"}" not registered`,
-        `registered names: ${list.map((c) => c?.name ?? c?.id).join(", ") || "(empty)"} — import the component file and pass opts.name explicitly`
-      );
-    }
-    return hit;
-  }
-  return data;
+  return callDevFaceTool(name, args, ctx);
 }
 
 /* ---------- JSON-RPC 方法分发（stdio 与 HTTP 直连共用单源；ctx 注入 project/dev/task 面） ---------- */
@@ -844,5 +945,7 @@ function main() {
   process.stderr.write(`[atelier-mcp] ${SERVER_INFO.name}@${SERVER_INFO.version}: ${TOOLS.length} tools, dev=${BASE}\n`);
 }
 
-export { handleMessage, defaultCtx, SERVER_INFO, STATELESS_PROTOCOL_VERSION };
+/* TOOL_HANDLERS/TOOL_META 一并导出（R3 收口）：机检面（tests/r3-mcp-dispatch.test.ts 键集 =
+ * 广告实现面 / 超时字面值 / 参数白名单位 ⊆ 广告 schema）——http.mjs 消费 callTool/listTools 不经此。 */
+export { handleMessage, defaultCtx, SERVER_INFO, STATELESS_PROTOCOL_VERSION, TOOL_HANDLERS, TOOL_META };
 if (INVOKED_DIRECTLY) main();
