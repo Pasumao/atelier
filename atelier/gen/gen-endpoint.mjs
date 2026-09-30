@@ -345,7 +345,7 @@ export function stringArrayOf(valueText) {
   const re = /"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'/g;
   for (let m; (m = re.exec(inner));) {
     const dec = decodeEscapesCore(m[1] ?? m[2] ?? "");
-    if (!dec.ok) throw new Error(`字符串数组字面量转义非法：${dec.error}（原文 ${JSON.stringify(m[1] ?? m[2] ?? "")}）`);
+    if (!dec.ok) throw new GenEndpointError("ATR-312", `字符串数组字面量转义非法：${dec.error}（原文 ${JSON.stringify(m[1] ?? m[2] ?? "")}）`, "扁平字面量转义集 = \\n \\t \\r \\b \\f \\\" \\' \\\\ \\/ \\` \\uXXXX（JSON.parse 语义）；改用合法转义或纯文本");
     out.push(dec.value);
   }
   return out;
