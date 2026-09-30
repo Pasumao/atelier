@@ -69,16 +69,97 @@
 | P-C CLI/工具链 | P1-4 build --out 守卫 · P1-5 dump codeMask · P2-C1/C2 缺值与旗标崩栈 · P2-C4 jsonl 坏行×2 · P2-C5 tokens-dtcg 同径 · P2-C6 api-diff --allow · judge strict 双向 · P2-G1 SQLite 147 词闸 · P2-G2 撞名闸 · P2-G3 解码归一 · P2-G4 __proto__ 族 · sync-project 缺值 | ✅（merge `4c6d1d0`；评审 ACCEPT_WITH_NOTES → 2 nit `3c80557` 收口） |
 | P-D 文档诚实面 | P2-D2 三处 push 口径 · P2-D1 approval-secret 入 ignore · P2-C3 快照模式统一（自 P-C 移入避文件冲突）· stream-intro 下线 · Node ≥22.12 + engines · docs 导航刷新 · init 收尾提示 · main-server 措辞（+CHANGELOG 状态行归统筹者收口） | ✅（merge `fb4c1fc`；评审 ACCEPT） |
 
-### REL 批（发布工程批——2026-09-30 第四遍全仓复校立项；push+CI 首跑+1.1.0 切版发布，**待用户拍板启动**）
+### REL 批（发布工程批——2026-09-30 第四遍全仓复校立项；push+CI 首跑+1.1.0 切版发布，**已启动：2026-09-30 用户拍板，A/B 支并行开工**；C/D 支待前置完成后按序推进）
 
 > 任务书唯一源：`research/2026-09-30-release-engineering-batch.md`（第四遍复校：五路并行深扫 + 统筹者亲核；**无新 P1**，7 项 P2 发布前置应修 + ~40 项 P3 收获；门禁实测 1103 绿 + 1 时序红〔jobs misfire 单文件复跑绿，flake 非回归——远端 CI 随机红风险〕）。四支：**A** 正确性收口（live SSE 标量 input 500 归一〔亲核坐实，P2-S1 同洞〕/extract-schema 签名误提取〔实跑复现〕/dev-token config 期覆写解除快照门/compiler Node 版本闸死代码 vs engines 22.12 承诺/cli review 死分支/ATR-405 漏 snapshotDiffHandler 一处/misfire 用例负载加固）∥ **B** 文档计数对真（性能四指标复测+README 刷新〔表仍 09-29 口径而 runtime 已过 R/P 两批〕/310→push 实测数四处/切版三钉/BACKLOG 队列可信化〔划除已销账 + P3 清单抄送评审队列〕/docs 导航补行）→ **C** push 远端 + CI 首跑（外向动作须用户确认；两轮绿摘 snapshot continue-on-error；api-diff strict 终检对账刷基线；①段 13 道全量重跑留痕）→ **D** 发布日外部动作（RELEASE-CHECKLIST ②段既有单源 + 任务书 §5-D 三点补充：包面字段齐套含 npm pack --dry-run 核验道/files 白名单须显式决策 scripts+compiler 入包否则 Registry 三工具恒失败/Registry 前过 inspector）。执行纪律照旧：worktree 分支、红检先红后绿、全套门禁。A/B 支无外部依赖可先行。
 
 | 支 | 范围 | 状态 |
 |---|---|---|
-| REL-A 正确性收口 | 任务书 §5-A1~A7 | ⏸ 待拍板 |
-| REL-B 文档计数对真 | 任务书 §5-B | ⏸ 待拍板 |
+| REL-A 正确性收口 | 任务书 §5-A1~A7 | 🚧 进行中（rel/a-fixes） |
+| REL-B 文档计数对真 | 任务书 §5-B | 🚧 进行中（rel/b-docs） |
 | REL-C push+CI 首跑+切版 | 任务书 §5-C（外向动作） | ⏸ 待拍板 |
 | REL-D 发布日外部动作 | RELEASE-CHECKLIST ②段 9 项 | ⏸ 发布日（D-3 口径） |
+
+### REL 批 P3 收获（2026-09-30 第四遍全仓复校，~40 项抄送评审队列——定位+定性，入队后按需展开）
+
+> 源：`research/2026-09-30-release-engineering-batch.md` §2.3（五路并行深扫；file:line 以原报告为准，制作时以实读为准——本仓先例：评审报告曾有勘误）。不阻塞 1.1.0 切版发布；按域分组，与上方既有队列及第三遍 P3 清单的重叠面已去重。
+
+**runtime/compiler**：
+
+- derived 成功路径不重置 failedDirty（core.ts:196-201——方向安全，多一次无害脏标）
+- hmrSwap `values` 死代码且空读信号（template.ts:1421）
+- ATR-401 记录缺 context/fix（template.ts:1594 + codegen.mjs:195）
+- contract.ts `k in data` 认继承键（:47,50——project-json 已改 hasOwn 此处漏同款）
+- scopedStyles.add 先于 ATR-204 校验致修好后永不重注（template.ts:1150-1152）
+- `on:click={typoHandler}` 静默 no-op 缺 dev 警示（:1121）
+- `<style media=...>` CSS 静默消失（:1203,1588）
+- 函数值插值渲染字面 "undefined"（:402-409）
+- 桶出口漂移三处：bind 族只出 bindAttr / HtmlTemplateWithScope 不出桶 / 同名 AtrError 两形（index.ts:8 等）
+- dump/codegen `argOf` 缺值裸 TypeError（dump.mjs:128-133 / codegen.mjs:476-478）
+- store.commit 在 effect 上下文内调用会污染依赖（core.ts:345-346，文档级）
+- expr 一元 ±/not 缺编译路径 parity 用例（对照 keyed idx 先例）
+
+**server/gen**：
+
+- node 宿主 tx 内 exec 绕过写捕获槽（sqlite.ts:173——与 bun 分叉、漏 live 失效，违背「差异锁死本文件」自述）
+- GET/HEAD 携带请求体 → 500 非 400（node-host.ts:159-170）
+- %00 路径逃出穿越守卫变 500（static-host.ts:86-91）
+- uploads INSERT 失败分支 unlinkSync 可删跨进程胜者的共享文件（uploads.ts:569-584，多副本共享卷形态）
+- server-status faces 投影装配期冻结、后注册面从内省消失（endpoints.ts:1199-1208）
+- gen-db 生成物 Update 允许清单真值查找原型链穿透（gen-db.mjs:465——运行时显式错无注入面，与 P2-S2 同族生成器面未同步）
+- 「错误路径不发 Cache-Control=不被缓存」注释与 RFC 9111 相反（endpoints.ts:1294-1297,1610——建议错误 Response 显式 no-store）
+- 限流键 ~160MB 内存放大面 + 非 node-host 宿主可伪造 remote-addr 头（endpoints.ts:260-286，文档级缓解）
+- isProd/DEFAULT_MAX_BODY_BYTES 等常量四处单点复制无机械对拍（建议补值对拍测试）
+- uploads ensureTable 晚于写盘的孤儿文件路径（uploads.ts:569-571）
+
+**dev/cli/scripts**：
+
+- `?lines=abc`→NaN→返回全量审计行（dev-plugin:590）
+- `/__atelier/mcp` 不校验 method，GET 通道携 token 无审计执行写副作用（:484-521）
+- readBody 无 error reject 无体积帽（:179-185）
+- 截图并发 inflight 参数吞（:637-649）
+- 握手窗口被 stop 打断时 stale promise 迟到 10s 误导性「握手超时」（dev-server-host.mjs:245-254）
+- bench 固定 debugPort 9346 与 pickFreePort 动机相悖（bench.mjs:281）
+- build --out guarded 面缺 `.atelier`/`.atr`（build.mjs:92）
+- snapshot flag-first 仍 usage exit 2（cli.mjs:307-309）
+- usage die exit 码 1/2 不一（checkpoint.mjs:299,340 等）
+- checkpoint `--db` flag-当值静默 vacuous（checkpoint.mjs:128-133）
+- api-diff `snapshot --out` 无覆盖守卫（api-diff.mjs:363-366）
+- struct skillsRoot 非目录裸抛击穿 struct（struct.mjs:91-96）
+- esc() 不转义引号、属性上下文可逃逸（dev-review-pages.mjs:108,219-221，token 门内自伤面）
+- probe-mount 自述一次性仍在 dev/ 未入 vendor（probe-mount.mjs:100-103）
+- snapshot-smoke 就绪探测不带身份（snapshot-smoke.mjs:78-85）
+- `atelier dev --host` 等参数静默丢弃（cli.mjs:171-180）
+- docs-numbers 报错文案闭合标记写错永不命中（docs-numbers.mjs:65）
+
+**mcp/skills/templates**：
+
+- 技能包六处陈旧（TASK_ELIGIBLE 两件→实为六件 / snapshot.diff summary 旧平铺路径 / ATR-330 fix 仍 22.5 / ATR-403 fix「改 server.port」同 P-D#8 型漏改 / 提取器 vendored 路径写错 / auto 档审计措辞过宽）
+- approvalSecret 每次 callTool 求值——纯读工具首用即静默建 `.atelier/` 目录（server.mjs:781）
+- endpoint.call/server.health 的 mount 剥斜杠不拒 `..` 段（endpoint-tools.mjs:267,297）
+- initialize 原样回显客户端 protocolVersion 不协商（server.mjs:887，Registry 合规探测风险）
+- mcp-definitions errors/约束元数据碎裂（ATR-401 三处缺列 / audit.log lines 无界广告 vs 实现 1..500）
+- 模板 AGENTS.md 命令表 lint/package 无 STUB 标、check 描述过时（AGENTS.md.template:19-26）
+- init 兜底 .gitignore 名单与模板漂移（init-project.mjs:161-163）
+- SERVER_INFO 版本双源（mcp-definitions $meta vs package.json）无机检（建议入 contract-checks）
+
+**第三遍复校（`research/2026-09-30-third-architecture-review.md`）§3/§4 仍开补抄**（与上列及既有队列去重后的净增；REL-A 支正在修的项不重复立项，席位=上方 REL 批表 A 行）：
+
+- prod 隐身单点旗：路由级隐身已单点化「handle 回 null 唯一来源」，但 foldProdMessage 两份 + 旗散布仍在（endpoints.ts:356 / introspect.ts:106 / node-host.ts:152）
+- server 侧 Origin/content-type 闸：POST 分支全程无 content-type 判定（endpoints.ts:1546-1562——dev 面 Origin 闸已修，此为 server 直连面后续）
+- 404/405 名册无 prod 门（endpoints.ts:1515,1512,1365,1421；另 uploads 面未装配 404 先于 405，可探测装配态 :1406-1414）
+- dev-screenshot 树杀误杀窗（dev-screenshot.mjs:155-168——端口复用时误杀新占用者；R 批收口行称「移回评审队列原位」但原位无行，此处补席位）
+- dump/codegen readdirSync 未排序破跨机幂等（内容幂等已修；dump.mjs:57 / codegen.mjs:454）
+- 模板 main.ts devFetch 无 catch（templates/app/src/main.ts:72-74）
+- 桶出口类型面不全：缺 Subscription/FlatField/FlatOf/FlatLeaf 等导出（index.ts:4-22——与上列「桶出口漂移」同域两面）
+- import 环实测仅剩 1 对（template↔component，import type 擦除、分层注释在档——旧「×2」口径在档修正，无行动项）
+- 第三遍 §4 零散仍在且未入上列与既有队列者：tokenState.ready 死旗标（template.ts:41）· 缓存上限策略分裂 500 全清 vs FIFO（template.ts:342 vs expr.ts:381-385）· {#each} 源非数组裸 TypeError（template.ts:1583,1632）· graph 的 derived 节点不可见（core.ts:347-364 × bridge.ts:36-46）· HMR 旧 `<style>` 永不摘除 + atr-scope 名直拼组件名（:1076-1113,1197）· validateUnknown 与 standard-schema 数组口径不一（contract.ts:164-176）· unmount 多实例只回收首个（:1303-1312）· initTokens 无环境守卫（:42-45）· expr.ts:55 文案笔误 · jobs tick 异常死循环刷屏（jobs.ts:466-493）· codegen CLI 对 CodegenError 无壳崩栈（codegen.mjs:121-122）· gen-db 数值形态窄于兄弟（:210）· splitTopLevel 不剥注释（gen-db:121-145 / export-openapi:82-106）· apikey securitySchemes 单名假设（export-openapi:583-587）· 路由表 method 盲判 GET 打 POST 路由（dev-plugin:813-822）· MiniCdp.events 常驻会话无界累积（dev-screenshot:79-90,214-220）· test.run win32 `%`/`^` 未入黑名单（server.mjs:605,612）· build win32 命令串只引含空格路径（build.mjs:107-109）· snapshot cwd 与 checkpoint 向上发现根口径分裂（snapshot.mjs:118-121）· atelier-ui.css 引用不存在的 atelier-theme.css 旧名（:2）
+
+### 待拍板（REL 批衍生——用户拍板后才能动）
+
+- **① keyed each 行内容在不可变更新下静默陈旧**——语义三选一：item 经隐藏信号随 reconcile 对齐 / 文档+钉测试明示红线 / dev 一次性警示（证据 runtime/template.ts:1739-1761 + templates/app/tests/state-discipline.test.ts:6-8,51）
+- **② bindProp 无错误哨兵通道**，与 bindExpr/bindAttr 错误契约分裂（template.ts:548-552）
+- **③ engines 地板统一 22.13 vs 22.18**（package.json/README/sqlite.ts 三面齐改，与 REL-A 已修的版本闸机制衔接）
 
 ### F 线 — 功能债（壮大框架的主菜）
 
@@ -150,12 +231,12 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 - **scripts/lib 共享库抽取**：die 已归一（评审批 W4）但 gen/compiler 仍持 `(msg, fix)` 款（gen-auth:41/gen-db:44/codegen:46/dump:45，各文件自洽无活 bug）；`sourceFingerprint` 整函数复制两份靠注释维系（checkpoint.mjs/snapshot.mjs）；check-skills 白名单与 cli dispatch 漂移（缺 gen/export/api-diff 等动词）改从 cli.mjs 派生（api-diff.mjs `extractCliCommands` 现成可复用）。
 - ~~**server 安全收口包**：scrypt 显式参数+哈希串版本位/升级路径；`openSqlite` 统一 `PRAGMA foreign_keys=ON`+`busy_timeout`（REFERENCES 现为装饰）；请求体上限（node-host 无界缓冲）；prod 错误 message 收敛通用文案+指纹；server-status 可选 token 门禁；迁移状态表 UNIQUE+会话过期清理；`live:false` 口径修正；登录账号枚举时序侧信道~~ → **已落地（2026-09-28，差距批 W1 A2，见同日归档行）**：清单八项全修 + 加法两面（rateLimit ATR-344/登录失败锁定 ATR-345，均显式装配内存态）；诚实边界：限流/锁定=单进程内存态重启清零、反代链部署须自定义 keyBy。
 - **生成器统一字面量解析模块**：三份解析器合一消除转义分叉（`enum: ["a\nb"]` 三处三值实证）；dump 产物去时间戳/机器绝对路径恢复字节幂等；codegen 多 `<style>` 块与解释器行为对齐（全注入 vs 只注入首个）；export-openapi 私有扫描器改 import `scanEndpointSource`（幽灵端点/非法名不 die 面）。
-- **巨型函数拆分**：callTool（~412 行七段平铺）按工具族分文件、createHandler（~200 行十职责）拆 gateAuth/runWithTimeout/settleCommand、probeChecks（~394 行）八层各一函数、dev 中间件闭包（~435 行 20+ 路由）；registry/docs 两处读盘补 try/catch（文件缺失 unhandled rejection 击杀 dev server）。
-- **MCP 契约面修复**：广告参数透传（tokens.list group/state.snapshot root/ui.screenshot format 现被静默丢弃）；confirm 未知档位 fail-closed（拼错 ask 即静默 auto）；requestState 一次性 nonce（5 分钟窗可无限重放）；MCP 输入 schema min/max→minimum/maximum 翻译；ui.screenshot MCP 侧 4s↔插件侧 40s 超时失配。
-- **checkpoint/api-diff 断链**：checkpoint API 门无法使用它自己指路的 `--allow` 豁免（checkpoint.mjs 固定调用不带 allow）；api-diff baseline 损坏被当 vacuous 静默放行（exit 2 一律解释为 vacuous 的解释链）。
-- **CLI 面尾巴**：`struct --json`/`snapshot --full` 等 flag 被当子命令 usage 退出 2；init 对已存在目录零守卫（重跑覆盖用户文件）；DEP0190 win32 spawn 风格归一（同款两种写法并存，测试输出仍见告警）；gen-endpoint RESERVED_WORDS 补 `eval`/`arguments`（P3，评审批 R1 建议）；gen-endpoint 文件尾补换行符（P3 格式）。
-- **dev 面尾巴**：dev-server-host 握手超时不杀子进程（迟到 READY 使已 rejected 监督器复活）；SSE 心跳+resolved Map 无界修剪；gen-tailwind-theme token 键值零校验直拼 CSS；runtime bridge.ts/index.ts `__ATELIER_TOKEN__` 注释清理（评审批 W6 相邻发现）。
-- **性能尾巴**（长期）：无 key `{#each}` 全清重建增量化、`store._checkpoints` 无上限、公开 unmount/dispose API 补全 SPA 生命周期；基准链路换异步执行消除 win32 shell:true 族。
+- ~~**巨型函数拆分**：callTool（~412 行七段平铺）按工具族分文件、createHandler（~200 行十职责）拆 gateAuth/runWithTimeout/settleCommand、probeChecks（~394 行）八层各一函数、dev 中间件闭包（~435 行 20+ 路由）；registry/docs 两处读盘补 try/catch（文件缺失 unhandled rejection 击杀 dev server）。~~ → **已落地（2026-09-30，R 批 R3 统筹件 + r3r + r3b，见同日归档行）**：createHandler 路由表化（237 行十段→6 条目+匹配层七纯函数 30 例矩阵直测）· callTool 分发 Map（431 行→40 件 TOOL_HANDLERS+per-tool 元数据表，Map 键集=广告面机检）· probeChecks 八层各一函数表驱动 · dev 中间件路由表化 23 条；registry/docs 读盘缺 try/catch 一并由 P1-12 错误围栏兜底（第三遍复校 §3 判「已修」）。
+- ~~**MCP 契约面修复**：广告参数透传（tokens.list group/state.snapshot root/ui.screenshot format 现被静默丢弃）；confirm 未知档位 fail-closed（拼错 ask 即静默 auto）；requestState 一次性 nonce（5 分钟窗可无限重放）；MCP 输入 schema min/max→minimum/maximum 翻译；ui.screenshot MCP 侧 4s↔插件侧 40s 超时失配。~~ → **已落地（2026-09-30，R 批 R3 统筹件 + P 批 P-B，见同日归档行）**：幻影广告参数删除 · confirm 未知档位 fail-closed（ATR-402，认证失败另拆 ATR-405）· 审批句柄 nonce 一次性台账（TTL 内重放拒绝）+ 审批 HMAC 密钥与 dev-token 分离 · min/max→minimum/maximum · 受闸三工具 `_approval` inputSchema 声明 · ui.screenshot timeoutMs 4s→60s（P2-M5）。
+- **checkpoint/api-diff 断链（半销账）**：~~api-diff baseline 损坏被当 vacuous 静默放行（exit 2 一律解释为 vacuous 的解释链）~~ → **已落地（2026-09-30，P 批 P-C：api-diff 坏基线 exit 3 诚实档 + checkpoint 对「基线存在但不可评估」拒锚，见同日归档行）**；checkpoint API 门无法使用它自己指路的 `--allow` 豁免**仍开且加重**（第三遍复校 §3 复核：门内 spawn 不带 `--allow`〔checkpoint.mjs:256〕，save 侧 `--allow` 被 :382 过滤式静默吞——用户以为豁免了、门照红；本队列勘误行曾判「已随 R 批销账」与复校实况不符，以复校为准）。
+- **CLI 面尾巴（两件销账）**：~~`struct --json`/`snapshot --full` 等 flag 被当子命令 usage 退出 2~~ → **已落地（2026-09-30，R 批 R1-D，见同日归档行）**；~~init 对已存在目录零守卫（重跑覆盖用户文件）~~ → **已落地（2026-09-30，R 批 R1-D：init die 指路 `atelier sync` + `--force` 显式逃生 + 参数缺值不再落 `./undefined`）**；DEP0190 win32 spawn 风格归一（同款两种写法并存，测试输出仍见告警）；gen-endpoint RESERVED_WORDS 补 `eval`/`arguments`（P3，评审批 R1 建议）；gen-endpoint 文件尾补换行符（P3 格式）。
+- **dev 面尾巴（两件销账）**：~~dev-server-host 握手超时不杀子进程（迟到 READY 使已 rejected 监督器复活）~~ → **已落地（2026-09-30，R 批 R1-D：握手超时杀子进程 + start() re-entry 清场）**；~~resolved Map 无界修剪~~ → **已落地（2026-09-30，R 批 r3b：resolved Map 200 上限 FIFO 修剪）**；SSE 心跳**仍开且归属修正**（第三遍复校：server 侧 live.ts 已有心跳/背压，留队实指 **dev 面代理 SSE**〔dev-plugin 无心跳、写入不看返回值〕）；gen-tailwind-theme token 键值零校验直拼 CSS；runtime bridge.ts/index.ts `__ATELIER_TOKEN__` 注释清理（评审批 W6 相邻发现；第三遍复校：dev 侧已移除注入，四读点成死代码）。
+- **性能尾巴**（长期）：无 key `{#each}` 全清重建增量化、streamValue push O(n²)（primitives.ts:51-53）、`store._checkpoints` 无上限（core.ts:298,312-321，被 HMR 快照重锚放大）、bridge sig-N 索引键不稳定（bridge.ts:31-33,49-64——dispose 后下标漂移→`sig-?`）、公开 unmount/dispose API 补全 SPA 生命周期；基准链路换异步执行消除 win32 shell:true 族。（性能债四项席位 2026-09-30 REL-B 按第三遍复校 §3 补全——streamValue/bridge 两项原仅存于 R 批收口行叙述）
 
 ### 设计备忘（半天级，按需触发）
 
