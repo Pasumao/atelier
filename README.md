@@ -95,17 +95,17 @@ node <atelier仓库路径>/atelier/mcp/server.mjs   # MCP 工具面（ATELIER_PR
 
 AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@num:tools-->40<!--@/--> 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按面分组按需启用）· W3C Design Tokens（DTCG）标准互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`）。
 
-## 性能基线（`atelier bench` 实测 2026-09-29 / Windows / Node 24 · 1.1.0 复测口径）
+## 性能基线（`atelier bench` 实测 2026-09-30 / Windows / Node 24 · 1.1.0 切版复测口径）
 
 | 指标 | 目标 | 实测 | 判定 |
 |---|---|---|---|
-| 核心运行时体积 | gzip ≤ 30 KB | **12.69 KB** | PASS |
-| 10³ 节点挂载+首渲染 | ≤ 50 ms | **3.4 ms** | PASS |
-| HMR（保存→可见） | ≤ 100 ms | **61 ms**（热交换按名锚定保留 `$state`，不清零） | PASS |
-| 截图回环 | ≤ 500 ms | **293 ms**（常驻无头实例） | PASS |
+| 核心运行时体积 | gzip ≤ 30 KB | **13.85 KB** | PASS |
+| 10³ 节点挂载+首渲染 | ≤ 50 ms | **2.8 ms** | PASS |
+| HMR（保存→可见） | ≤ 100 ms | **52 ms**（热交换按名锚定保留 `$state`，不清零） | PASS |
+| 截图回环 | ≤ 500 ms | **300 ms**（常驻无头实例） | PASS |
 
 复现：`node atelier/cli.mjs init --target my-app --name App && cd my-app && pnpm install && node <atelier仓库路径>/atelier/cli.mjs bench --app ./my-app`。
-诚实性：FAIL 不粉饰、不豁免；数字会随修复移动（HMR 曾 108ms → 51ms → 1.1 复测 61ms，截图曾 1933ms → 318ms → 1.1 复测 293ms；体积自 09-06 的 9.09KB 随 bind 指令族/事件修饰/schema 提取/error 语义增长至 12.69KB，仍远低于判据）。
+诚实性：FAIL 不粉饰、不豁免；数字会随修复移动（HMR 曾 108ms → 51ms → 61ms → 52ms，截图曾 1933ms → 318ms → 293ms → 300ms；体积自 09-06 的 9.09KB 随 bind 指令族/事件修饰/schema 提取/error 语义/R·P 两批正确性与 dev 警示面增长至 13.85KB，仍远低于判据）。
 
 ## 路线与现状（详见 ROADMAP.md）
 
@@ -131,7 +131,7 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 - **FTS5 分词器为 unicode61 缺省**：按空格/标点切词，连续中文串 = 整串单 token——整串与前缀 `*` 查询可命中、中段子串不命中。影响：中文按词检索受限（不切词）。出路：整串/前缀查询形态可用；真分词需应用侧预处理或手改迁移加 tokenize 选项，表契约不变。
 - **vendored 应用按 init 时点冻结**：应用获得的是 init 时刻的框架拷贝；新能力（MCP HTTP 直连、全页快照等）需 `atelier sync` 拉齐。影响：未 sync 的旧应用 MCP 直连 503（诚实指路 stdio）。出路：`node atelier/cli.mjs sync --target <dir>` 幂等拉齐，应用源码不受影响。
 - **正确率主张克制**：三臂对照实验在简单层与加难层（Wave-7 正式波 45 run）均全平——绝对口径 100% 达标、相对区分力为零；「技能包优势」主张悬置待干扰面/混合实验出数，我们不引用任何"首遍正确率优势"数字，请引用者同样克制。
-- **性能数字为单机实测**（2026-09-29 / Windows / Node 24，1.1.0 复测口径），会随修复移动；FAIL 不粉饰、不豁免。
+- **性能数字为单机实测**（2026-09-30 / Windows / Node 24，1.1.0 切版复测口径），会随修复移动；FAIL 不粉饰、不豁免。
 - **未实现即明说**：CLI 命令按实现程度标注（完整 / 最小 / 未实现），未实现的命令返回 exit 4 并指路规格文档，永不伪造成功。
 - 所有"未确认"结论明确标注，不写成事实。
 
