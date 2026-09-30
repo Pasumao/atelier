@@ -15,7 +15,9 @@
  *                     legacy flat .atr/snapshots/baseline.png is a read-only fallback) and the dev face answers,
  *                     the live render must MATCH it — MISMATCH refuses the anchor (fix via `atelier snapshot check --update`)
  *                     gate 3 (P3-4 api-diff gate): if .atelier/api-surface.json exists, unexempted public API breaking drift
- *                     refuses the anchor (re-baseline via `atelier api-diff snapshot`; carve-outs via `--allow`)
+ *                     refuses the anchor (re-baseline via `atelier api-diff snapshot`; carve-outs via `--allow`);
+ *                     a baseline that exists but is UNREADABLE (corrupt JSON / unknown schema, api-diff exit 3)
+ *                     also refuses the anchor — never a vacuous pass (P1 #8)
  *   list [--json]     show the human-visible timeline (.atelier/checkpoints.jsonl — local-only
  *                     ledger since 15d9059: deliberately gitignored, recoverability comes from
  *                     the anchor commits themselves; tracked-ledger repos still get meta commits)
@@ -270,6 +272,16 @@ function apiDiffGate(repo, skip) {
   const scriptPath = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "api-diff.mjs");
   const r = spawnSync(process.execPath, [scriptPath, "check", "--root", repo, "--json"], { encoding: "utf8" });
   if (r.status === 2) { console.log("[gate] api surface layout undetectable — gate vacuous this anchor"); return; }
+  /* P1 #8：基线「存在但不可评估」（api-diff exit 3 = JSON 损坏 / schema 不识别）→ 拒锚，绝不
+   * vacuous pass——此前 exit 2 被一律解释为布局不可判，坏基线静默锚定击穿「未检不锚」（与上方
+   * :261 诚实口径自相矛盾）。不可评估 ≠ 无从评估：基线在，就先修基线再锚。 */
+  if (r.status === 3) {
+    die(
+      `error: 未检不锚 — api-surface 基线存在但不可评估（损坏 / schema 不识别）；refusing to anchor on an unevaluable baseline\n` +
+      `fix: 检查 ${baseline}——确认后重跑 'atelier api-diff snapshot' 重新基线化（旧基线经 git 历史留痕），或 deliberate wip anchor → 'atelier checkpoint save <name> --no-gate'.`,
+      1,
+    );
+  }
   let result;
   try { result = JSON.parse(r.stdout); } catch { console.log("[gate] api-diff output unparseable — gate vacuous this anchor"); return; }
   if (r.status === 0 && result.violations?.length === 0) {

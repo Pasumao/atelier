@@ -16,12 +16,21 @@
  *                        经 ../scripts/struct.mjs 等相对 import 在 vendored 拷贝上原样成立。名单与
  *                        sync-project.mjs / tests/mcp-vendor.test.ts 三处同源）
  *   4. init-ai（除非 --no-ai）：skills 双落点 + AGENTS.md/llms.txt + specs/ + MCP 客户端配置
+ *
+ * P1 #7 目录守卫：target 已存在且非空（或为文件）→ die exit 2 指路 `atelier sync`——cpSync
+ * 合并覆盖会静默重置用户改过的 main.ts/contract.ts/vite.config.ts（未提交即不可恢复）；
+ * `--force` 为显式覆盖逃生口（模板件覆盖同名，名单外用户文件保留）。空目录照常脚手架。
  */
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
 
 const PKG = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), ".."); // atelier/
+
+function die(msg, code = 2) {
+  console.error(msg);
+  process.exit(code);
+}
 
 function parseArgs(argv) {
   const a = {};
@@ -30,6 +39,7 @@ function parseArgs(argv) {
       case "--target": a.target = argv[++i]; break;
       case "--name": a.name = argv[++i]; break;
       case "--no-ai": a.noAi = true; break;
+      case "--force": a.force = true; break;
       default: console.error(`unknown arg: ${argv[i]}`); process.exit(2);
     }
   }
@@ -38,10 +48,26 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 if (!args.target || !args.name) {
-  console.error("usage: init-project --target <dir> --name <Name> [--no-ai]");
-  process.exit(2);
+  die("usage: init-project --target <dir> --name <Name> [--no-ai] [--force]");
 }
 const target = path.resolve(args.target);
+
+/* P1 #7：目录守卫（先于任何写入）。文件 target 连 --force 也不放行——目录与文件的形态冲突
+ * 不是「覆盖用户文件」能形容的，诚实拒绝换路径。 */
+if (fs.existsSync(target) && !fs.statSync(target).isDirectory()) {
+  die(
+    `error: target 已存在且不是目录（${target}）——init 需要一个目录作脚手架落点\n` +
+    `fix: 换一个 --target 路径；既有 Atelier 应用拉齐框架件用 \`node <repo>/atelier/cli.mjs sync --target <dir>\``,
+  );
+}
+if (fs.existsSync(target) && fs.readdirSync(target).length > 0 && !args.force) {
+  die(
+    `error: target 已存在且非空（${target}）——init 绝不静默覆盖：cpSync 合并覆盖会重置你改过的 ` +
+    `main.ts / contract.ts / vite.config.ts（未提交即不可恢复）\n` +
+    `fix: 既有 Atelier 应用拉齐框架件用 \`node <repo>/atelier/cli.mjs sync --target <dir>\`；` +
+    `确要在此目录重建脚手架请显式加 \`--force\`（模板件覆盖同名，名单外用户文件保留）`,
+  );
+}
 
 const TEMPLATE = path.join(PKG, "templates", "app");
 const RUNTIME = path.join(PKG, "runtime");

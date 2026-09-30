@@ -5,6 +5,7 @@
  * 诚实边界：提取器是语法级（正则/括号配对），用例即其语义承诺的边界。
  */
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -259,5 +260,35 @@ describe("端到端（真实框架仓，自检面）", () => {
     const ids = snap.surfaces["component-contracts"].map((e) => e.id);
     expect(ids).toContain("HelloCard.title");
     expect(ids).toContain("HelloCard.start");
+  });
+});
+
+/* ---------------- P1 #8：基线损坏 = 独立退出码 3（与 usage/缺 baseline 的 2 分离） ----------------
+ * 评审 #8：baseline JSON 损坏也 die exit 2，checkpoint 把 2 一律解释为「布局不可判 → vacuous
+ * pass」——坏基线静默放行，击穿「未检不锚」。修后：布局不可判/缺 baseline/usage = 2；
+ * 基线存在但不可评估（JSON 损坏 / schema 不识别）= 3，checkpoint 对 3 拒锚。 */
+describe("P1 #8：基线损坏退出码（CLI 装配面，spawn 真实脚本）", () => {
+  const SCRIPT = path.resolve(import.meta.dirname, "..", "scripts", "api-diff.mjs");
+
+  it("红检：baseline JSON 截断 → exit 3 + stderr 指认损坏；缺 baseline 仍 exit 2（既有语义不回退）", () => {
+    const dir = tmpDir();
+    const bad = path.join(dir, "api-surface.json");
+    fs.writeFileSync(bad, '{"schemaVersion":1,"surfaces":{"mcp-tools":[{"id":"a"}', "utf8"); // 截断
+    const r = spawnSync(process.execPath, [SCRIPT, "check", "--root", dir, "--baseline", bad, "--json"], { encoding: "utf8", windowsHide: true });
+    expect(r.status).toBe(3); // 修复前：2——被 checkpoint 解释为 vacuous pass
+    expect(r.stderr).toContain("baseline");
+    expect(r.stderr).toContain("api-diff snapshot"); // fix 指路再基线化
+
+    const missing = spawnSync(process.execPath, [SCRIPT, "check", "--root", dir, "--baseline", path.join(dir, "nope.json")], { encoding: "utf8", windowsHide: true });
+    expect(missing.status).toBe(2); // 缺 baseline = usage 级，语义不变
+    expect(missing.stderr).toContain("缺 baseline");
+  });
+
+  it("红检：JSON 合法但 schema 不识别（schemaVersion 缺失 / surfaces 非对象）→ exit 3", () => {
+    const dir = tmpDir();
+    const bogus = path.join(dir, "api-surface.json");
+    fs.writeFileSync(bogus, JSON.stringify({ hello: "not a snapshot" }), "utf8");
+    const r = spawnSync(process.execPath, [SCRIPT, "check", "--root", dir, "--baseline", bogus], { encoding: "utf8", windowsHide: true });
+    expect(r.status).toBe(3); // 修复前：diffSurfaces 当空面处理 → 可能 vacuous 放行（exit 0/2）
   });
 });
