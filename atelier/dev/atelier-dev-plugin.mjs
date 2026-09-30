@@ -143,12 +143,32 @@ export function atelierDevPlugin() {
   const crypto = require("node:crypto");
   const ROOT = process.cwd();
 
-  const TOKEN = crypto.randomUUID();
-  fs.mkdirSync(path.join(ROOT, ".atelier"), { recursive: true });
-  // P1-12 ②：dev-token 是 dev 面唯一信任锚，落盘即 0600（写时 mode + chmod 兜底）。
-  // 平台语义：POSIX 完整；win32 的 chmod 只映射 read-only 位（0o600 含写位 → 可写文件），尽力而为。
-  fs.writeFileSync(path.join(ROOT, ".atelier", "dev-token"), TOKEN, { encoding: "utf8", mode: 0o600 });
-  try { fs.chmodSync(path.join(ROOT, ".atelier", "dev-token"), 0o600); } catch { /* 平台不支持时写时 mode 已尽力 */ }
+  /* ---- REL-A A3：dev-token 铸造时机 = configureServer（serve 路径），非插件工厂（vite config 期）----
+   * 旧口径：工厂实例化即铸 token 落盘 ⇒ `atelier build`/`pnpm build`（vite build 只实例化工厂、
+   * 永不触发 configureServer）也重铸并覆写——与运行中 pnpm dev 互踩后，读盘 token 的工具链
+   * （scripts/snapshot.mjs / bench.mjs / checkpoint.mjs）全部 401，而 checkpoint 把 !r.ok 一律判
+   * vacuous 放行 ⇒「未检不锚」快照门静默解除。修后：config/build 期对 token 零读零写；serve 期
+   * 磁盘已有非空 token（dev 重启/同目录并行 dev）复用不覆写——磁盘值即运行中 dev 面的内存令牌；
+   * 无则铸造。P1-12 ② 0600 落盘语义原样保留。 */
+  let TOKEN = null;
+  const mintDevToken = () => {
+    if (TOKEN != null) return TOKEN;
+    const file = path.join(ROOT, ".atelier", "dev-token");
+    try {
+      const existing = fs.readFileSync(file, "utf8").trim();
+      if (existing) {
+        TOKEN = existing; // 复用：重启/并行 dev 不互踩（绝不覆写运行中 dev 面的令牌）
+        return TOKEN;
+      }
+    } catch { /* 无 token 文件 → 铸造 */ }
+    TOKEN = crypto.randomUUID();
+    fs.mkdirSync(path.join(ROOT, ".atelier"), { recursive: true });
+    // P1-12 ②：dev-token 是 dev 面唯一信任锚，落盘即 0600（写时 mode + chmod 兜底）。
+    // 平台语义：POSIX 完整；win32 的 chmod 只映射 read-only 位（0o600 含写位 → 可写文件），尽力而为。
+    fs.writeFileSync(file, TOKEN, { encoding: "utf8", mode: 0o600 });
+    try { fs.chmodSync(file, 0o600); } catch { /* 平台不支持时写时 mode 已尽力 */ }
+    return TOKEN;
+  };
   const AUDIT_FILE = path.join(ROOT, ".atelier", "audit.jsonl");
   const audit = (kind, detail) => {
     try {
@@ -276,6 +296,7 @@ export function atelierDevPlugin() {
       };
     },
     configureServer(server) {
+      mintDevToken(); // REL-A A3：token 铸造/复用在 serve 路径第一序——config/build 期永不 touch（见 mintDevToken 注）
       /* ---------- P1 #10：actualPort 单源 ----------
        * Vite strictPort 缺省 false：配置端口被占时自动 +1，config.server.port 不变——此前 7 处硬用
        * 配置端口（fetchChildStatus host / selfPort〔cookie 名 + Origin 白名单〕/ mcp devUrl /
