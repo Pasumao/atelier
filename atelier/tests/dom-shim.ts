@@ -202,3 +202,9 @@ export function attachToDocument(node: AnyNode): AnyNode {
   doc.documentElement.appendChild(node);
   return node;
 }
+
+/** 文档 head 中的 <style> 元素（R1-B 支 P1 #6 双 style 块注入计数用：解释器 vs 编译路径
+ * 的 scoped 样式都落在 head，序列化容器看不到） */
+export function headStyles(): AnyNode[] {
+  return doc.head.childNodes.filter((c: AnyNode) => c.type === "element" && c.tag === "style");
+}
