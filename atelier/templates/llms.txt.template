@@ -11,8 +11,8 @@
 | effect | `$effect(fn) → cleanup` | subscribes to deps read inside fn |
 | component | `component(fn, { name, schema }) → ComponentDef` | fn returns `html\`...\`.locals({...})` |
 | html | `html\`...\`` (tagged template) | `.locals(obj)` injects scope (compiler captures later) |
-| stream | `streamValue<T>() → { values, value, done, push, finish }` | streaming text/values; no manual setInterval |
-| optimistic | `optimisticList<T>() → { values, optimisticAdd, commit, revert }` | pending → committed / rollback |
+| stream | `streamValue<T>() → { values, value, done, error, push, finish }` | streaming text/values; error frames never close the stream; no manual setInterval |
+| optimistic | `optimisticList<T>() → { values, rollbacked, revertErrors, optimisticAdd, commit, revert }` | pending → committed / rollback (revert errors carried in `revertErrors`) |
 | store | `store.commit/rollback/timeTravel/list` | named checkpoints; app-state only (source = git, decision 15) |
 | graph | `store.graph(keyOf?)` | live dependency graph (signals + effect edges); keyOf remaps ids |
 | log | `store.log(n)` | $state mutation journal (seq/at/sig/from/to, bounded ring) |
@@ -20,7 +20,7 @@
 
 ## Template DSL
 
-`{expr}`（对象/数组字面量 `{{a: x.value}}`、`{a}` 简写）· `{#if}{:else if}{:else}{/if}` · `{#each arr as item, idx [by key]}` · `on:click={handler}（.prevent/.stop 修饰符：on:click.prevent={handler}，ATR-326 白名单外拒绝）` · `bind:value={sig}` / `bind:checked={sig}` / `bind:group={sig}`（表单双向，目标=可写 $state；$derived→ATR-305 / 目标非法或组合越面→ATR-324 / 同槽重复冲突→ATR-325 / radio 缺 value 身份键→ATR-327；bind:group × radio，组身份=静态 value 属性，组内互斥经信号）· `attr={expr}`（含对象字面量）· void 元素 `<br>/<img>/<input>` · `<StyleBlock scoped>` — 解析期显式拒绝未闭合/错位结构（ATR-101）。
+`{expr}`（对象/数组字面量 `{{a: x.value}}`、`{a}` 简写）· `{#if}{:else if}{:else}{/if}` · `{#each arr as item, idx [by key]}` · `on:click={handler}（.prevent/.stop 修饰符：on:click.prevent={handler}，ATR-326 白名单外拒绝）` · `bind:value={sig}` / `bind:checked={sig}` / `bind:group={sig}`（表单双向，目标=可写 $state；$derived→ATR-305 / 目标非法或组合越面→ATR-324 / 同槽重复冲突→ATR-325 / radio 缺 value 身份键→ATR-327；bind:group × radio，组身份=静态 value 属性，组内互斥经信号）· `attr={expr}`（含对象字面量）· void 元素 `<br>/<img>/<input>` — 解析期显式拒绝未闭合/错位结构（ATR-101）。
 
 ## Contract (flat schema)
 
@@ -34,18 +34,20 @@ Rules: pure data, literal discriminants, no generics, no $ref/oneOf.
 
 | Command | Flags |
 |---|---|
-| `atelier init [--ai]` | --ai generates AGENTS.md/SKILL.md/llms.txt/specs |
-| `atelier dev` | — |
-| `atelier review` | — |
-| `atelier check` / `lint` / `test` | — |
-| `atelier snapshot [--update]` | — |
-| `atelier e2e` | — |
-| `atelier build [--static]` | --static = SSG |
-| `atelier package [--electron]` | Tauri 2 default |
+| `atelier init --target <dir> --name <Name> [--no-ai]` | agent layer (AGENTS.md/llms.txt/specs/client MCP configs) on by default; `--no-ai` opts out |
+| `atelier dev [--prod-db <path>]` | dev face + MCP + server-face supervisor |
+| `atelier review [--open]` | needs a running dev server |
+| `atelier check` / `atelier test` | check = eight-layer struct gate; test forwards to the app runner |
+| `atelier snapshot save \| check [--update] [--full]` | never auto-promotes; human review first |
+| `atelier api-diff snapshot \| check` | public API surface drift gate |
+| `atelier checkpoint save \| list \| rollback` | decision-15 source checkpoints (save = gated anchor) |
+| `atelier build --target=node\|bun [--out <dir>]` | self-hosted single-container artifact (D-F14) |
+| `atelier compile / gen db\|endpoint\|auth / migrate / db backup / impact / call / export openapi / mcp / skills` | generator family, reversible migrations, online backup, impact navigation, endpoint CLI calls, OpenAPI export, MCP server, skill installer/gate |
+| `atelier e2e` / `atelier lint` / `atelier package` | STUB (exit 4, honest) — spec positions, not runnable yet |
 
 ## Errors
 
-`{ code, message, context, fix }` — domains: 1xx compile / 2xx contract / 3xx runtime / 4xx MCP. Table: `skills/errors/codes.md`.
+`{ code, message, context, fix }` — domains: 1xx compile / 2xx contract / 3xx runtime / 4xx MCP. Table: `skills/atelier-error-codes/SKILL.md` (read `fix` and execute).
 
 ## Design tokens
 
@@ -53,4 +55,4 @@ Rules: pure data, literal discriminants, no generics, no $ref/oneOf.
 
 ## Packages
 
-`atelier` (runtime/cli) · `@atelier/compiler` · `@atelier/eslint` · `@atelier/config` · `@atelier/review` · `create-atelier`
+Framework repo today: `atelier/` (runtime/server/compiler/gen/dev/mcp/skills self-contained). npm release split (`@atelier/compiler` · `@atelier/eslint` · `@atelier/review` · `create-atelier`) is planned, not implemented (decision 13a/14).

@@ -3,7 +3,7 @@ name: atelier
 description: Atelier framework skill (root). Write .atr.ts components, streaming UI, state transactions, style tokens, acceptance testing, package exe. Load first for any Atelier task.
 ---
 
-# Atelier — Quick Start (v0.1)
+# Atelier — Quick Start
 
 > Read this first. Detail lives in sub-skill packages (load on demand). Never read whole repo for small changes.
 
@@ -37,19 +37,19 @@ export const Greeting = component(function Greeting(props: { name: string }) {
 2. Ground truth before edits: MCP `structure.map` → registry → tokens → state snapshot (see `atelier-mcp-tools/SKILL.md`)
 3. Edit `.atr.ts` — explicit `$state/$derived/$effect`, no magic
 4. `atelier dev` — watch compile errors + HMR
-5. Self-verify: `atelier check` → `atelier lint` → `atelier test` → `atelier snapshot` (diff MUST be reviewed, not auto-accepted)
+5. Self-verify: `atelier check` → `atelier test` → `atelier snapshot` (diff MUST be reviewed, not auto-accepted; `atelier lint` is a STUB, exit 4 — guard tests carry the soft constraints)
 6. Produce `diff.report`, wait for human approve/disapprove (feedback writes back to `specs/`)
 
-## DoD (all six)
+## DoD
 
-1. `atelier check` passes, 2. `atelier lint` zero violations, 3. `atelier test` all green, 4. snapshot diff reviewed (no auto-accept), 5. no `locked` touched / no new deps, 6. diff report attached.
+1. `atelier check` passes, 2. `atelier test` all green (incl. guard tests — the soft-constraint carrier), 3. snapshot diff reviewed (no auto-accept), 4. no `locked` touched / no new deps, 5. diff report attached.
 
-## Hard bans (compile/lint error or ATR error)
+## Hard bans (check/ATR error)
 
 - Hardcoded style values (use semantic tokens only)
 - Hand-written typewriter (`setInterval` polling for streaming text — use `streamValue`)
 - Generics / wide string unions in contract types
-- Bare `window/document` (use `atelier.env`), implicit global state (use `$state`/store)
+- Bare `window/document` in components (no DOM globals in render paths — the decision-9 `atelier.env` primitive is not implemented yet), implicit global state (use `$state`/store)
 
 ## Sub-skills (skill packages, load on demand)
 

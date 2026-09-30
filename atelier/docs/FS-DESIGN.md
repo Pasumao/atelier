@@ -1217,25 +1217,52 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 
 ## 15. 错误码分配总表（新增段规划；码号以实现时对表现用占用为准）
 
+> **R2 批落地注记（2026-09-30）**：全表展开为一码一行（原「既有」摘要行注销），与
+> `skills/atelier-error-codes`（ERR_CATALOG，SSOT）及 `docs/SPEC-Agentic-DX-v0.2.md` §3.2
+> 三表码集相等——`scripts/contract-checks.mjs` 机检钉死（代码实引 ⊆ 总表 + 三表互等），
+> 新码先注册 ERR_CATALOG 再写实现。
+
 | 码 | 域 | 含义 | 出处 |
 |---|---|---|---|
+| ATR-101 | 1xx 编译 | 模板语法错误（标签/块未闭合） | 既有（1.0 前；runtime/template.ts） |
+| ATR-102 | 1xx 编译 | props 注解提取拒绝超面注解（泛型/交叉/工具类型/非字面量联合/嵌套对象/any/unknown——拒绝猜测，dev 插件转换期 Vite overlay 透出） | 决策 26 v1（compiler/extract-schema·dump） |
+| ATR-103 | 1xx 编译 | 契约违反 H1（泛型/映射类型进契约）——注册位预留，当前超面注解经 ATR-102 拒绝 | 决策 6（规范位） |
 | ATR-105 | 1xx 编译 | server 边界 import 越界 | §9.1（FS-8） |
 | ATR-106 | 1xx 编译 | import 白名单外包名（幻觉包） | §9.2（FS-6） |
 | ATR-107 | 1xx 编译 | 超出扁平投影能力（投影器遇 $ref/oneOf 等非扁平结构显式 throw，绝不静默降级） | §2.4（FS-9，已落地） |
+| ATR-201 | 2xx 契约 | 输入不符扁平 schema（props/端点输入缺字段或类型错） | 既有（1.0 前；runtime/contract.ts） |
+| ATR-204 | 2xx 契约 | 样式引用未定义 token | 既有（1.0 前） |
+| ATR-205 | 2xx 契约 | 输入不是 JSON 对象 | 既有（1.0 前；runtime/contract.ts） |
 | ATR-215 | 2xx 契约 | 端点输出契约违规（开发者错误） | §2.3 |
 | ATR-216 | 2xx 契约 | 端点输出非 JSON-safe | §2.3 |
+| ATR-301 | 3xx 运行 | 模板表达式解析失败（箭头函数/赋值/函数调用遗留） | 既有（1.0 前；runtime/expr.ts） |
+| ATR-305 | 3xx 运行 | 对 $derived 信号赋值 | 既有（1.0 前；runtime/core.ts） |
+| ATR-310 | 3xx 运行 | 未知端点/上传面/资产（404；hints 列已注册名，资产按内容寻址 sha256 重传幂等修复） | 既有（1.0 前；endpoints.ts/uploads.ts） |
+| ATR-311 | 3xx 运行 | 方法不允许（405；POST-only，live 为 GET SSE；prod 隐身 debug 面 405 同码） | 既有（1.0 前）/决策 27 注记 |
+| ATR-312 | 3xx 运行 | 请求体不是合法 JSON/无契约端点收到非对象/multipart 缺 boundary 或体非法（400） | 既有（1.0 前；endpoints/live/uploads） |
+| ATR-313 | 3xx 运行 | 端点/上传面重名或命名非法；定义期契约矛盾同码（command 带 cache/restful、cache 形状/键非法、public×auth——炸在定义处，不另开新码） | 既有（1.0 前）/差距批 A7 + 决策 34 同码注记 |
 | ATR-314 | 3xx 运行 | live/invalidate 声明非法（键语法错） | §4.1 |
+| ATR-315 | 3xx 运行 | live SSE 与端点级鉴权同时声明——注册期 fail-closed（共享重算 ctx.auth=null，auth 声明会被 SSE 通道静默忽略） | §4.2（live×鉴权收口，已落地） |
+| ATR-320 | 3xx 运行 | handler 未捕获抛错（500 兜底；journal 记失败；上传 IO 失败与 call 非 JSON 2xx 同码形态） | 既有（1.0 前；endpoints/node-host/uploads/call） |
 | ATR-321 | 3xx 运行 | live 重算失败（SSE error 事件，不断流） | §4.2 |
 | ATR-322 | 3xx 运行 | 端点超时（503） | §3.6 |
 | ATR-323 | 3xx 运行 | 模板表达式返回 Promise（异步泄漏进响应式图，显式拒绝） | §8.4（FS-11，已落地） |
 | ATR-324 | 3xx 运行 | bind: 目标非法——非单个可写信号 / 元素-attr 组合不在 v1 支持面 | 决策 25（bind 批，已落地；skills ERR_CATALOG 同步） |
 | ATR-325 | 3xx 运行 | 同元素同 attr 重复 bind:（WeakMap 守卫，后到者错误卡不双订） | 决策 25（bind 批，已落地） |
 | ATR-326 | 3xx 运行 | on: 事件修饰未识别（白名单 v1 = prevent/stop；dev 预检错误卡整替换 / prod record 后跳过该监听照常渲染） | 决策 25 后置候选 v1.1（m9 批，已落地） |
+| ATR-327 | 3xx 运行 | bind:group radio 缺静态 value 身份键（组身份=静态 value 属性；动态 value/空串同拒） | 决策 25 v1.2（bind 批，已落地） |
+| ATR-328 | 3xx 运行 | 已知布尔属性收到字符串化假值（存在即真 ⇒ 十有八九语义反转；dev 一次性警示/prod 剥离，渲染语义不变） | 既有（1.0 前；runtime/template.ts 布尔属性面） |
+| ATR-330 | 3xx 运行 | 无可用 SQLite 宿主（SqliteUnavailableError，分发层映射 500） | 既有（1.0 前；server/sqlite.ts 单文件） |
 | ATR-331 | 3xx 运行 | 迁移缺 down（不成对） | §5.4 |
 | ATR-332 | 3xx 运行 | 迁移 checksum 不匹配 | §5.4 |
 | ATR-333 | 3xx 运行 | down 缺失/执行失败 | §5.4 |
 | ATR-334 | 3xx 运行 | up 失败（事务已回滚） | §5.4 |
-| ATR-340/341 | 3xx 运行 | 鉴权未通过 / 权限不足（401/403） | §6.2 |
+| ATR-335 | 3xx 运行 | 已应用种子文件被改（atelier_seeds checksum 不符） | §5.6（D-F17，M2-d 落地） |
+| ATR-336 | 3xx 运行 | 种子语句不可重放（裸 INSERT 无 ON CONFLICT）或执行失败（整体回滚） | §5.6（D-F17，M2-d 落地） |
+| ATR-340 | 3xx 运行 | 鉴权未通过（401） | §6.2 |
+| ATR-341 | 3xx 运行 | 权限不足（403） | §6.2 |
+| ATR-342 | 3xx 运行 | gen endpoint 名字闸（端点名非法/派生标识符非法/名字字面量解码失败——坏名字绝不流入产物） | FS-M2（P1-8 落地；NAME_RE 与运行时 ATR-313 同源） |
+| ATR-343 | 3xx 运行 | gen db 表名闸（表名非法/toPascal 派生不出合法标识符/JS 保留字） | FS-M2（R1-C 支补 RESERVED_WORDS 闸；词表与 ATR-342 同源） |
 | ATR-344 | 3xx 运行 | 限流窗口超配额（429 + Retry-After；rateLimit 显式装配、缺省不启用，in-memory v1） | §3.3（A2 批，已落地） |
 | ATR-345 | 3xx 运行 | 登录失败锁定（423；gen auth 产物明文 knob，in-memory v1） | §3.3/§6.1（A2 批，已落地） |
 | ATR-346 | 3xx 运行 | 请求体超上限（413；maxBodyBytes 可配，node-host 中途截断 + 分发器兜底） | §3.3（A2 批，已落地） |
@@ -1243,10 +1270,15 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 | ATR-351 | 3xx 运行 | 幂等键 KV 参数非法（key 空/超 512 字符、value 不可 JSON 序列化）——调用点同步抛错 | §5.6（差距批 A4，已落地） |
 | ATR-352 | 3xx 运行 | 插值/属性值直接收到信号对象（忘写 `.value` 典型笔误）——信号被渲染成内部字段 JSON；dev 每信号一次性警示、prod 剥离（ATR-328 同款形态），渲染语义逐字不变 | R1 收口批 B 支（R-D4a，2026-09-30 评审 §4.4 静默错误族，已落地；skills ERR_CATALOG 同步） |
 | ATR-353 | 3xx 运行 | keyed each 重复身份键——自第二项起折叠进已有行（appendChild 移动语义），渲染行数少于数据项数；dev 每 each 块一次性警示、prod 剥离，折叠语义逐字不变 | R1 收口批 B 支（R-D4b，2026-09-30 评审 §4.4 静默错误族，已落地；skills ERR_CATALOG 同步） |
+| ATR-401 | 4xx 工具/dev 面 | 组件未注册 / MCP 工具或句柄未知（含审批句柄过期） | 既有（1.0 前；mcp 面） |
+| ATR-402 | 4xx 工具/dev 面 | confirm 档拒绝（deny 或人工否决）；dev-token 校验失败当前同码（双语义拆分归 R3 批） | 既有（1.0 前）/R2 批双语义注记 |
 | ATR-403 | 4xx 工具/dev 面 | dev 托管 server 面不可用（未托管/未就绪/热重启中/子进程连接被拒——代理以 HTTP 503 返回，fix 可执行） | §11.1（FS-7，已落地） |
-| 既有 | — | 310/311/312/313/320 端点、330 SQLite、301/305 模板、201/204 契约/token、401/402 MCP | 不动 |
+| ATR-404 | 4xx 工具/dev 面 | 未知 MCP 工具名 | 既有（1.0 前；mcp/server.mjs·endpoint-tools） |
+| ATR-415 | 4xx 工具/dev 面 | 不支持的媒体类型（dev 面 JSON 路由/上传面强制 content-type——no-cors text/plain 伪装写通道已封） | dev 面收口（P1-12）/上传面同码 |
+| ATR-500 | 4xx 工具/dev 面 | MCP 工具内部错误兜底（图构建失败/超时/取消、任务执行崩溃） | 既有（1.0 前；mcp/server.mjs·tasks） |
 
-每码进 `skills/atelier-error-codes` 与 ERR_CATALOG 机检（既有纪律）；fix 文案必须可执行。
+每码进 `skills/atelier-error-codes` 与 ERR_CATALOG 机检（既有纪律）；fix 文案必须可执行；
+三表码集相等由 `scripts/contract-checks.mjs` 机检钉死（2026-09-30 R2 批起）。
 
 ---
 

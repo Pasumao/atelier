@@ -73,11 +73,13 @@ describe("gen auth --flows 两态（B2；缺省字节不变负例 + flows 产物
     // golden sha256（红检期实证：marker 负例对「无流程符号的散文漂移」有盲区——B2 红检曾抓出
     // registerAuthEndpoints JSDoc 多出一行的缺省态漂移。本表 = B2 时点缺省模板的 golden 锚，
     // 与 main 基线逐字节对照全同；未来改缺省模板 = 有意升级，须显式重算本表并说明（golden 纪律）。
+    // 2026-09-30 R2 批重算：endpoints.ts 头注「诚实边界」两行改写为事实口径（api.ts 客户端
+    // FS-M2-d 起纳入 auth 扫描面）——新旧产物逐行对拍实证仅该两行注释变化，其余五件字节全同。
     const GOLDEN_SHA256: Array<[string, string]> = [
       ["src/server/auth/sessions.table.ts", "sha256-c225c7b7aac646680d52c8087a28e700fe3b38f6f6a8844c577bed9c4acc55b6"],
       ["src/server/auth/cookie.ts", "sha256-863c350af82a8627a029239e962bb039543d08f54cf3995a8251c70d2ca0a0f3"],
       ["src/server/auth/auth.ts", "sha256-d23eda897311ef663cc1b0cfa9eca12d4809e895ee6e666b099a0ee20242f2e8"],
-      ["src/server/auth/endpoints.ts", "sha256-195f2b534f5e4d4889e3ee802cbbcf9be5ff04211aa1ec9ddfd87714b18f60d0"],
+      ["src/server/auth/endpoints.ts", "sha256-7924a9f0b89d2511f3376a3ff421e3a07128b95d51a815119fe77f34037c3c0f"],
       ["src/server/db/migrations/001_auth.up.sql", "sha256-f484629abbd74709fa36c99216a1ae9e97df22cfbe158695c88bcf37341d2913"],
       ["src/server/db/migrations/001_auth.down.sql", "sha256-65ada0200216e2cb6517747139acf42f8d08afc72163a650012cf3a55dc173d9"],
     ];

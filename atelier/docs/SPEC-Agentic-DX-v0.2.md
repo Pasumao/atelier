@@ -82,12 +82,14 @@ type AtrError = {
 > 码与含义以 ERR_CATALOG 实文 + 实现内注释为准对表（`server/endpoints.ts` / `server/sqlite.ts` /
 > `mcp/server.mjs` / `scripts/struct.mjs`）；新码先注册 ERR_CATALOG 再写实现，无码条目的错误视为
 > 开发者 bug。下表"下一步"给可执行动作；详细修法见 ERR_CATALOG 对应词条。
+> 三表（ERR_CATALOG / FS-DESIGN §15 / 本表）码集相等由 `scripts/contract-checks.mjs` 机检钉死（R2 批）。
 
 **1xx 编译域（模板/边界/投影）**
 
 | 码 | 含义 | 下一步 |
 |---|---|---|
 | ATR-101 | 模板语法错误（标签/块未闭合） | 补闭合；检查表达式花括号配平 |
+| ATR-102 | props 注解提取拒绝超面注解（泛型/交叉/工具类型/非字面量联合/嵌套对象/any/unknown——拒绝猜测） | 复杂类型手写扁平 schema，或把注解拍平到支持面（`string`/`number`/`boolean`/`Array<叶>`/字面量联合） |
 | ATR-103 | 契约违反 H1（泛型/映射类型进契约） | 改纯数据 + literal 判别 |
 | ATR-105 | server 边界 import 越界（前端图可达 server 模块） | 改走端点 HTTP（生成客户端）；import 移入 `src/server/**` 或 server 入口 |
 | ATR-106 | bare import 包名不在 `package.json` deps（幻觉包/包名幻觉） | `struct check` 定位文件；装真包或改对 specifier |
@@ -114,10 +116,16 @@ type AtrError = {
 | ATR-312 | 请求体不是合法 JSON（或无契约端点收到非对象） | 发 `application/json` 体 |
 | ATR-313 | 端点重复注册或命名非法 | 换名/移除重复注册；命名限字母开头的 `[A-Za-z0-9_.-]` |
 | ATR-314 | `live.invalidate` / `emits` 键语法非法 | 键必须是 `table:<name>` 或 `key:<业务键>`；改注册处声明 |
+| ATR-315 | live SSE 与端点级鉴权同时声明（注册期 fail-closed——共享重算 ctx.auth=null，auth 声明会被静默忽略） | `auth: { type: "none" }` 显式消警；敏感数据改普通 query 走 POST 门禁；敏感过滤在 handler 读 ctx.auth 自行做 |
 | ATR-320 | handler 未捕获抛错（500 兜底；journal 记失败） | 按消息定位 handler 内部错误；审计已入账 |
 | ATR-321 | live 重算失败（SSE `error` 事件；**不断流**，下次失效写自动重试） | 无需重连；同输入 POST 复现根因，修 handler |
 | ATR-322 | 端点超出 `timeoutMs` 预算（503） | 调大 `timeoutMs` 或修 handler：监听 `ctx.signal` 提前退出（abort 只停等待，不能杀 handler） |
 | ATR-323 | 模板表达式求值出 Promise（异步泄漏进响应式图，显式拒绝） | 收敛到合法边界：`streamValue`/`optimisticList` 或 live 端点订阅 |
+| ATR-324 | bind: 目标非法——非单个可写信号 / 元素-attr 组合不在 v1 支持面（决策 25） | 绑定组件内可写 `$state`（`.locals({ name })` 传入）；越面组合改单向 `attr={expr}` 或显式 `on:` handler |
+| ATR-325 | 同元素同 attr 槽重复 bind:（一元素一槽一订阅守卫） | 删重复 `bind:`——一个控件只绑一个可写 `$state` |
+| ATR-326 | on: 事件修饰未识别（v1 白名单 = prevent/stop） | 移除未知修饰段，或 handler 内显式 `e.preventDefault()` / `e.stopPropagation()` |
+| ATR-327 | bind:group radio 缺静态 value 身份键（组身份 = 静态 value 属性） | 每个组内 radio 给非空静态 `value` 属性；动态 `value={}` 越出 v1 面 |
+| ATR-328 | 布尔属性收到字符串化假值（存在即真 ⇒ 语义十有八九反转；dev 一次性警示/prod 剥离） | 传真布尔（`disabled={cond}`）——运行时对 `false` 移除属性，勿先字符串化 |
 | ATR-330 | SQLite 宿主面错误 | 按 message 定位 SQL/参数；宿主差异已锁 `sqlite.ts` 单文件 |
 | ATR-331 | 迁移缺 `.down.sql` 成对文件（可逆性硬门槛） | 补 down 文件（`gen db` 骨架成对生成） |
 | ATR-332 | 已应用迁移文件被改（sha256 checksum 不符） | 还原文件（git/checkpoint）；要改 schema 就追加新编号迁移 |
@@ -127,6 +135,8 @@ type AtrError = {
 | ATR-336 | 种子语句不可重放（裸 `INSERT` 无 ON CONFLICT）或执行失败（整体回滚） | 每条语句改幂等 UPSERT（`INSERT OR REPLACE` / `ON CONFLICT DO UPDATE`） |
 | ATR-340 | 端点声明了 `auth` 但请求无有效会话（或装配点未接会话读取器）（401） | 先登录（`auth.login` 置 cookie）；未装配则 `createHandler({ auth: createSessionReader(db) })`；真正公开的端点显式 `auth: {type:"none"}` |
 | ATR-341 | 会话有效但角色不符端点 `auth: {type, role}` 声明（403） | 授予所需角色或修声明；行级判断在 handler 读 `ctx.auth` 显式做（禁隐式 RLS） |
+| ATR-342 | gen endpoint 名字闸：端点名非法/派生标识符非法/名字字面量解码失败（坏名字绝不流入产物） | 按端点名文法改名（字母开头 `[A-Za-z0-9_.-]`，与运行时 ATR-313 同源），如 `"chat.ask"` → `ChatAsk` |
+| ATR-343 | gen db 表名闸：表名非法/派生不出合法 TS 标识符/JS 保留字 | 改字母开头且避开保留字的表名（如 `delete` → `deleted_items`；词表与 ATR-342 同源） |
 | ATR-344 | 限流窗口超配额（429，`Retry-After` 头随行） | 等 `Retry-After` 秒数后重试；配额由装配点 `createHandler({ rateLimit: { windowMs, max } })` 显式声明（缺省不限流）；单进程内存态重启清零 |
 | ATR-345 | 登录失败锁定触发（423，gen auth 产物） | 等锁期过后重试（连续失败 5 次锁 15 分钟，产物明文常量可调；成功登录清零）；in-memory 重启清零 |
 | ATR-346 | 请求体超上限（413） | 缩小请求体或调装配上限 `createHandler({ maxBodyBytes })`（缺省 1MiB）；超限请求不进 handler、不入 journal |
@@ -143,6 +153,7 @@ type AtrError = {
 | ATR-402 | confirm 档拒绝（deny 或人工否决） | 询问用户；**不要重试同一调用** |
 | ATR-403 | dev 托管 server 面不可用（未托管/握手中/热重启中/子进程拒连——HTTP 503 透出） | 读 `[server] ` 前缀控制台行找子进程自身错误；CLI 直调场景指路应用目录 `pnpm dev` |
 | ATR-404 | 未知 MCP 工具名 | 用 `tools/list` 输出里的名字 |
+| ATR-415 | 不支持的媒体类型（dev 面 JSON 路由/上传面强制 content-type；no-cors text/plain 伪装写通道已封） | JSON 路由带 `Content-Type: application/json`；上传走标准 `multipart/form-data`（fetch FormData 自动带 boundary） |
 | ATR-4xx-dev | dev 面不可达/端口占用 | 应用目录 `pnpm dev`（MCP 工具随 dev 生命周期存活） |
 | ATR-500 | MCP 工具内部错误兜底（如图构建失败） | 按 fix 重跑；持续复现查 `.atr/` 工件完整性 |
 
