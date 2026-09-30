@@ -40,8 +40,10 @@ export function extractComponentDecls(src) {
 
 /* ---------- 全文单遍状态机 → 真实代码区标记（Uint8Array，1 = code）。
  * 帧模型：code（顶层或模板插值）/ q（'、"）/ tpl（`，${} 插值推回 code 帧并按花括号深度归位）；
- * // 与 /* *\/ 注释、字符串字面量、模板文本均不标记。正则字面量不解析（v1 边界，见头注）。 ---------- */
-function codeMaskOf(src) {
+ * // 与 /* *\/ 注释、字符串字面量、模板文本均不标记。正则字面量不解析（v1 边界，见头注）。
+ * P1-5 起导出共享：dump.mjs 的 extractHtmlLiterals/decl 过滤消费同一掩码（compiler 侧
+ * codeMask 单一真相，绝不两份手抄漂移）。 ---------- */
+export function codeMaskOf(src) {
   const mask = new Uint8Array(src.length);
   let i = 0;
   const stack = [{ kind: "code", interp: false, depth: 0 }];
@@ -340,6 +342,15 @@ export function extractPropsSchemas(src) {
     for (const chunk of splitTopLevel(src.slice(open + 1, close))) {
       const pm = /^([A-Za-z_$][\w$]*)\s*(\?)?\s*:\s*([\s\S]+)$/.exec(chunk.trim());
       if (!pm) throw atr102(decl.name, null, chunk.trim());
+      // P2-G4：__proto__ 属性名显式拒绝（ATR-102 款）——reqProps/optProps 挂普通对象，该键
+      // 赋值静默改写原型而非声明字段（属性无声消失，schema 与组件真值分叉）；全族「显式 die」
+      // 口径（gen-db/export-openapi 同款，标识符最终以裸名进生成代码，护解析面不护产物面）。
+      if (pm[1] === "__proto__") {
+        throw Object.assign(
+          new Error(`组件 ${decl.name} 属性 __proto__ 是原型保留键——普通对象上该键静默改写原型而非声明字段（属性无声消失，schema 与组件真值分叉）`),
+          { code: "ATR-102", fix: "改属性名避开 __proto__（原型通道不是合法 props 键）" },
+        );
+      }
       const field = mapType(pm[3], decl.name, pm[1]);
       if (pm[2]) optProps[pm[1]] = field;
       else reqProps[pm[1]] = field;

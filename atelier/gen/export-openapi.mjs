@@ -125,7 +125,9 @@ function parseStringLiteral(text, what) {
   litDie(`${what}：期望字符串字面量，实际「${t.slice(0, 60)}」`, "契约必须是普通对象字面量（扁平纪律，§2.1）——禁计算值/展开/函数调用");
 }
 
-/** 对象字面量 → { key: 原始文本片段 }（键必须是标识符；值文本留给上层按需解析） */
+/** 对象字面量 → { key: 原始文本片段 }（键必须是标识符；值文本留给上层按需解析）。
+ * P2-G4：__proto__ 键显式拒绝——普通对象上该键静默改原型而非声明字段（与 gen-db 同款
+ * 全族「显式 die」口径）。 */
 function parseObjectEntries(text, what) {
   const t = text.trim();
   if (!t.startsWith("{") || !t.endsWith("}")) {
@@ -136,6 +138,12 @@ function parseObjectEntries(text, what) {
     if (part.trim() === "") continue;
     const m = /^\s*([A-Za-z_$][\w$]*)\s*:\s*([\s\S]+)$/.exec(part);
     if (!m) litDie(`${what}：无法解析的对象条目「${part.trim().slice(0, 60)}」（键必须是标识符）`, "扁平字面量纪律（§2.1）：键 = 标识符，值 = 直接字面量（禁展开/简写/计算键）");
+    if (m[1] === "__proto__") {
+      litDie(
+        `${what}：键 __proto__ 是原型保留键——普通对象上该键静默改写原型而非声明字段（字段无声消失，schema 与真值分叉）`,
+        "改键名避开 __proto__（原型通道不是合法契约键）",
+      );
+    }
     entries.push({ key: m[1], valueText: m[2] });
   }
   return entries;
@@ -192,7 +200,7 @@ export function scanContractSchemas(root) {
   CONTRACT_RE.lastIndex = 0;
   for (let m; (m = CONTRACT_RE.exec(src));) {
     const ident = m[1];
-    if (ident in byIdent) continue; // 重复声明按首个为准（TS 本身会报重复——扫描器不猜）
+    if (Object.hasOwn(byIdent, ident)) continue; // 重复声明按首个为准（TS 本身会报重复——扫描器不猜）。P2-G4：hasOwn 替代 in——toString 等继承键不再误判重复声明
     idents.push(ident);
     const openPos = m.index + m[0].length - 1;
     const closePos = matchDelim(src, openPos);
@@ -383,7 +391,12 @@ function resolveLocalPickSchemas(file, src) {
         tailFrom = optsClose + 1;
       }
       if (!/^\s*\)/.test(tsrc.slice(tailFrom))) continue; // table( 参数段未按预期闭合——窄边界外
-      const name = (tm[2] ?? "").replace(/\\(.)/g, "$1"); // 引号内表名（DDL 标识符白名单由 defineTable 校验）
+      // P2-G3：表名字面量解码与 gen-endpoint.mjs:488-489 同阶梯（decodeEscapesCore + ok 检查）——
+      // 旧 `\\(.)→$1` 把 \u0072 解成 "u0072"，defineTable 校验的是错名（幻影放行/漏校验双坏）。
+      // ok=false（悬空/越界转义）→ 惰性 continue（同 catch 口径：标识符走契约单源解析路径）。
+      const nameDec = decodeEscapesCore(tm[2] ?? "");
+      if (!nameDec.ok) continue;
+      const name = nameDec.value; // 引号内表名（DDL 标识符白名单与 SQLite 关键字闸由 defineTable 校验）
       const cols = parseFlatSchemaLiteral(tsrc.slice(colsOpen, colsClose + 1), `表定义 ${name}`);
       const tableOpts = parseFlatSchemaLiteral(optsText, `表定义 ${name} opts`);
       const def = defineTable(name, cols, tableOpts);

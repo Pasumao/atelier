@@ -225,7 +225,10 @@ function parseLiteral(text, what) {
   );
 }
 
-/** 对象字面量 → { key: 原始文本片段 }（顶层键必须是标识符；值文本留给上层按需解析） */
+/** 对象字面量 → { key: 原始文本片段 }（顶层键必须是标识符；值文本留给上层按需解析）。
+ * P2-G4：__proto__ 键显式拒绝——普通对象上 `obj.__proto__ = …` 静默改写原型而非声明键，
+ * 列/字段会无声消失（schema 与产物分叉零报错）；全族统一「显式 die」口径（标识符最终以
+ * 裸名进生成代码，Object.create(null) 只护解析面不护产物面）。 */
 function parseObjectEntries(text, what) {
   const t = text.trim();
   if (!t.startsWith("{") || !t.endsWith("}")) {
@@ -237,6 +240,13 @@ function parseObjectEntries(text, what) {
     const m = /^\s*([A-Za-z_$][\w$]*)\s*:\s*([\s\S]+)$/.exec(part);
     if (!m) {
       die(`${what}：无法解析的对象条目「${part.trim().slice(0, 60)}」（键必须是标识符）`, "扁平字面量纪律（§2.1）：键 = 标识符，值 = 直接字面量");
+    }
+    if (m[1] === "__proto__") {
+      die(
+        `${what}：键 __proto__ 是原型保留键——普通对象上该键静默改写原型而非声明字段（列无声消失，schema 与产物分叉）`,
+        `改键名避开 __proto__（原型通道不是合法契约键；ATR-343 命名闸族同口径显式拒绝）`,
+        "ATR-343",
+      );
     }
     entries.push({ key: m[1], valueText: m[2] });
   }

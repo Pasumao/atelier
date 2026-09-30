@@ -314,18 +314,22 @@ export function diffSurfaces(baseline, current, { strict = false, budget = null 
   return { schemaVersion: SCHEMA_VERSION, comparedAt: new Date().toISOString(), summary, surfaces };
 }
 
-/** 门禁判定：allowlist 豁免（entry 形如 `面:id`）。 */
-export function judge(diffResult, allowIds = []) {
+/** 门禁判定：allowlist 豁免（entry 形如 `面:id`）。
+ * P-C#8：strict 显式传参——修前从 `summary.ok === false && breaking === 0` 反推 strict，
+ * 双向反例：① 仅 --budget 超限时 ok 同样为 false → 非 strict 的 added 被误标违规；
+ * ② --strict + removed 时 breaking > 0 → added 漏标且不走豁免环。现 added 违规判定
+ * 只看显式 strict，且 added 与 removed/changed 同样走豁免环（--allow 可豁免 added(strict)）。 */
+export function judge(diffResult, allowIds = [], { strict = false } = {}) {
   const allow = new Set(allowIds);
   const violations = [];
   for (const [name, s] of Object.entries(diffResult.surfaces)) {
     for (const id of s.removed) if (!allow.has(`${name}:${id}`)) violations.push({ surface: name, kind: "removed", id });
     for (const c of s.changed) if (!allow.has(`${name}:${c.id}`)) violations.push({ surface: name, kind: "changed", id: `${c.id} (${c.from} → ${c.to})` });
   }
-  if (diffResult.summary.ok === false && diffResult.summary.breaking === 0) {
-    // strict 模式（--strict）：added 也算违规
+  if (strict) {
+    // strict 模式（--strict）：added 也算违规（同样可被 allowlist 豁免）
     for (const [name, s] of Object.entries(diffResult.surfaces)) {
-      for (const id of s.added) violations.push({ surface: name, kind: "added(strict)", id });
+      for (const id of s.added) if (!allow.has(`${name}:${id}`)) violations.push({ surface: name, kind: "added(strict)", id });
     }
   }
   const b = diffResult.summary.valueBudgetExceeded;
@@ -402,13 +406,35 @@ if (isMain()) {
       }
       const current = makeSnapshot(root, flag("--surfaces"));
       const allowFile = flag("--allow");
-      const allowIds = allowFile ? readJson(path.resolve(allowFile))?.accepted ?? [] : [];
+      /* P2-C6：--allow 给定但读失败/非对象/无 accepted → die 2 指路径——静默按空表会让 typo
+       * 路径/拼错键名假装「无破坏」或文案误导「未在 allowlist 中豁免」，与基线损坏 exit 3
+       * 同一诚实纪律（坏输入在评估前即拦，绝不 vacuous）。 */
+      let allowIds = [];
+      if (allowFile) {
+        const allowPath = path.resolve(allowFile);
+        let allowDoc;
+        try {
+          allowDoc = readJson(allowPath);
+        } catch (e) {
+          die(`error: --allow 文件损坏不可解析（${allowPath}）: ${e.message}\nfix: 检查 --allow 路径拼写；豁免清单形态 = { "accepted": ["面:id", …] }（entry 形如 "mcp-tools:tool.name"）`, 2);
+        }
+        if (allowDoc == null) {
+          die(`error: --allow 文件不存在（${allowPath}）\nfix: 检查 --allow 路径拼写（相对 cwd 解析）；豁免清单形态 = { "accepted": ["面:id", …] }`, 2);
+        }
+        if (typeof allowDoc !== "object" || Array.isArray(allowDoc) || !Array.isArray(allowDoc.accepted)) {
+          die(`error: --allow 文件缺 accepted 数组（${allowPath}）：实际顶层形态 = ${Array.isArray(allowDoc) ? "array" : typeof allowDoc}\nfix: 豁免清单形态 = { "accepted": ["面:id", …] }（entry 形如 "mcp-tools:tool.name"）`, 2);
+        }
+        if (allowDoc.accepted.some((x) => typeof x !== "string")) {
+          die(`error: --allow 的 accepted 含非字符串条目（${allowPath}）\nfix: accepted 必须是字符串数组，entry 形如 "面:id"`, 2);
+        }
+        allowIds = allowDoc.accepted;
+      }
       let budget = null;
       if (has("--budget")) {
         budget = Number(flag("--budget"));
         if (!Number.isFinite(budget) || budget < 0 || budget > 1) die("--budget 需为 0..1 的比例（如 0.02 = 值漂移 ≤2%）", 2);
       }
-      const result = judge(diffSurfaces(baseline, current, { strict: has("--strict"), budget }), allowIds);
+      const result = judge(diffSurfaces(baseline, current, { strict: has("--strict"), budget }), allowIds, { strict: has("--strict") }); // P-C#8：strict 显式传参（不再从 summary.ok 反推）
       if (jsonOut) {
         console.log(JSON.stringify(result, null, 2));
       } else {

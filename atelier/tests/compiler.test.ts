@@ -41,6 +41,107 @@ describe("extractHtmlLiterals (scanner)", () => {
   });
 });
 
+/* ---- P1-5（第三遍架构复校 §1）：stage② 扫描器注释/字符串免疫（codeMask） ----
+ * 背景：extractHtmlLiterals 裸 indexOf("html`")（dump.mjs:72）+ ownerOf 用 regex 命中 decls
+ * 不查 codeMask——注释掉的 html`…` 产幻影模板（含未闭合块时整场 dump hard die）；注释里的
+ * html` 未闭合块会把下一个真模板整体吞掉；注释掉的 export const X = component( 产幻影 owner。
+ * 修法：extract-schema.mjs codeMaskOf 单遍状态机导入 dump 面——命中位/decl 位查 mask，
+ * mask 误命中 → warn 跳过（extract-schema.mjs 同款先例）。 */
+describe("P1-5：stage② 扫描器注释/字符串免疫（codeMask）", () => {
+  it("红检①：注释掉的模板（含未闭合块）不产幻影、不 hard die", async () => {
+    const { extractHtmlLiterals } = await import("../compiler/dump.mjs");
+    const src = [
+      "export const A = component(function A() {",
+      "  return html" + BT + "<p>a</p>" + BT + ";",
+      "});",
+      "// const Dead = component(function Dead() {",
+      "//   return html" + BT + "<p>unterminated-in-comment", // 注释内反引号永不闭合
+      "// });",
+    ].join("\n");
+    const lits = extractHtmlLiterals(src);
+    expect(lits, "只认真实代码区的 html`——注释内的未闭合块不得产幻影，更不得让整场 dump hard die").toHaveLength(1);
+    expect(lits[0].raw).toBe("<p>a</p>");
+  });
+
+  it("红检②：注释里的未闭合 html` 不吞下一个真模板", async () => {
+    const { extractHtmlLiterals } = await import("../compiler/dump.mjs");
+    const src = [
+      "export const A = component(function A() {",
+      "  return html" + BT + "<p>a</p>" + BT + ";",
+      "});",
+      "// dead: html" + BT + " never closed in this comment", // 修复前：扫描器从此处吞到 B 的开引号
+      "export const B = component(function B() {",
+      "  return html" + BT + "<p>b</p>" + BT + ";",
+      "});",
+    ].join("\n");
+    const lits = extractHtmlLiterals(src);
+    expect(lits.map((l) => l.raw), "真模板 B 不得被注释垃圾吞掉").toEqual(["<p>a</p>", "<p>b</p>"]);
+  });
+
+  it("红检③：注释掉的 component( 声明不产幻影 owner（模板归属不漂移）", async () => {
+    const { extractComponentDecls } = await import("../compiler/extract-schema.mjs");
+    const { extractHtmlLiterals } = await import("../compiler/dump.mjs");
+    const src = [
+      "export const A = component(function A() {",
+      "  return html" + BT + "<p>a</p>" + BT + ";",
+      "});",
+      "// export const Ghost = component(function Ghost() {",
+      "//   return html" + BT + "<p>ghost</p>" + BT + ";", // 注释内自闭合——修复前产幻影模板归到 A 名下
+      "// });",
+      "export const B = component(function B() {",
+      "  return html" + BT + "<p>b</p>" + BT + ";",
+      "});",
+    ].join("\n");
+    const decls = extractComponentDecls(src).map((d) => d.name);
+    expect(decls).toEqual(["A", "Ghost", "B"]); // regex 面照旧全量命中（extractPropsSchemas 消费）
+    const lits = extractHtmlLiterals(src);
+    expect(lits.map((l) => l.raw), "注释内的自闭合模板不进字面量面——A 名下不得挂上 ghost 模板").toEqual(["<p>a</p>", "<p>b</p>"]);
+    // owner 映射（dump main 同款序）：每个字面量的最近真实（非注释）decl
+    const realDecls = [
+      { name: "A", offset: src.indexOf("export const A") },
+      { name: "B", offset: src.indexOf("export const B") },
+    ];
+    const ownerOf = (offset: number) => {
+      let owner: string | null = null;
+      for (const d of realDecls) {
+        if (d.offset < offset) owner = d.name;
+        else break;
+      }
+      return owner;
+    };
+    expect(lits.map((l) => ownerOf(l.offset))).toEqual(["A", "B"]);
+  });
+
+  it("红检④（全链）：注释 decl + 注释模板经 dump CLI 不落幻影组件/幻影模板", (ctx) => {
+    if (!NODE_OK) return ctx.skip();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atr-dump-mask-"));
+    try {
+      fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "src", "Masked.atr.ts"),
+        [
+          'import { component, html } from "atelier/runtime";',
+          "export const Live = component(function Live() {",
+          "  return html`<section>live</section>`;",
+          "});",
+          "// export const Ghost = component(function Ghost() {",
+          "//   return html`<section>ghost</section>`;",
+          "// });",
+        ].join("\n"),
+        "utf8",
+      );
+      const r = spawnSync(process.execPath, [DUMP, "--root", dir, "--stdout"], { encoding: "utf8" });
+      expect(r.status, `dump 不得因注释内模板 hard die：${r.stderr}`).toBe(0);
+      const out = JSON.parse(r.stdout);
+      expect(out.components.map((c: { name: string }) => c.name), "幻影组件不进 index").toEqual(["Live"]);
+      expect(out.components[0].templates, "幻影模板不挂到真实组件名下").toHaveLength(1);
+      expect(out.components[0].templates[0].raw).toBe("<section>live</section>");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("stage ② dump ↔ runtime parser identity", () => {
   it("parseTemplate sees the same tree the dump serializes", () => {
     const raw = `

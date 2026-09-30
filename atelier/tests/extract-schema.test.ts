@@ -373,3 +373,10 @@ describe("dump.mjs 接线（CLI 子进程冒烟，决策 26 产物字段）", ()
     }
   });
 });
+
+describe("P2-G4：props 注解 __proto__ 原型键显式拒绝（第三遍架构复校 §2.6）", () => {
+  it("红检：属性名 __proto__ → throw（修前静默改写 reqProps 原型，属性无声消失）", async () => {
+    const { extractPropsSchemas } = await mod();
+    expect(() => extractPropsSchemas(compSrc("Proto", "(props: { __proto__: string })"))).toThrow(/__proto__/);
+  });
+});

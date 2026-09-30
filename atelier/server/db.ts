@@ -58,10 +58,46 @@ const REF_RE = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/;
 const COLUMN_TYPES: readonly SqlColumnType[] = ["integer", "text", "real", "blob"];
 const COLUMN_KEYS = ["type", "primaryKey", "notNull", "unique", "default", "enum", "references"];
 
-/** DDL 标识符白名单：字母/下划线开头的 [A-Za-z0-9_]*——这是 DDL 免引号且免注入面的前提 */
+/**
+ * SQLite 官方关键字词表（P2-G1，https://sqlite.org/lang_keywords.html 全集）：表/列/索引名
+ * 以裸标识符拼进 DDL/CRUD（CREATE TABLE order / SELECT … ORDER BY limit / UPDATE SET …），
+ * 撞关键字 = 语法错误且 migrate 时才炸——构造期单一真相源必须在此拦下。SQLite 关键字大小写
+ * 不敏感，比对一律小写化。gen-db 生成路径经 table() 回灌复验同受闸（词表绝不两份手抄）。
+ */
+const SQLITE_KEYWORDS: ReadonlySet<string> = new Set([
+  "abort", "action", "add", "after", "all", "alter", "always", "analyze", "and", "as", "asc", "attach",
+  "autoincrement", "before", "begin", "between", "by", "cascade", "case", "cast", "check", "collate",
+  "column", "commit", "conflict", "constraint", "create", "cross", "current", "current_date",
+  "current_time", "current_timestamp", "database", "default", "deferrable", "deferred", "delete",
+  "desc", "detach", "distinct", "do", "drop", "each", "else", "end", "escape", "except", "exclude",
+  "exclusive", "exists", "explain", "fail", "filter", "first", "following", "for", "foreign", "from",
+  "full", "generated", "glob", "group", "groups", "having", "if", "ignore", "immediate", "in", "index",
+  "indexed", "initially", "inner", "insert", "instead", "intersect", "into", "is", "isnull", "join", "key", "last",
+  "left", "like", "limit", "match", "materialized", "natural", "no", "not", "nothing", "notnull",
+  "null", "nulls", "of", "offset", "on", "or", "order", "others", "outer", "over", "partition",
+  "plan", "pragma", "preceding", "primary", "query", "raise", "range", "recursive", "references",
+  "regexp", "reindex", "release", "rename", "replace", "restrict", "returning", "right", "rollback",
+  "row", "rows", "savepoint", "select", "set", "table", "temp", "temporary", "then", "ties", "to",
+  "transaction", "trigger", "unbounded", "union", "unique", "update", "using", "vacuum", "values",
+  "view", "virtual", "when", "where", "window", "with", "without",
+]);
+
+/** DDL 标识符白名单：字母/下划线开头的 [A-Za-z0-9_]* 且不撞 SQLite 关键字——这是 DDL 免引号、
+ * 免注入面、免「migrate 时才炸」的前提（P2-G1：字符集 + 关键字双闸都在构造期） */
 function assertIdent(kind: string, name: string): void {
   if (!IDENT_RE.test(name)) {
     throw new Error(`数据契约错误：${kind}名非法：${name}（只允许字母/下划线开头的 [A-Za-z0-9_]；标识符只来自契约定义，永不拼用户输入——决策 19 参数化红线）`);
+  }
+  if (SQLITE_KEYWORDS.has(name.toLowerCase())) {
+    // ATR-343 命名闸族码（与 gen-db 表名闸同族单源）：message 自含细节 + fix 属性随错误对象
+    // 透传（gen-db CLI 按 message + fix 两行打印；运行时直用 table() 的应用读 message 即全量）。
+    throw Object.assign(
+      new Error(
+        `数据契约错误（ATR-343）：${kind}名「${name}」是 SQLite 保留字——裸标识符会拼进 DDL/CRUD SQL（如 CREATE TABLE … ${name} / SELECT … FROM ${name}），是语法错误且要到 migrate 才炸，契约绝不带病入库\n` +
+        `fix: 改${kind}名避开 SQLite 关键字（如 order → orders、limit → max_rows；词表 = SQLite 官方关键字全集，https://sqlite.org/lang_keywords.html）`,
+      ),
+      { code: "ATR-343", fix: `改${kind}名避开 SQLite 关键字（大小写不敏感；词表 = SQLite 官方关键字全集）` },
+    );
   }
 }
 

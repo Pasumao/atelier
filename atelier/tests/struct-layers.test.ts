@@ -116,3 +116,36 @@ describe("R3-B 件②：单层直调行为样例", () => {
     expect(budget?.detail).toContain("121 lines");
   });
 });
+
+describe("P2-C4：timeline 台账坏行（struct 侧收口，第三遍架构复校 §2.3）", () => {
+  it("红检：台账掺半行垃圾 → ERROR finding 指行号，不裸 JSON.parse 崩栈", () => {
+    const entry = LAYER_PROBES.find((e) => e.layer === 6)!;
+    const root = makeProject({
+      ".atelier/checkpoints.jsonl": [
+        JSON.stringify({ type: "save", id: "aaa0000" }),
+        '{"type":"save","id":"half",', // 半行——append 型 jsonl 中途 kill 的实证形态
+      ].join("\n"),
+    });
+    const f = runProbe(entry, root); // 修复前：裸 JSON.parse SyntaxError——整场 struct 崩栈
+    const bad = f.find((x) => x.severity === "ERROR");
+    expect(bad?.id).toBe("TIMELINE_STORE");
+    expect(bad?.detail).toContain("第 2 行"); // 指明行号
+    expect(bad?.detail).toContain("1"); // 健康行照旧计数
+    expect(bad?.fix).toBeTruthy();
+    expect(f.filter((x) => x.id === "TIMELINE_STORE")).toHaveLength(1); // 不重复记账
+  });
+
+  it("回归：健康台账行为零变化（ok finding 计数逐字节同形）", () => {
+    const entry = LAYER_PROBES.find((e) => e.layer === 6)!;
+    const root = makeProject({
+      ".atelier/checkpoints.jsonl": [
+        JSON.stringify({ type: "save", id: "aaa0000" }),
+        JSON.stringify({ type: "rollback", id: "rb-xx" }),
+      ].join("\n"),
+    });
+    const f = runProbe(entry, root);
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBeNull();
+    expect(f[0].detail).toBe("2 timeline event(s), 1 anchored checkpoint(s)");
+  });
+});

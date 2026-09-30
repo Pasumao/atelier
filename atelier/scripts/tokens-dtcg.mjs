@@ -74,6 +74,20 @@ function main() {
   }
   const inPath = path.resolve(argOf("--in") ?? die("error: --in is required\nfix: 传 atelier.config.json（export）或 .tokens.json（import）", 1));
   const outPath = path.resolve(argOf("--out") ?? die("error: --out is required\nfix: 产物落盘路径（不覆盖既有配置，审阅后手工合并）", 1));
+  // P2-C5：--in 与 --out 同径 = 一次性覆写源文件（手工 token SSOT 覆灭，「审阅后合并」提示
+  // 打印在覆盖之后为时已晚）——backup.mjs 同径「连 --force 也拒」先例：坏输入在动手前即拦。
+  const norm = (p) => p.replace(/\\/g, "/");
+  const samePath = (a, b) => (process.platform === "win32" ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b));
+  if (samePath(inPath, outPath)) {
+    die(
+      `error: --in 与 --out 是同一路径（${norm(inPath)}）——互导会一次性覆写源文件（token SSOT 覆灭）\n` +
+      "fix: --out 换一个产物路径（export → tokens.json；import → config-fragment.json），审阅后手工合并",
+      2,
+    );
+  }
+  if (path.basename(outPath) === "atelier.config.json") {
+    console.error(`warn: --out 指向 atelier.config.json（${norm(outPath)}）——该文件是手工 token SSOT；产物请先落旁文件审阅后手工合并（本命令按显式指示继续写出）`);
+  }
   const data = JSON.parse(fs.readFileSync(inPath, "utf8"));
   const result = sub === "export" ? exportDtcg(data) : importDtcg(data);
   fs.writeFileSync(outPath, JSON.stringify(result, null, 2) + "\n");

@@ -209,8 +209,14 @@ switch (cmd) {
     // MINI（P1-4 落地）：review UI 最小版实跑在 dev 面（/__atelier/review，P2-5 L5）。
     // 本命令负责指路 + 可选开页；不做反向代理（页面已在应用自己的 dev server 上）。
     const argv = process.argv.slice(3);
+    // P2-C1：缺值 / flag 当值 → usage die 2（init 分支同款守卫先例）——`review --target`
+    // 曾 path.resolve(undefined) 裸 TypeError 崩栈；`--target --open` 曾把 flag 当目录名。
+    const tIdx = argv.indexOf("--target");
+    if (tIdx >= 0 && (!argv[tIdx + 1] || String(argv[tIdx + 1]).startsWith("--"))) {
+      die("usage: atelier review [--open] [--target <dir>]", 2);
+    }
     const base = (process.env.ATELIER_DEV_URL ?? "http://127.0.0.1:5173").replace(/\/$/, "");
-    const cwd = argv.includes("--target") ? path.resolve(argv[argv.indexOf("--target") + 1]) : process.cwd();
+    const cwd = tIdx >= 0 ? path.resolve(argv[tIdx + 1]) : process.cwd();
     let token = "";
     try { token = fs.readFileSync(path.join(cwd, ".atelier", "dev-token"), "utf8").trim(); } catch { /* empty */ }
     if (!token) {

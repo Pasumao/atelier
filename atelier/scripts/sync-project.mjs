@@ -42,7 +42,13 @@ function die(msg, code = 2) {
 }
 
 const argv = process.argv.slice(2);
-const target = path.resolve(argv.includes("--target") ? argv[argv.indexOf("--target") + 1] : process.cwd());
+// P-C#13：缺值 / flag 当值 → usage die 2（cli.mjs init 分支同款守卫先例）——`sync --target`
+// 曾 path.resolve(undefined) 裸 TypeError 崩栈；`--target --json` 曾把 flag 当目录名。
+const targetIdx = argv.indexOf("--target");
+if (targetIdx >= 0 && (!argv[targetIdx + 1] || String(argv[targetIdx + 1]).startsWith("--"))) {
+  die("usage: atelier sync [--target <appDir>]\nfix: --target 后面要跟应用目录（缺省 cwd）", 2);
+}
+const target = path.resolve(targetIdx >= 0 ? argv[targetIdx + 1] : process.cwd());
 if (!fs.existsSync(path.join(target, "src", "runtime", "core.ts"))) {
   die(
     `error: not an Atelier app (missing src/runtime at ${target})\nfix: run inside the app dir, or pass --target <appDir> (vendor sync only applies to scaffolded apps)`,

@@ -82,7 +82,23 @@ function ledgerMetaCommit(repo, message) {
 function readStore(repo) {
   const p = path.join(repo, STORE_FILE);
   if (!fs.existsSync(p)) return [];
-  return fs.readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  // P2-C4：台账是 gitignore 本地态 append 型 jsonl——中途 kill 可留半行；坏行裸 JSON.parse
+  // 让 list 裸崩栈、save/rollback 被 async catch 吞成 cryptic SyntaxError 文案。逐行
+  // try/catch，坏行 die 1 指明行号（struct.mjs probeTimelineLayer 同族同步收口）。
+  const lines = fs.readFileSync(p, "utf8").split("\n").filter(Boolean);
+  const rows = [];
+  for (let i = 0; i < lines.length; i++) {
+    try {
+      rows.push(JSON.parse(lines[i]));
+    } catch {
+      die(
+        `error: 台账损坏：${p} 第 ${i + 1} 行不是完整 JSON（append 型台账中途 kill 可留半行）——拒绝在损坏台账上继续\n` +
+        `fix: 修复或删除该行后重跑（锚点本体在 git commit，台账只是本地时间线；行内容片段：${lines[i].slice(0, 60)}）`,
+        1,
+      );
+    }
+  }
+  return rows;
 }
 function appendStore(repo, entry) {
   fs.mkdirSync(path.join(repo, STORE_DIR), { recursive: true });

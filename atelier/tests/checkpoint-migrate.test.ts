@@ -223,3 +223,43 @@ describeSqlite("checkpoint 迁移联动（决策 21-③：save 记 head / rollba
     expect(lines.some((l) => l.includes("bare") && !l.includes("head="))).toBe(true); // 无 head 字段条目照常呈现
   });
 });
+
+/* ---------------- P2-C4：台账坏行 die 1 指行号（第三遍架构复校 §2.3） ----------------
+ * 台账是 gitignore 本地态 append 型 jsonl——中途 kill 可留半行；坏行裸 JSON.parse 让
+ * list 裸 SyntaxError 崩栈、save/rollback 被 async catch 吞成 cryptic「SyntaxError: …」
+ * 文案（exit 1 但零行号、零指路）。修法：readStore 逐行 try/catch，坏行 die 1 指明行号。
+ * 不依赖 node:sqlite——独立 describe 全平台跑。 */
+describe("P2-C4：台账坏行 die 1 指行号（append 型 jsonl 中途 kill 半行）", () => {
+  /** 写入健康行 + 半行垃圾的台账（第 2 行 = 损坏行） */
+  function corruptLedger(repo: string): void {
+    fs.mkdirSync(path.join(repo, ".atelier"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, ".atelier", "checkpoints.jsonl"),
+      [JSON.stringify({ type: "save", id: "aaa0000", sha: "a".repeat(40), name: "ok", at: "t" }), '{"type":"save","id":"half",'].join("\n"),
+      "utf8",
+    );
+  }
+
+  it("红检：list → exit 1 指认第 2 行，非裸 SyntaxError 崩栈", () => {
+    const repo = makeRepo();
+    corruptLedger(repo);
+    const r = runCheckpoint(repo, ["list"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("第 2 行"); // 修复前：裸 SyntaxError 堆栈，零行号
+    expect(r.stderr).toContain("台账损坏");
+    expect(r.stderr).not.toContain("SyntaxError"); // 崩栈即红
+  });
+
+  it("红检：save（树净走 readStore 路径）→ exit 1 指认行号 + fix 指路", () => {
+    const repo = makeRepo();
+    corruptLedger(repo);
+    // 树净（cmdSave 仅在 !dirty 时读台账）：全部提交
+    spawnSync("git", ["add", "-A"], { cwd: repo });
+    spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@local", "commit", "-m", "init"], { cwd: repo });
+    const r = runCheckpoint(repo, ["save", "wip", "--no-gate"]);
+    expect(r.status).toBe(1); // 修复前：async catch 吞成 "error: SyntaxError: …" cryptic 文案
+    expect(r.stderr).toContain("第 2 行");
+    expect(r.stderr).toContain("fix:");
+    expect(r.stderr).not.toContain("SyntaxError");
+  });
+});
