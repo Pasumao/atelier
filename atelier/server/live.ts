@@ -158,19 +158,27 @@ export class LiveEngine {
         );
       }
     }
-    const input = (parsed ?? {}) as Record<string, unknown>;
-    if (def.contract != null) {
-      const v = validateFlat(def.contract, input, def.name);
-      if (!v.ok) return jsonError(400, v.error!); // live input 同样是不可信边界（§3.7 输入校验保留）
-    } else if (parsed != null && (typeof parsed !== "object" || Array.isArray(parsed))) {
+    // ---- P2-S1 POST 面同口径归一（REL-A A1）：形状闸提到 contract 分支之前 ----
+    // 旧口径与 POST 面同病（P2-S1 修前原样）：形状闸只在无契约分支（else if），带契约 live 端点
+    // 收 ?input=5 时 (5 ?? {}) 直接进 validateFlat → contract.ts `k in data` 对原始值抛
+    // TypeError → 路由 handle 裸抛（线上宿主兜底 500，dev 泄 TypeError 原文）。live×鉴权恒被
+    // ATR-315 注册期拒绝 ⇒ 该面恒为免鉴权可远程触发。两分支口径归一：input 必须缺省或为
+    // JSON 对象，标量/数组一律 400 ATR-312；null 保持放行 = 缺省体语义——经下方 (parsed ?? {})
+    // 归一后契约端点走 ATR-201 缺必填、无契约端点 handler 拿 {}，既有语义零变化。
+    if (parsed != null && (typeof parsed !== "object" || Array.isArray(parsed))) {
       return jsonError(
         400,
         endpointError(
           "ATR-312",
-          `端点 ${def.name} 无契约，live input 必须缺省或为 JSON 对象`,
-          `省略 ?input= 或发送 JSON 对象（例如 {"chatId": 1}）；或为该端点补 contract（推荐：契约单源纪律）`
+          `端点 ${def.name} live input 必须缺省或为 JSON 对象`,
+          `EventSource URL 以 ?input= + encodeURIComponent(JSON.stringify(input)) 携带 JSON 对象，或省略该参数表示空对象 {}`
         )
       );
+    }
+    const input = (parsed ?? {}) as Record<string, unknown>;
+    if (def.contract != null) {
+      const v = validateFlat(def.contract, input, def.name);
+      if (!v.ok) return jsonError(400, v.error!); // live input 同样是不可信边界（§3.7 输入校验保留）
     }
 
     // Last-Event-ID：v1 忽略（重连 = 全量重算，简单且正确）——诚实边界见文件头
