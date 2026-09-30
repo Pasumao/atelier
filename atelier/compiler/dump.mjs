@@ -32,13 +32,30 @@
  * per-component JSONs and uses index.json as an existence sentinel).
  *
  * Zero npm dependencies. Requires Node ≥ 22.18 (unflagged TS type stripping) because the
- * runtime kernel is TypeScript and this script imports it directly.
+ * runtime kernel is TypeScript and this script imports it directly — the version gate
+ * (compiler/node-guard.mjs, REL-A A4) now runs BEFORE the dynamic import, so unsupported
+ * nodes get a four-part ATR error instead of a raw ERR_UNKNOWN_FILE_EXTENSION stack.
  */
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { parseTemplate } from "../runtime/template.ts";
 import { codeMaskOf, extractComponentDecls, extractPropsSchemas } from "./extract-schema.mjs";
+import { isTsExtensionLoadError, nodeGuardError, nodeSupportsTsImport } from "./node-guard.mjs";
+
+/* REL-A A4：runtime TS 绑定改为闸后动态加载——旧口径顶层静态 import 先于 main() 内版本闸求值，
+ * Node 22.12~22.17 进程在闸前死于 ERR_UNKNOWN_FILE_EXTENSION（闸 = 死代码，用户第一触点级故障）。
+ * 现版本预检（node-guard.mjs 纯函数）先于 import，闸外仍炸扩展名错误时双保险转同款四段式。 */
+let parseTemplate = null;
+async function ensureRuntimeTemplate() {
+  if (parseTemplate) return;
+  if (!nodeSupportsTsImport(process.versions.node)) throw nodeGuardError(process.versions.node);
+  try {
+    ({ parseTemplate } = await import("../runtime/template.ts"));
+  } catch (e) {
+    if (isTsExtensionLoadError(e)) throw nodeGuardError(process.versions.node); // 双保险：同款四段式，不放原始栈
+    throw e;
+  }
+}
 
 const SCHEMA = "atelier-ast-dump/0.1";
 
@@ -122,7 +139,7 @@ function ownerOf(decls, offset) {
   return owner;
 }
 
-function main() {
+async function main() {
   /* ---------- arg parsing (flat, decision 6) ---------- */
   const argv = process.argv.slice(2);
   const argOf = (name) => {
@@ -135,18 +152,17 @@ function main() {
   const QUIET = argv.includes("--quiet");
   if (!fs.existsSync(ROOT)) die(`root does not exist: ${ROOT}`, "pass the app dir that holds your *.atr.ts files (--root <dir>)");
 
-  /* ---------- Node capability guard ---------- */
-  const [maj, min] = process.versions.node.split(".").map(Number);
-  if (maj < 22 || (maj === 22 && min < 18)) {
-    die(`Node ${process.versions.node} cannot import the TypeScript runtime directly`,
-      "use Node ≥ 22.18 (native type stripping), or run the dump under vitest");
-  }
+  /* ---------- Node capability guard（REL-A A4：闸先于动态 import 生效——node-guard.mjs 纯函数单源） ---------- */
+  const nodeGuard = nodeSupportsTsImport(process.versions.node) ? null : nodeGuardError(process.versions.node);
+  if (nodeGuard) die(nodeGuard.message, nodeGuard.fix);
 
   const files = [...findAtrFiles(ROOT)];
   if (!files.length) {
     console.log(`no *.atr.ts files under ${ROOT} — nothing to dump (stage ② is a no-op before the first component)`);
     process.exit(0);
   }
+
+  await ensureRuntimeTemplate(); // runtime TS 动态加载（闸后；parseTemplate 在此绑定）
 
   const components = new Map(); // name → { file, templates: [{index, raw, ast}] }
   const schemas = new Map(); // name → FlatSchema（决策 26 注解提取；仅可提取组件入表）
@@ -235,4 +251,4 @@ function main() {
   }
 }
 
-if (INVOKED_DIRECTLY) main();
+if (INVOKED_DIRECTLY) await main();
