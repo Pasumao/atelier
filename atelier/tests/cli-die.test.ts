@@ -224,7 +224,9 @@ describe("P-C 支：CLI 缺值守卫与旗标透传（review / struct / sync 三
     const r = spawnSync(process.execPath, [CLI, "struct", "--json"], { encoding: "utf8", windowsHide: true, cwd: dir });
     expect(r.status).toBe(0); // 修复前：argv[2]="--json" 落 default → usage exit 2
     expect(r.stderr).not.toContain("usage: struct");
-    const out = JSON.parse(r.stdout); // --json 旗标必须真生效（修复后不得静默退化成人类可读 map）
+    // --json 旗标必须真生效（修复后不得静默退化成人类可读 map）。裸调用（子命令缺省）在 JSON 后
+    // 还会追加既有的人读 gate 行（struct 既有输出形状，本支不碰）——取最后一个 } 前的 JSON 体解析。
+    const out = JSON.parse(r.stdout.slice(0, r.stdout.lastIndexOf("}") + 1));
     expect(out.modelVersion).toBeDefined();
   });
 });

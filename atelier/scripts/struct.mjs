@@ -770,7 +770,13 @@ function printMap(res) {
 
 /* ---------- CLI (runs only when invoked directly; library consumers import inspectStructure) ---------- */
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  const [, , cmd, ...rest] = process.argv;
+  const [, , rawCmd, ...rawRest] = process.argv;
+  // P2-C2：map 可省略（HELP:45 明示）——`struct --json` 的 argv[2] 是旗标不是子命令；
+  // 以 -- 开头时折叠回 rest 按子命令缺省（map）处理。cli.mjs:196 的 [sub,...rest] 与
+  // process.argv.slice(3) 恒等价，纯 cli 侧改动是空操作——此处才是有效修复位。
+  const flagFirst = rawCmd != null && rawCmd.startsWith("--");
+  const cmd = flagFirst ? undefined : rawCmd;
+  const rest = flagFirst ? [rawCmd, ...rawRest] : rawRest;
   const rootArg = rest.find((a) => !a.startsWith("--"));
   switch (cmd) {
     case undefined:
