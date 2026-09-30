@@ -301,4 +301,46 @@ describe("P-A 支（2026-09-30 第三遍架构评审）runtime 正确性——co
     await settled();
     expect(seen, "上游恢复后 derived 复活并通知下游").toBe(4);
   });
+
+  it("P2-R2 红检：$effect 首跑抛错时 dispose 已登记 __effectSink（修复前登记在 sub.run() 之后 → 抛错即跳过，mount 失败回收看不到僵尸 effect）", () => {
+    const src = $state(0);
+    const sunk: Array<() => void> = [];
+    const prev = __effectSink.fn;
+    __effectSink.fn = (d) => sunk.push(d);
+    let threw = false;
+    try {
+      $effect(() => {
+        void src.value;
+        throw new Error("boom-first-run");
+      });
+    } catch {
+      threw = true;
+    } finally {
+      __effectSink.fn = prev;
+    }
+    expect(threw).toBe(true);
+    expect(sunk.length, "首跑抛错前 sink 必须已拿到 dispose").toBe(1);
+    sunk[0]!(); // mount 失败回收路径（template.ts finally 块同款逆序 dispose）
+    expect(src._subs.size, "回收后不留僵尸订阅").toBe(0);
+  });
+
+  it("P2-R2 红检：$effectStatic 首跑抛错同样登记 __effectSink（同款时序缺陷）", () => {
+    const src = $state("p2r2-static");
+    const sunk: Array<() => void> = [];
+    const prev = __effectSink.fn;
+    __effectSink.fn = (d) => sunk.push(d);
+    try {
+      expect(() =>
+        $effectStatic(() => {
+          void src.value;
+          throw new Error("boom-static-first");
+        }, [src]),
+      ).toThrowError(/boom-static-first/);
+    } finally {
+      __effectSink.fn = prev;
+    }
+    expect(sunk.length, "首跑抛错前 sink 必须已拿到 dispose").toBe(1);
+    sunk[0]!();
+    expect(src._subs.size, "回收后不留僵尸订阅").toBe(0);
+  });
 });

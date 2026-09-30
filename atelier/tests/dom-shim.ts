@@ -161,6 +161,43 @@ for (const attr of BOOLEAN_ATTRS) {
   });
 }
 
+/** select/option 最小 value 语义（P-A P2-R1 测试基建）：真 DOM 中 select.value 是「选中项的
+ * value」派生值而非存储属性——bind:value × select 的初始选中丢失（option 晚于下行 effect
+ * 首跑 append）在纯 expando 形态下原理上不可见。语义面：
+ *   · select getter：有选中 option 取其 value；否则回落最后写入值（裸 select 的接线面用例
+ *     ——bind-directive.test.ts「select 接线钉面」——依赖此回落，诚实标注：真 DOM 此处为 ""）；
+ *   · select setter：首个 value 匹配的 option 置 selected（经 BOOLEAN_ATTRS 反射存在即真），
+ *     其余取消；无匹配时清空选中（真 DOM 同款）；
+ *   · option getter：value attr ?? 文本内容（真 DOM 同款）；
+ *   · 非 select/option 维持旧 expando 形态（自有字段，未写过 = undefined），既有用例全兼容。 */
+Object.defineProperty(MElement.prototype, "value", {
+  get(this: AnyNode) {
+    if (this.tag === "select") {
+      const sel = this.childNodes.find((c: AnyNode) => c.type === "element" && c.tag === "option" && c.selected);
+      if (sel) return sel.value;
+      return this.__selFallback ?? "";
+    }
+    if (this.tag === "option") return this.getAttribute("value") ?? this.textContent;
+    return this.__expandoValue;
+  },
+  set(this: AnyNode, v: unknown) {
+    if (this.tag === "select") {
+      const want = String(v);
+      let hit = false;
+      for (const c of this.childNodes) {
+        if (c.type !== "element" || c.tag !== "option") continue;
+        const isHit = !hit && c.value === want;
+        if (isHit) hit = true;
+        c.selected = isHit; // BOOLEAN_ATTRS 反射：存在即真
+      }
+      this.__selFallback = hit ? undefined : want;
+      return;
+    }
+    this.__expandoValue = v;
+  },
+  configurable: true,
+});
+
 const doc = {
   createElement: (tag: string) => new MElement(tag),
   createTextNode: (d: string) => new MText(d),

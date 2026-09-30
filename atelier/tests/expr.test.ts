@@ -85,6 +85,29 @@ describe("evalExpr — supported subset matrix", () => {
   });
 });
 
+describe("P-A P2-R5b：一元负号/正号 + not 关键字兑现", () => {
+  const scope = { n: 7, flag: false, name: "" };
+
+  it("红检：{-n} 一元负号求值（修复前 primary 无 unary → ATR-301「意外的符号 -」且 fix 不指路）", () => {
+    expect(evalExpr("-n", scope)).toBe(-7);
+    expect(evalExpr("+n", scope)).toBe(7);
+    expect(evalExpr("-n + 3", scope)).toBe(-4);
+    expect(evalExpr("2 * -n", scope)).toBe(-14);
+    expect(evalExpr("-flag", scope)).toBe(-0); // 非数值操作数按 JS 一元 - 语义强转
+  });
+
+  it("红检：not 关键字求值（KEYWORDS 一直广告 not，and/or 早已落地——修复前抛「不支持关键字 not」）", () => {
+    expect(evalExpr("not flag", scope)).toBe(true);
+    expect(evalExpr("not not flag", scope)).toBe(false);
+    expect(evalExpr("not n", scope)).toBe(false);
+    // 与既有 and/or 关键字组合不回归（值语义：and/or 返回操作数本身）
+    expect(evalExpr("flag and not flag", scope)).toBe(false);
+    expect(evalExpr("n or not n", scope)).toBe(7);
+    expect(evalExpr("true and false", {})).toBe(false);
+    expect(evalExpr("false or 7", {})).toBe(7);
+  });
+});
+
 describe("evalExpr — property fuzz-lite (arith depth<=3)", () => {
   // deterministic PRNG so failures are reproducible
   let seed = 20260827;
