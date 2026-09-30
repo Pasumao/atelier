@@ -249,6 +249,28 @@ describe("P1-12 ①②：dev 插件中间件 Origin 闸 / content-type 闸 / tok
       expect(fs.statSync(tokenFile).mode & 0o777).toBe(0o600);
     }
   });
+
+  /* ---- P1 #12：async 中间件错误围栏 ----
+   * 评审 #12：connect/Vite 不 await 中间件 promise——/__atelier/registry、/__atelier/docs 的
+   * readFileSync 裸抛 = 请求永久悬挂 + unhandledRejection 击杀 dev server。本 harness 直接 await
+   * 中间件，裸抛表现为 call() reject（真实 connect 形态下即悬挂）——修后必须 500 ATR JSON。
+   * harness TMP 无 src/（manifest.json / llms.txt 天然缺失），读文件失败现场即用例现场。 */
+  it("P1 #12（红检）：/__atelier/registry 读 manifest 失败 → 500 ATR JSON（不悬挂、不裸抛）", async () => {
+    expect(fs.existsSync(path.join(TMP, "src", "manifest.json"))).toBe(false); // 现场确认：文件缺失
+    const res = await call("/__atelier/registry", { headers: { "x-atelier-token": token } });
+    expect(res.statusCode).toBe(500); // 修复前：call() 直接 reject（readFileSync ENOENT 裸抛）
+    const j = JSON.parse(String(res.body)) as { ok: boolean; error: string; fix: string };
+    expect(j.ok).toBe(false);
+    expect(j.error).toContain("ATR-500");
+    expect(typeof j.fix).toBe("string");
+  });
+
+  it("P1 #12（红检）：/__atelier/docs 读 llms.txt 失败 → 500 ATR JSON", async () => {
+    expect(fs.existsSync(path.join(TMP, "src", "llms.txt"))).toBe(false);
+    const res = await call("/__atelier/docs", { headers: { "x-atelier-token": token } });
+    expect(res.statusCode).toBe(500); // 修复前：reject
+    expect(String(res.body)).toContain("ATR-500");
+  });
 });
 
 /* ---------------- ③：CDP 面形态机检 + pickFreePort 单元 ---------------- */

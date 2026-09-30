@@ -27,6 +27,9 @@ import { createServerSupervisor, forwardRequest, parseReadyLine, resolveServerCo
 
 const TMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-dev-host-"));
 const FIXTURE_ENTRY = path.join(TMP_ROOT, "src", "server", "main-server.ts");
+/* P1 #11 专用 root：永不知就绪 / 换装握手 fixture 的第二现场（与主 root 隔离，防用例互踩） */
+const TMP_ROOT_TIMEOUT = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-dev-host-timeout-"));
+const TIMEOUT_ENTRY = path.join(TMP_ROOT_TIMEOUT, "src", "server", "main-server.ts");
 
 /** fixture 内联入口源码：TAG 嵌在文件内容里（热重启用例改文件 → 新进程行为随之变）。 */
 function fixtureSource(tag: string): string {
@@ -67,8 +70,41 @@ server.listen(port, "127.0.0.1", () => {
 }
 
 function writeFixture(tag: string): void {
-  fs.mkdirSync(path.dirname(FIXTURE_ENTRY), { recursive: true });
-  fs.writeFileSync(FIXTURE_ENTRY, fixtureSource(tag), "utf8");
+  writeFixtureAt(TMP_ROOT, tag);
+}
+
+/** 通用版：向任意 root 写握手 fixture（P1 #11 re-entry 用例换装入口内容用） */
+function writeFixtureAt(root: string, tag: string): void {
+  const entry = path.join(root, "src", "server", "main-server.ts");
+  fs.mkdirSync(path.dirname(entry), { recursive: true });
+  fs.writeFileSync(entry, fixtureSource(tag), "utf8");
+}
+
+/** P1 #11 fixture：假 server 子进程——写 pid 文件后永不知就绪（空转）。 */
+function writeNeverReadyFixture(root: string, pidFile: string): void {
+  const entry = path.join(root, "src", "server", "main-server.ts");
+  fs.mkdirSync(path.dirname(entry), { recursive: true });
+  fs.writeFileSync(
+    entry,
+    `import fs from "node:fs";\nfs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 10000);\n`,
+    "utf8",
+  );
+}
+
+/** 轮询断言 pid 已死（win32 SIGTERM/taskkill 均为即时终止语义；pid 复用窗口极小可接受）。 */
+async function expectPidDead(pid: number, timeoutMs = 6000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      alive = false;
+    }
+    if (!alive) return;
+    if (Date.now() > deadline) throw new Error(`pid ${pid} 仍在运行（${timeoutMs}ms 内未被终止）`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 type Supervisor = ReturnType<typeof createServerSupervisor>;
@@ -113,6 +149,7 @@ afterAll(async () => {
   await stopAll();
   // Windows 孤儿进程零容忍：目录删除失败即测试失败（说明有子进程还活着占着 cwd）
   fs.rmSync(TMP_ROOT, { recursive: true, force: true });
+  fs.rmSync(TMP_ROOT_TIMEOUT, { recursive: true, force: true });
 });
 
 /* ---------------- 用例 ---------------- */
@@ -266,6 +303,111 @@ describe("createServerSupervisor + middleware（集成：spawn → 握手 → �
     expect(sup.targetPort()).toBe((restarted as { port: number }).port);
 
     const after = (await (await fetch(`http://127.0.0.1:${port}/api/echo`)).json()) as { tag: string };
-    expect(after.tag).toBe("v2"); // 新进程行为生效
+    expect(after.tag).toBe("v2");
+  });
+});
+
+/* ---------------- P1 #3：反代写面 Origin 闸（镜像 P1-12，原语单源） ----------------
+ * 威胁模型（评审 #3）：P1-12 闸只盖 /__atelier/*，承载写副作用的 <mount>/* 反代零防护——
+ * 恶意网页可用 no-cors fetch 跨站驱动 POST /api/<写端点>。修法 = 反代中间件复用同一闸
+ * （同 self port 口径）：Origin 存在且不在白名单也不与 Host 头同授权方 → 403；
+ * 无 Origin = 非浏览器客户端（curl/MCP stdio）放行。 */
+describe("P1 #3：反代 <mount>/* Origin 闸（语义严格镜像 P1-12 闸）", () => {
+  function supWithSelfPort(): Supervisor {
+    // selfPort = dev 面自身端口（反代上游 server 端口与此无关——白名单口径是页面所在的 dev 面）
+    const sup = createServerSupervisor({ root: TMP_ROOT, port: 0, mount: "/api", dbPath: ".atelier/dev.db", selfPort: 5173 });
+    supervisors.push(sup);
+    return sup;
+  }
+
+  it("红检：伪造 Origin（跨站 no-cors 写）→ 403 ATR JSON，绝不转发到 server 面", async () => {
+    const sup = supWithSelfPort();
+    await sup.start();
+    const { srv, port } = await listenOn(sup.middleware());
+    httpServers.push(srv);
+
+    const evil = await fetch(`http://127.0.0.1:${port}/api/echo`, {
+      method: "POST",
+      headers: { origin: "http://evil.example", "content-type": "application/json" },
+      body: JSON.stringify({ stolen: true }),
+    });
+    expect(evil.status).toBe(403); // 修复前：200——请求被原样转发（写面洞）
+    const j = (await evil.json()) as { ok: boolean; error: string; fix: string };
+    expect(j.ok).toBe(false);
+    expect(j.error).toContain("ATR-403-dev");
+    expect(typeof j.fix).toBe("string");
+  });
+
+  it("红检：Origin: null（沙箱 iframe / 跨源伪装）→ 403", async () => {
+    const sup = supWithSelfPort();
+    await sup.start();
+    const { srv, port } = await listenOn(sup.middleware());
+    httpServers.push(srv);
+    const res = await fetch(`http://127.0.0.1:${port}/api/echo`, { headers: { origin: "null" } });
+    expect(res.status).toBe(403); // 修复前：200
+  });
+
+  it("同源放行三路：Origin ∈ 白名单（selfPort）/ Origin ≡ Host 头（同授权方）/ 无 Origin（curl·MCP stdio）", async () => {
+    const sup = supWithSelfPort();
+    await sup.start();
+    const { srv, port } = await listenOn(sup.middleware());
+    httpServers.push(srv);
+
+    const allowlisted = await fetch(`http://127.0.0.1:${port}/api/echo`, { headers: { origin: "http://localhost:5173" } });
+    expect(allowlisted.status).toBe(200);
+    expect(((await allowlisted.json()) as { ok: boolean }).ok).toBe(true);
+
+    // 浏览器同源 POST：Origin 必然 ≡ 实际连接授权方（Host）——放行（既有同源页面 /api 调用零影响）
+    const hostMatch = await fetch(`http://127.0.0.1:${port}/api/echo`, { headers: { origin: `http://127.0.0.1:${port}` } });
+    expect(hostMatch.status).toBe(200);
+
+    const noOrigin = await fetch(`http://127.0.0.1:${port}/api/echo`); // undici 不发 Origin = 工具链通道
+    expect(noOrigin.status).toBe(200);
+  });
+
+  it("selfPort 支持函数口径（端口漂移后白名单跟随实际端口——P1 #10 联动）", async () => {
+    let actual = 5173;
+    const sup = createServerSupervisor({ root: TMP_ROOT, port: 0, mount: "/api", dbPath: ".atelier/dev.db", selfPort: () => actual });
+    supervisors.push(sup);
+    await sup.start();
+    const { srv, port } = await listenOn(sup.middleware());
+    httpServers.push(srv);
+
+    const drifted = await fetch(`http://127.0.0.1:${port}/api/echo`, { headers: { origin: "http://127.0.0.1:5174" } });
+    expect(drifted.status).toBe(403); // 漂移前 5174 不在白名单
+    actual = 5174; // 漂移发生
+    const after = await fetch(`http://127.0.0.1:${port}/api/echo`, { headers: { origin: "http://127.0.0.1:5174" } });
+    expect(after.status).toBe(200); // 白名单跟随实际端口
+  });
+});
+
+/* ---------------- P1 #11：握手超时杀子进程 + start() re-entry 防孤儿 ----------------
+ * 评审 #11：超时只 reject，child 永活（占端口持 SQLite 句柄）；再 start() 会 spawn 新 child
+ * 覆盖引用，旧进程彻底孤儿——与 :29-30 注释承诺「超时杀子进程并如实报错」相悖。 */
+describe("P1 #11：握手超时杀子进程（假子进程钉住）+ re-entry 防孤儿", () => {
+  it("红检：握手超时 → start() reject 且子进程被终止（pid 数秒内不可 kill(0)）", { timeout: 15000 }, async () => {
+    const pidFile = path.join(TMP_ROOT_TIMEOUT, "child.pid");
+    writeNeverReadyFixture(TMP_ROOT_TIMEOUT, pidFile);
+    const sup = createServerSupervisor({ root: TMP_ROOT_TIMEOUT, port: 0, mount: "/api", dbPath: ".atelier/dev.db", readyTimeoutMs: 600 });
+    supervisors.push(sup);
+    await expect(sup.start()).rejects.toThrow(/握手超时/);
+    const pid = Number(fs.readFileSync(pidFile, "utf8"));
+    expect(Number.isFinite(pid) && pid > 0).toBe(true);
+    await expectPidDead(pid); // 修复前：子进程永活（占端口持句柄）→ 轮询超时即红
+  });
+
+  it("红检：超时后 re-entry start() → 新握手正常，且旧子进程绝不孤儿", { timeout: 15000 }, async () => {
+    const pidFile = path.join(TMP_ROOT_TIMEOUT, "child2.pid");
+    writeNeverReadyFixture(TMP_ROOT_TIMEOUT, pidFile);
+    const sup = createServerSupervisor({ root: TMP_ROOT_TIMEOUT, port: 0, mount: "/api", dbPath: ".atelier/dev.db", readyTimeoutMs: 500 });
+    supervisors.push(sup);
+    await expect(sup.start()).rejects.toThrow(/握手超时/);
+    const oldPid = Number(fs.readFileSync(pidFile, "utf8"));
+
+    writeFixtureAt(TMP_ROOT_TIMEOUT, "v-reentry"); // 入口换装成守约 fixture，再 start
+    const started = await sup.start();
+    expect(started).not.toBeNull();
+    expect(sup.isReady()).toBe(true);
+    await expectPidDead(oldPid); // 修复前：旧 child 被覆盖引用成孤儿 → 仍活 → 红
   });
 });

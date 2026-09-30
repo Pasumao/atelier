@@ -81,6 +81,41 @@ function dirty(repo: string, content: string): void {
   fs.writeFileSync(path.join(repo, "app.txt"), content);
 }
 
+/* ---------------- P1 #8：api-diff 基线损坏 → 拒锚（绝不 vacuous pass） ----------------
+ * 评审 #8：api-diff 对损坏基线也 exit 2，checkpoint 把 2 一律解释为「布局不可判 → vacuous
+ * pass」——「基线存在但不可评估」被静默放行，与 :261 注释「布局错误不该被静默吞掉」自相矛盾。
+ * 修后：api-diff 基线损坏 = exit 3；checkpoint 对 3 拒锚（exit 1 + 显式原因）。
+ * 不依赖 node:sqlite——独立 describe 全平台跑。 */
+describe("P1 #8：checkpoint api 门禁对损坏基线拒锚", () => {
+  it("红检：api-surface 基线损坏 → save 拒锚（exit 1，绝不 vacuous 锚定）", () => {
+    const repo = makeRepo();
+    fs.mkdirSync(path.join(repo, ".atelier"), { recursive: true });
+    fs.writeFileSync(path.join(repo, ".atelier", "api-surface.json"), '{"schemaVersion":1,"surfaces":', "utf8"); // 截断
+    dirty(repo, "corrupt baseline");
+    const r = runCheckpoint(repo, ["save", "corrupt", "--json"]);
+    expect(r.status).toBe(1); // 修复前：0——exit 2 被解释为 vacuous pass，锚照常落
+    expect(r.stderr).toContain("不可评估");
+    expect(readLedger(repo).filter((e) => e.type === "save")).toHaveLength(0); // 台账零锚定
+  });
+
+  it("基线完好 + 零漂移 → 门禁 vacuous 满足照常锚定（既有行为不回退）", () => {
+    const repo = makeRepo();
+    fs.mkdirSync(path.join(repo, ".atelier"), { recursive: true });
+    // 完好但与该 tmp repo 无关的基线：布局不可判（空 repo 非 app/framework）→ exit 2 → vacuous——
+    // 这条钉住「布局不可判 → vacuous」与「基线损坏 → 拒锚」的分流不互相污染
+    fs.writeFileSync(
+      path.join(repo, ".atelier", "api-surface.json"),
+      JSON.stringify({ schemaVersion: 1, generatedAt: "t", root: "x", layout: "app", surfaces: {} }) + "\n",
+      "utf8",
+    );
+    dirty(repo, "valid baseline");
+    const r = runCheckpoint(repo, ["save", "valid", "--json"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("layout undetectable"); // vacuous 打印诚实可见
+    expect(parseSaveJson(r).ok).toBe(true);
+  });
+});
+
 describeSqlite("checkpoint 迁移联动（决策 21-③：save 记 head / rollback 低 head 拒绝）", () => {
   it("save：库在 → 条目记 migrationHead（最大 id + name）；--db 换库生效；再次 save 记新 head", async () => {
     const repo = makeRepo();
