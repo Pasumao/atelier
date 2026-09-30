@@ -181,3 +181,50 @@ describe("建议书 A5：die 契约（P1-9 修复 + 全仓签名大一统 + P1-1
     expect(r.stderr).toContain("api-diff snapshot");
   });
 });
+
+/* ---------------- P-C 支（第三遍架构复校 §2.3/§3 拉入）：缺值守卫与旗标透传 ----------------
+ * P2-C1：`atelier review --target` 缺值 → path.resolve(undefined) 裸 TypeError 崩栈
+ *   （cli.mjs:213 实测复现；init 分支 :148-153 有完整守卫先例）；flag 当值（--target --open）
+ *   同守卫。P-C#13：`sync --target` 缺值同款（sync-project.mjs:45 实测复现）。
+ * P2-C2：`atelier struct --json`（map 可省略，HELP:45 明示）——argv[2] 以 -- 开头被 struct.mjs
+ *   当子命令 → usage 误红 exit 2。 */
+describe("P-C 支：CLI 缺值守卫与旗标透传（review / struct / sync 三件）", () => {
+  it("P2-C1 红检：review --target 缺值 → die 2 usage，不崩栈", () => {
+    const dir = emptyDir("atelier-review-notarget-");
+    const r = spawnSync(process.execPath, [CLI, "review", "--target"], { encoding: "utf8", windowsHide: true, cwd: dir });
+    expect(r.status).toBe(2); // 修复前：path.resolve(undefined) TypeError → exit 1 + 崩栈
+    expect(r.stderr).toContain("usage: atelier review");
+    expect(r.stderr).not.toContain("TypeError"); // 崩栈即红
+  });
+
+  it("P2-C1 红检：review --target --open（flag 当值）→ 同守卫 die 2", () => {
+    const dir = emptyDir("atelier-review-flagval-");
+    const r = spawnSync(process.execPath, [CLI, "review", "--target", "--open"], { encoding: "utf8", windowsHide: true, cwd: dir });
+    expect(r.status).toBe(2); // 修复前：把 "--open" 当目录名解析 → no dev token exit 1（指错方向）
+    expect(r.stderr).toContain("usage: atelier review");
+    expect(r.stderr).not.toContain("TypeError");
+  });
+
+  it("P-C#13 红检：sync-project --target 缺值 → die 2 usage，不崩栈；flag 当值同守卫", () => {
+    const dir = emptyDir("atelier-sync-notarget-");
+    const missing = run(SCRIPT("sync-project.mjs"), ["--target"], { env: {} });
+    expect(missing.status).toBe(2); // 修复前：path.resolve(undefined) TypeError → exit 1 + 崩栈
+    expect(missing.stderr).toContain("usage: atelier sync");
+    expect(missing.stderr).not.toContain("TypeError");
+    // 同步检查 cwd 无关性：脚本无 --root 概念，tmp cwd 下同样应 die 2（守卫先于 existsSync 探测）
+    const flagAsValue = spawnSync(process.execPath, [SCRIPT("sync-project.mjs"), "--target", "--json"], {
+      encoding: "utf8", windowsHide: true, cwd: dir,
+    });
+    expect(flagAsValue.status).toBe(2); // 修复前："--json" 被当目录名 → not an Atelier app exit 1
+    expect(flagAsValue.stderr).toContain("usage: atelier sync");
+  });
+
+  it("P2-C2 红检：struct --json（无子命令，map 可省略）→ 正常执行不 usage 红", () => {
+    const dir = emptyDir("atelier-struct-json-");
+    const r = spawnSync(process.execPath, [CLI, "struct", "--json"], { encoding: "utf8", windowsHide: true, cwd: dir });
+    expect(r.status).toBe(0); // 修复前：argv[2]="--json" 落 default → usage exit 2
+    expect(r.stderr).not.toContain("usage: struct");
+    const out = JSON.parse(r.stdout); // --json 旗标必须真生效（修复后不得静默退化成人类可读 map）
+    expect(out.modelVersion).toBeDefined();
+  });
+});
