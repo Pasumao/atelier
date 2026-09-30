@@ -60,7 +60,7 @@
 
 ### P 批（发布前硬化——2026-09-30 第三遍架构复校立项，npm 1.1.0 发布前最后制作批）
 
-> 任务书唯一源：`research/2026-09-30-third-architecture-review.md`（5 项新 P1 + ~15 项 P2 + 留队项复核关键修正）。**全批收口（2026-09-30 当日）**：四支 38 项 + 独立评审 2 nit 全部合并，1104 绿 + 8 skip / check-skills 56-0 / contract-checks 7-0 / api-diff PASS / docs-numbers PASS（tests=1104 tools=40）。明细见已完成归档表同日行。第三遍复校 §3 留队项中 struct jsonl 坏行、sync-project 缺值、api-diff judge strict 三件随 P-C 销账；其余留队维持原位（评审队列），SSE 心跳/背压归属修正为 **dev 面代理**（server 侧 live.ts 已修）；gen-db 共享库抽取闭包红线理由失效已录（1.2+ 候选池）。下一步 = **发布工程批**（push 310 commits → 远端 CI 首跑 → 摘 continue-on-error → 1.1.0 切版发布，RELEASE-CHECKLIST ② 段 9 项；需用户拍板时点与包名）。
+> 任务书唯一源：`research/2026-09-30-third-architecture-review.md`（5 项新 P1 + ~15 项 P2 + 留队项复核关键修正）。**全批收口（2026-09-30 当日）**：四支 38 项 + 独立评审 2 nit 全部合并，1104 绿 + 8 skip / check-skills 56-0 / contract-checks 7-0 / api-diff PASS / docs-numbers PASS（tests=1104 tools=40）。明细见已完成归档表同日行。第三遍复校 §3 留队项中 struct jsonl 坏行、sync-project 缺值、api-diff judge strict 三件随 P-C 销账；其余留队维持原位（评审队列），SSE 心跳/背压归属修正为 **dev 面代理**（server 侧 live.ts 已修）；gen-db 共享库抽取闭包红线理由失效已录（1.2+ 候选池）。下一步 = **发布工程批**（push 344 commits → 远端 CI 首跑 → 摘 continue-on-error → 1.1.0 切版发布，RELEASE-CHECKLIST ② 段 9 项；需用户拍板时点与包名）。
 
 | 支 | 范围 | 状态 |
 |---|---|---|
