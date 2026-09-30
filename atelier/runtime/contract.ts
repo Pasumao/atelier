@@ -10,7 +10,10 @@
 export type FlatField = {
   type: "string" | "number" | "boolean" | "array";
   items?: FlatField;
-  enum?: string[];
+  /** 枚举取值，同质：全 string 或全 number（server/db.ts table() 构造期同口径校验）。
+   *  R1-C §4.7 放宽：此前 string[] 标注是撒谎窄化——db.ts 的数值枚举 rowSchema 只能经
+   *  `as` 硬转透传，而 project-json 投影按窄化标注硬错，同一契约跨消费面两套真相。 */
+  enum?: (string | number)[];
   /** number: 数值下限（含）；string/array: 长度下限 */
   min?: number;
   /** number: 数值上限（含）；string/array: 长度上限 */
@@ -60,7 +63,7 @@ export function collectFlatIssues(
         }
       }
     }
-    if (f.enum && !f.enum.includes(v as string)) issues.push({ message: `${k}: 期望 ${f.enum.join("|")} 之一，实际 "${v}"`, path: k });
+    if (f.enum && !f.enum.includes(v as string | number)) issues.push({ message: `${k}: 期望 ${f.enum.join("|")} 之一，实际 "${v}"`, path: k });
     // min/max/pattern（设计备忘 2026-08-30：仍扁平——无 $ref/oneOf，约束只挂在叶子字段上）
     if (f.type === "number" && typeof v === "number") {
       if (f.min != null && v < f.min) issues.push({ message: `${k}: ${v} 小于下限 ${f.min}`, path: k });
@@ -125,15 +128,16 @@ function typeName(v: unknown): string {
  * 的 schema 常量 + 本类型，`FlatOf<typeof chatInput>` 即得输入/输出对象类型，避免生成物内联
  * 重复类型（§8.1 双源 = ERROR 机检）。
  * 投影规则（与 FlatField 对齐）：string→string、number→number、boolean→boolean、
- * array→items 投影数组、enum→字面量联合。（数据契约 §5.1 的列类型 integer/real→number、
+ * array→items 投影数组、enum→成员联合 E（R1-C §4.7：直接取 E——as const 字面量元组
+ * 保字面量精度；satisfies 加宽数组诚实退化宽联合。此前 `E extends string ? E : never`
+ * 在 enum 放宽为 (string|number)[] 后会把字符串枚举也投影成 never（api.ts 破坏性回归），
+ * 且 as const 数值枚举本可保精度却被收窄成 never）。（数据契约 §5.1 的列类型 integer/real→number、
  * text/blob→string 是同一投影思想在 table() 域的对应物，归 FS 线 M2-b。）
  * 精度前提：契约常量用 `satisfies FlatSchema` 声明（保留字段字面量类型，逐字段可判别）；
  * 若用 `: FlatSchema` 注解，字段 type 被加宽为联合，投影退化为宽联合（诚实降级，不报错）。
  * 红线：本导出必须保持零运行时代码（纯 type）——runtime 不增负（§8.2）。 */
 export type FlatLeaf<F> = F extends { enum: readonly (infer E)[] }
-  ? E extends string
-    ? E
-    : never
+  ? E
   : F extends { type: infer T; items: infer I }
     ? T extends "array"
       ? I extends FlatField

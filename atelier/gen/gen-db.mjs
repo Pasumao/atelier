@@ -26,7 +26,9 @@
  *
  * 命名校验（P1-8，ATR-343）：表名入口校验（字母开头的 [A-Za-z0-9_]）+ toPascal/toCamel 派生
  * 标识符合法性兜底——坏名字（如 `_1`）此前一路产出 `export type 1Row` 编译不过的非法 TS，
- * 现生成器侧四段式 die（message + fix），破产物绝不落盘。
+ * 现生成器侧四段式 die（message + fix），破产物绝不落盘。R1-C（P1-13）补保留字闸：表名
+ * delete/void/class 等经 toCamel 派生出保留字（词表与 gen-endpoint ATR-342 单源共享）——
+ * 表名会以裸标识符进 SQLite DDL/CRUD SQL（CREATE TABLE delete = 保留字语法错误），同码 die。
  *
  * 红线（决策 19）：产物 SQL 全参数化、零值拼接——值一律 ? 绑定；UPDATE 的 SET 列名来自
  * 生成时允许清单（contract 定义，非运行时输入）。产物不做查询构造器/关系 API/懒加载（§5.2 克制声明）。
@@ -35,6 +37,9 @@ import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
 import { createTableSql, dropTableSql, table as defineTable } from "../server/db.ts";
+// R1-C（P1-13）：保留字词表与 gen-endpoint ATR-342 派生闸单源共享（gen-db 不在 vendor 闭包
+// 名单内，框架侧 import 同仓 .mjs 零成本）——绝不两份手抄漂移。
+import { RESERVED_WORDS } from "./gen-endpoint.mjs";
 
 const COLUMN_TYPES = new Set(["integer", "text", "real", "blob"]);
 // P1-8（ATR-343）：字母开头——下划线/数字开头的表名（`_1` 通过旧宽松 IDENT_RE）经 toPascal
@@ -139,7 +144,40 @@ function splitTopLevel(text) {
   return parts;
 }
 
-/** 字符串字面量解析（禁插值/拼接——内容含未转义同种引号或 ${ 即硬错） */
+/** 字符串字面量体内文 → 实际值（decodeEscapesCore 同款内联——gen-endpoint.mjs 单源注释；
+ *  行为由 tests/gen-literal-parity.test.ts 跨面对拍钉住） */
+function decodeEscapesCore(inner) {
+  let out = "";
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c !== "\\") {
+      out += c;
+      continue;
+    }
+    const d = inner[i + 1];
+    if (d === undefined) return { ok: false, error: "转义序列悬空（字面量以反斜杠结尾）" };
+    if (d === "n") { out += "\n"; i++; continue; }
+    if (d === "t") { out += "\t"; i++; continue; }
+    if (d === "r") { out += "\r"; i++; continue; }
+    if (d === "b") { out += "\b"; i++; continue; }
+    if (d === "f") { out += "\f"; i++; continue; }
+    if (d === '"' || d === "'" || d === "\\" || d === "/" || d === "`") { out += d; i++; continue; }
+    if (d === "u") {
+      const hex = inner.slice(i + 2, i + 6);
+      if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
+        return { ok: false, error: "转义 \\u 需要 4 位十六进制（实际「" + inner.slice(i, i + 6) + "」）" };
+      }
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 5;
+      continue;
+    }
+    return { ok: false, error: "转义序列超出扁平字面量纪律（只认 JSON 转义集 \\n \\t \\r \\b \\f 引号 反斜杠 斜杠 \\uXXXX；\\x/八进制等越界）" };
+  }
+  return { ok: true, value: out };
+}
+
+/** 字符串字面量解析（禁插值/拼接——内容含未转义同种引号或 ${ 即硬错）。
+ *  转义解码 = JSON.parse 语义（R1-C §4.7：此前仅映射 \n/\t，\u4e2d 解成 "u4e2d"） */
 function parseStringLiteral(text, what) {
   const t = text.trim();
   const q = t[0];
@@ -154,7 +192,11 @@ function parseStringLiteral(text, what) {
     if (q === "`" && inner.includes("${")) {
       die(`${what}：模板字符串插值超出扁平字面量纪律（§2.1）`, "写成普通字符串字面量");
     }
-    return inner.replace(/\\(.)/g, (_, c) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
+    const dec = decodeEscapesCore(inner);
+    if (!dec.ok) {
+      die(`${what}：${dec.error}`, "字面量转义只认 JSON 转义集（\\n \\t \\r \\b \\f 引号 反斜杠 斜杠 \\uXXXX）——越界转义超出扁平字面量纪律（§2.1）");
+    }
+    return dec.value;
   }
   die(`${what}：期望字符串字面量，实际「${t.slice(0, 60)}」`, "列定义必须是普通对象字面量（扁平纪律，§2.1）——禁计算值/展开/函数调用");
 }
@@ -298,7 +340,19 @@ function toPascal(name) {
 
 function toCamel(name) {
   const p = toPascal(name);
-  return p[0].toLowerCase() + p.slice(1);
+  const c = p[0].toLowerCase() + p.slice(1);
+  // R1-C（P1-13）：保留字闸（词表 = gen-endpoint ATR-342 同一单源）。表名 delete/void/class 等
+  // 通过 IDENT_RE 与 toPascal 检查后，toCamel 派生出保留字——生成的迁移 DDL 与 CRUD SQL 会把
+  // 表名以裸标识符写进 SQLite（CREATE TABLE delete = 保留字语法错误，node:sqlite 实证；SQLite
+  // 关键字大小写不敏感，"Delete" 同闸），产物整体不可用。生成器侧 ATR-343 die（绝不落盘）。
+  if (RESERVED_WORDS.has(c)) {
+    die(
+      `表 ${name} 撞 JS 保留字（toCamel → 「${c}」）——表名会以裸标识符进 SQLite DDL/CRUD SQL（CREATE TABLE ${name} 是保留字语法错误），产物不可用`,
+      `改表名避开保留字（如 delete → deleted_items）——词表与 gen-endpoint 端点派生闸（ATR-342）同一单源`,
+      "ATR-343"
+    );
+  }
+  return c;
 }
 
 /** TS import 相对路径（posix 分隔；不以 . 开头补 ./） */

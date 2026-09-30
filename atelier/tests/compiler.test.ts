@@ -96,6 +96,49 @@ describe("stage ② dump ↔ runtime parser identity", () => {
   });
 });
 
+/* ---- R1-C：stage ② dump 产物 regen 字节幂等（generatedAt 时间戳 + 绝对 root 已入 git 实证曾被打破） ---- */
+describe("stage ② dump regen 字节幂等（R1-C：去 generatedAt/绝对 root）", () => {
+  it("同一输入两次 dump 落盘逐字节一致；index/组件/stdout 产物不含 generatedAt 与绝对 root", async (ctx) => {
+    if (!NODE_OK) return ctx.skip();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atr-dump-idem-"));
+    try {
+      fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "src", "Widget.atr.ts"),
+        [
+          'import { component, html } from "atelier/runtime";',
+          "export const Widget = component(function Widget(props: { title: string }) {",
+          "  return html`<section><h2>{props.title}</h2></section>`;",
+          '}, { name: "Widget", schema: { type: "object", reqProps: { title: { type: "string" } }, optProps: {} } });',
+        ].join("\n"),
+      );
+      const run = () => {
+        const r = spawnSync(process.execPath, [DUMP, "--root", dir], { encoding: "utf8" });
+        if (r.status !== 0) throw new Error(`dump failed: ${r.stderr}`);
+      };
+      const readAll = () =>
+        [".atr/ast/index.json", ".atr/ast/Widget.json"].map((rel) => fs.readFileSync(path.join(dir, rel), "utf8"));
+      run();
+      const first = readAll();
+      await new Promise((r) => setTimeout(r, 25)); // generatedAt 为 ms 精度——跨 25ms 再跑，时间戳必不同
+      run();
+      const second = readAll();
+      expect(second, "regen 必须字节幂等（修复前 generatedAt 时间戳使两次产物必然漂移）").toEqual(first);
+      const index = JSON.parse(first[0]);
+      expect(index.generatedAt, "index.json 不含时间戳（跨机器/跨时点 regen 零漂移）").toBeUndefined();
+      expect(index.root, "index.json 不含绝对 root（跨机器漂移源；codegen --ast 仅以 index.json 为存在哨兵，实读不消费该字段）").toBeUndefined();
+      expect(JSON.parse(first[1]).generatedAt).toBeUndefined();
+      const stdout = spawnSync(process.execPath, [DUMP, "--root", dir, "--stdout"], { encoding: "utf8" });
+      if (stdout.status !== 0) throw new Error(`dump --stdout failed: ${stdout.stderr}`);
+      const agg = JSON.parse(stdout.stdout);
+      expect(agg.generatedAt).toBeUndefined();
+      expect(agg.root).toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 /* ---- F-2 二期：构建期静态依赖图（决策 3「不跑应用即可查询」） ---- */
 describe("buildGraph + codegen --graph-only (F-2 phase 2)", () => {
   const RAW = `

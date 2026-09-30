@@ -403,6 +403,127 @@ export const authBroken = defineCommand("auth.broken", {
   });
 });
 
+/* ---------- R1-C（P1-4 扫描器掩码 / 重名 die / 注入消毒 / 转义解码） ---------- */
+
+describe("R1-C P1-4：端点扫描器注释/字符串掩码（codeMask——幻影端点与吞真实端点双修）", () => {
+  it("① 行注释与块注释里注释掉的 defineQuery 不得产幻影端点", () => {
+    const src = `// export const gone = defineQuery("ghost.y", { handler: () => 1 });
+/* export const gone2 = defineQuery("ghost.z", { handler: () => 1 }); */
+export const real = defineCommand("real.x", { handler: () => 2 });
+`;
+    expect(scanEndpointSource(src).map((e) => e.name)).toEqual(["real.x"]);
+  });
+
+  it("② 字符串/模板字面量里的 defineQuery 忽略（文档示例/提示文本不是端点）", () => {
+    const src = `const hint = "defineQuery('ghost.y', { handler: () => 1 })";
+const tip = \`模板文本里的 defineQuery("ghost.z", { handler: () => 1 }) 不是端点\`;
+export const real = defineCommand("real.x", { handler: () => 2 });
+`;
+    expect(scanEndpointSource(src).map((e) => e.name)).toEqual(["real.x"]);
+  });
+
+  it("③ 多行注释区间不吞真实端点（修复前 re.lastIndex 越界跳过：注释里失配的 defineQuery 花括号外溢，把后续真实端点整体吞掉）", () => {
+    const src = `export function legacy() {
+  /*
+  defineQuery("ghost.y", {
+  */
+  return defineQuery("real.x", { handler: () => 2 });
+}
+`;
+    // 修复前：ghost.y 幻影入册 + real.x 被 lastIndex = close+1 越界吞掉（api.ts 缺真实端点 = 运行时 404 面）
+    expect(scanEndpointSource(src).map((e) => e.name)).toEqual(["real.x"]);
+  });
+
+  it("api.ts 层：注释掉的端点不进产物；注释区间内的真实端点必须进产物", () => {
+    const root = makeRoot();
+    writeFixtureFile(
+      root,
+      "src/server/endpoints/x.ts",
+      `// export const gone = defineQuery("ghost.y", { handler: () => 1 });
+export function legacy() {
+  /*
+  defineQuery("ghost.y", {
+  */
+  return defineQuery("real.x", { handler: () => 2 });
+}
+`
+    );
+    const { content, endpoints } = generateApi(root);
+    expect(endpoints.map((e) => e.name)).toEqual(["real.x"]);
+    expect(content).toContain(`name: "real.x" as const,`);
+    expect(content).not.toContain("ghost.y");
+  });
+});
+
+describe("R1-C：端点重名 die（镜像运行时 register() ATR-313——语法破碎的 api.ts 绝不产出）", () => {
+  it("同文件重复端点名 → ATR-313 die 且 api.ts 不落盘（修复前：重复 export const/type 破碎产物照写）", () => {
+    const root = makeRoot();
+    writeFixtureFile(
+      root,
+      "src/server/endpoints/x.ts",
+      `export const a = defineQuery("dup.x", { handler: () => 1 });
+export const b = defineQuery("dup.x", { handler: () => 2 });
+`
+    );
+    let err: (Error & { code?: string; fix?: string }) | null = null;
+    try {
+      generateApi(root);
+    } catch (e) {
+      err = e as Error & { code?: string; fix?: string };
+    }
+    expect(err, "重名必须在生成器侧 die（运行时 register() 同为 ATR-313 硬错）").toBeTruthy();
+    expect(err!.code).toBe("ATR-313");
+    expect(err!.message).toContain("dup.x");
+    expect(err!.fix).toBeTruthy();
+    expect(fs.existsSync(path.join(root, "src", "generated", "api.ts"))).toBe(false);
+  });
+
+  it("跨文件重复端点名 → 同样 die（诊断含两处声明位置，可导航）", () => {
+    const root = makeRoot();
+    writeFixtureFile(root, "src/server/endpoints/a.ts", `export const a1 = defineQuery("dup.y", { handler: () => 1 });\n`);
+    writeFixtureFile(root, "src/server/endpoints/b.ts", `export const b1 = defineQuery("dup.y", { handler: () => 2 });\n`);
+    let err: (Error & { code?: string; fix?: string }) | null = null;
+    try {
+      generateApi(root);
+    } catch (e) {
+      err = e as Error & { code?: string; fix?: string };
+    }
+    expect(err?.code).toBe("ATR-313");
+    expect(err?.message).toContain("dup.y");
+    expect(err?.message).toContain("src/server/endpoints/a.ts");
+    expect(err?.message).toContain("src/server/endpoints/b.ts");
+  });
+});
+
+describe("R1-C：desc/mount 注入消毒（JSDoc 破坏序列 */ 中性化——破碎产物绝不落盘）", () => {
+  it("specs 描述含 */ 不得破碎骨架 JSDoc（中性化为 *\\/）", () => {
+    const root = makeFixture();
+    writeFixtureFile(
+      root,
+      "specs/legacy.md",
+      `# Legacy
+
+## 端点意图（specs 扩展段）
+- legacy.old（query）：旧接口 */ 已废弃，勿用
+`
+    );
+    const sk = generateSkeletons(root);
+    expect(sk.written.map((w) => w.file)).toContain("src/server/endpoints/legacy.ts");
+    const skel = fs.readFileSync(path.join(root, "src", "server", "endpoints", "legacy.ts"), "utf8");
+    expect(skel).toContain("意图：旧接口 *\\/ 已废弃"); // */ 已中性化——JSDoc 结构完整
+    expect(skel).not.toContain("旧接口 */ 已废弃"); // 原样注入 = 提前闭合注释（破碎产物）
+  });
+
+  it("mount 含 */ 不得破碎 api.ts JSDoc（中性化为 *\\/）", () => {
+    const root = makeFixture();
+    const { content } = generateApi(root, { mount: "/a*/b" });
+    expect(content).toContain("POST /a*\\/b/chat.ask"); // JSDoc 内 mount 已消毒
+    expect(content).not.toContain("POST /a*/b/chat.ask"); // 原样注入 = 提前闭合注释（破碎产物）
+    // fetch URL 是字符串字面量（JSON.stringify 转义）不受影响——消毒只动注释面
+    expect(content).toContain(`fetch("/a*/b/chat.ask"`);
+  });
+});
+
 /* ---------- 端点名与派生标识符校验（P1-8：坏名字绝不流入产物，生成器侧诊断而非生成文件里报错） ---------- */
 
 /** 四段式断言：code / message（含坏值）/ fix（给合法示例）三段齐 */

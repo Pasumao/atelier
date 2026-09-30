@@ -45,6 +45,12 @@ export const chatMessageSchema = {
   type: "object",
   reqProps: { id: { type: "number" }, chatId: { type: "number" }, role: { type: "string", enum: ["user", "assistant"] }, content: { type: "string" } },
 } satisfies FlatSchema;
+// —— R1-C 数值枚举跨面闸：数值枚举契约必须能以 satisfies FlatSchema 声明（修复前 enum?: string[]
+//     标注撒谎窄化——数值枚举契约在 tsc 直接报错，db.ts 只能经 as 硬转）——
+export const chatLevelSchema = {
+  type: "object",
+  reqProps: { level: { type: "number", enum: [1, 2, 3] } },
+} satisfies FlatSchema;
 `
   );
   w(
@@ -55,9 +61,24 @@ export const messages = table("messages", {
   id: { type: "integer", primaryKey: true },
   chatId: { type: "integer", notNull: true },
   role: { type: "text", notNull: true, enum: ["user", "assistant"] },
+  level: { type: "integer", enum: [1, 2, 3] },
   content: { type: "text", notNull: true },
   createdAt: { type: "integer", notNull: true },
 });
+`
+  );
+  // R1-C：FlatOf 枚举投影类型闸（tsc 级红检）——字符串枚举投影保持 string 宽化（不得回归 never）、
+  // 数值枚举契约投影诚实宽化（绝不为 never）。satisfies 加宽数组下无法恢复字面量精度是既有诚实边界。
+  w(
+    "src/type-probe.ts",
+    `import type { FlatOf } from "./vendor/atelier/server/index.ts";
+import type { chatMessageSchema, chatLevelSchema } from "./contract.ts";
+
+type Expect<T extends true> = T;
+type NotNever<T> = [T] extends [never] ? false : true;
+
+export type RoleStaysString = Expect<string extends FlatOf<typeof chatMessageSchema>["role"] ? true : false>;
+export type LevelNotNever = Expect<NotNever<FlatOf<typeof chatLevelSchema>["level"]>>;
 `
   );
   w(

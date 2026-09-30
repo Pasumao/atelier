@@ -305,6 +305,123 @@ export const chatPing = defineQuery("chat.ping", {
   return root;
 }
 
+/* ---------- R1-C（扫描器掩码单一真相 / 数值枚举投影 / 重名 die / 名字闸） ---------- */
+
+describe("R1-C P1-4：export-openapi 扫描面注释/字符串掩码（复用 gen-endpoint findEndpointCalls 单一真相）", () => {
+  const MASKED_SRC = `// export const gone = defineQuery("ghost.y", { handler: () => 1 });
+const hint = "defineQuery('ghost.z', { handler: () => 1 })";
+export function legacy() {
+  /*
+  defineQuery("ghost.y", {
+  */
+  return defineQuery("real.x", { handler: () => 2 });
+}
+`;
+  it("①② 注释掉的/字符串里的 defineQuery 不进导出面；③ 注释区间内的真实端点必须进（吞端点负例）", () => {
+    expect(scanOpenApiEndpoints(MASKED_SRC).map((e) => e.name)).toEqual(["real.x"]);
+  });
+
+  it("掩码修复后导出面元数据照常提取（真实端点的 auth/timeoutMs/live 不受掩码影响）", () => {
+    const src = `export const a = defineQuery("x.y", {
+  live: { invalidate: ["table:m"] },
+  timeoutMs: 10_000,
+  auth: { type: "session" },
+  handler: () => ({}),
+});
+`;
+    const eps = scanOpenApiEndpoints(src);
+    expect(eps[0]).toMatchObject({ name: "x.y", live: true, invalidate: ["table:m"], timeoutMs: 10000, auth: { type: "session" } });
+  });
+});
+
+describe("R1-C：数值枚举投影（§2.4 放行 (string|number)[]——validateFlat includes 同源，消除跨消费面分叉）", () => {
+  it("number 叶子数值枚举：enum 原样投影（修复前 ATR-107「enum 取值必须是字符串」——db.ts rowSchema 数值枚举消费链直接失败）", () => {
+    expect(projectFlatField({ type: "number", enum: [1, 2, 3] }, "openapi-3.0")).toEqual({ type: "number", enum: [1, 2, 3] });
+    expect(projectJsonSchema({ type: "object", reqProps: { level: { type: "number", enum: [1, 2, 3] } } }, "draft-2020-12").properties?.level).toEqual({
+      type: "number",
+      enum: [1, 2, 3],
+    });
+  });
+
+  it("投影与 validateFlat 同判：数值枚举合法值过投影校验、非法值两侧同拒（round-trip）", () => {
+    const flat = { type: "object", reqProps: { level: { type: "number", enum: [1, 2, 3] } } } as never;
+    const projected = projectJsonSchema(flat, "openapi-3.0");
+    expect(validateFlat(flat, { level: 2 }, "t").ok).toBe(true);
+    expect(jsValidate(projected, { level: 2 })).toBe(true);
+    expect(validateFlat(flat, { level: 9 }, "t").ok).toBe(false);
+    expect(jsValidate(projected, { level: 9 })).toBe(false);
+    expect(validateFlat(flat, { level: "2" }, "t").ok).toBe(false);
+    expect(jsValidate(projected, { level: "2" })).toBe(false);
+  });
+
+  it("同质闸回归（对齐 db.ts table() 口径）：混质/布尔成员 → ATR-107 绝不静默", () => {
+    for (const leaf of [{ type: "number", enum: [1, "a"] }, { type: "string", enum: ["a", 1] }, { type: "boolean", enum: [true] }]) {
+      const err = atrOf(() => projectFlatField(leaf as never, "openapi-3.0"));
+      expect(err.code, JSON.stringify(leaf)).toBe("ATR-107");
+      expect(err.fix, JSON.stringify(leaf)).toBeTruthy();
+    }
+  });
+
+  it("端到端：数值枚举契约（db.ts rowSchema pick 投影形态）的 openapi 导出不再失败、enum 原样进文档", () => {
+    const root = makeRoot();
+    w(
+      root,
+      "src/contract.ts",
+      `export const chatLevelInput = {
+  type: "object",
+  reqProps: { level: { type: "number", enum: [1, 2, 3] } },
+};
+`
+    );
+    w(
+      root,
+      "src/server/endpoints/level.ts",
+      `export const levelGet = defineQuery("level.get", {
+  contract: chatLevelInput,
+  output: chatLevelInput,
+  handler: () => ({ level: 1 }),
+});
+`
+    );
+    const { doc } = buildOpenApi(root);
+    expect(doc.components.schemas.chatLevelInput.properties.level).toEqual({ type: "number", enum: [1, 2, 3] });
+  });
+});
+
+describe("R1-C：端点重名 die（ATR-313 镜像——paths[pathKey] 静默后者覆盖已废除）", () => {
+  it("重名端点 → 聚合报错含 ATR-313 与端点名，绝不静默覆盖", () => {
+    const root = makeApp();
+    w(root, "src/server/endpoints/dupe.ts", `export const dupeCall = defineQuery("chat.ask", { handler: () => ({}) });\n`);
+    let msg = "";
+    let fix = "";
+    try {
+      buildOpenApi(root);
+    } catch (e) {
+      msg = (e as Error).message;
+      fix = String((e as { fix?: string }).fix ?? "");
+    }
+    expect(msg).toContain("ATR-313");
+    expect(msg).toContain("chat.ask");
+    expect(fix).toBeTruthy();
+  });
+});
+
+describe("R1-C：端点名字符集闸（ATR-342 同集——坏名字 die 而非静默导出坏路径）", () => {
+  it("端点名含双引号 → ATR-342 die（修复前：paths 键静默携带坏字符导出）", () => {
+    const root = makeApp();
+    w(root, "src/server/endpoints/bad.ts", `export const badCall = defineQuery("we\\"ird", { handler: () => ({}) });\n`);
+    let err: (Error & { code?: string; fix?: string }) | null = null;
+    try {
+      buildOpenApi(root);
+    } catch (e) {
+      err = e as Error & { code?: string; fix?: string };
+    }
+    expect(err, "坏名字必须在导出侧 die").toBeTruthy();
+    expect(err!.code ?? err!.message).toContain("ATR-342");
+    expect(err!.fix).toBeTruthy();
+  });
+});
+
 describe("export openapi 端到端（§13：paths / x-atelier / restful / 注记 / 报错）", () => {
   it("文档结构：5 端点 5 paths / 默认 POST / operationId+tags / requestBody required 由 reqProps 推导", () => {
     const { doc } = buildOpenApi(makeApp());
