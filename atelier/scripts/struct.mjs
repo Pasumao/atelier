@@ -245,9 +245,32 @@ export function probeErrorsLayer(root, add) {
 export function probeTimelineLayer(root, add) {
   const tl = path.join(root, ".atelier", "checkpoints.jsonl");
   if (fs.existsSync(tl)) {
-    const rows = fs.readFileSync(tl, "utf8").split("\n").filter(Boolean);
-    const saves = rows.filter((r) => JSON.parse(r).type === "save").length;
-    add({ id: "TIMELINE_STORE", layer: 6, severity: null, detail: `${rows.length} timeline event(s), ${saves} anchored checkpoint(s)` });
+    // P2-C4：与 checkpoint.mjs readStore 同族收口——append 型 jsonl 中途 kill 可留半行，
+    // 坏行裸 JSON.parse 让整场 struct 崩栈。逐行 try/catch：坏行 = ERROR finding 指行号
+    // （struct check 门 exit 1 即「die 1」的结构化形态；探针是库函数绝不 process.exit——
+    // MCP structure.map 同进程消费本文件），健康行照旧计数、坏行单独记账不重复。
+    const lines = fs.readFileSync(tl, "utf8").split("\n").filter(Boolean);
+    const rows = [];
+    const badLines = [];
+    for (let i = 0; i < lines.length; i++) {
+      try {
+        rows.push(JSON.parse(lines[i]));
+      } catch {
+        badLines.push(i + 1);
+      }
+    }
+    const saves = rows.filter((r) => r.type === "save").length;
+    if (badLines.length > 0) {
+      add({
+        id: "TIMELINE_STORE",
+        layer: 6,
+        severity: "ERROR",
+        detail: `checkpoint timeline corrupt: ${tl} 第 ${badLines.join(", ")} 行不是完整 JSON（append 型台账中途 kill 可留半行）；健康行 ${rows.length} 条`,
+        fix: "修复或删除损坏行后重跑 struct check（锚点本体在 git commit，台账只是本地时间线）",
+      });
+    } else {
+      add({ id: "TIMELINE_STORE", layer: 6, severity: null, detail: `${rows.length} timeline event(s), ${saves} anchored checkpoint(s)` });
+    }
   } else {
     add({ id: "TIMELINE_STORE", layer: 6, severity: "INFO", detail: "no checkpoint timeline yet", fix: "anchor the current state: node atelier/cli.mjs checkpoint save \"baseline\"" });
   }
