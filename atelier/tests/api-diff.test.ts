@@ -292,3 +292,98 @@ describe("P1 #8：基线损坏退出码（CLI 装配面，spawn 真实脚本）"
     expect(r.status).toBe(3); // 修复前：diffSurfaces 当空面处理 → 可能 vacuous 放行（exit 0/2）
   });
 });
+
+/* ---------------- P-C#8 + P2-C6（第三遍架构复校 §3 拉入 / §2.3） ----------------
+ * P-C#8：judge strict 反推——修前 added 违规判定依赖 `summary.ok === false && breaking === 0`：
+ *   ① 仅 --budget 超限时 ok 同样为 false → 非 strict 的 added 被误标 added(strict)；
+ *   ② --strict + removed 时 breaking > 0 → added 漏标且永不走豁免环（--allow 无法豁免 added）。
+ * 修法：strict 显式传参（judge(diff, allow, { strict })），added 同样走豁免环。
+ * P2-C6：--allow 文件缺失/坏档/无 accepted 键 → 静默按空表（typo 路径零提示，文案还说
+ *   「未在 allowlist 中豁免」）。修法：die 2 指路径（与基线损坏 exit 3 同一诚实纪律）。 */
+describe("P-C#8：judge strict 反推修正（显式 strict + added 走豁免环）", () => {
+  const base = (surfaces) => ({ surfaces });
+
+  it("红检①：--budget 超限不误标 added（judge 不得从 summary.ok 反推 strict）", () => {
+    const before = base({
+      "token-keys": [{ id: "a", value: "1" }, { id: "b", value: "2" }, { id: "c", value: "3" }, { id: "d", value: "4" }],
+      "mcp-tools": [{ id: "t1" }],
+    });
+    const after = base({
+      "token-keys": [{ id: "a", value: "1" }, { id: "b", value: "2" }, { id: "c", value: "3" }, { id: "d", value: "9" }],
+      "mcp-tools": [{ id: "t1" }, { id: "t2" }], // added——非 strict
+    });
+    const d = diffSurfaces(before, after, { budget: 0.1 }); // 值漂移超预算（非 strict）
+    expect(d.summary.ok).toBe(false);
+    expect(d.summary.breaking).toBe(0);
+    const j = judge(d);
+    expect(j.violations.filter((v) => v.kind === "added(strict)"), "修前：ok=false 被 反推 为 strict → added 误标").toEqual([]);
+    expect(j.violations.some((v) => v.kind === "value-budget")).toBe(true); // budget 违规照报
+  });
+
+  it("红检②：--strict + removed 时 added 同样标违规且走豁免环", () => {
+    const d = diffSurfaces(
+      base({ "mcp-tools": [{ id: "keep" }, { id: "drop" }] }),
+      base({ "mcp-tools": [{ id: "keep" }, { id: "fresh" }] }),
+      { strict: true },
+    );
+    // 修前：breaking=1（removed）→ strict 块整体跳过 → added 漏标；--allow 豁免 removed 后 added 仍不可见
+    const exemptRemoved = judge(d, ["mcp-tools:drop"], { strict: true });
+    expect(exemptRemoved.violations.some((v) => v.kind === "added(strict)" && v.id === "fresh")).toBe(true);
+    const exemptBoth = judge(d, ["mcp-tools:drop", "mcp-tools:fresh"], { strict: true });
+    expect(exemptBoth.violations, "added 必须走豁免环（--allow 可豁免 added(strict)）").toEqual([]);
+  });
+
+  it("非 strict 时 added 恒不标违规（显式 strict 参数缺省 false，不加违规）", () => {
+    const d = diffSurfaces(
+      base({ "mcp-tools": [{ id: "a" }] }),
+      base({ "mcp-tools": [{ id: "a" }, { id: "b" }] }),
+    );
+    expect(judge(d).violations).toEqual([]);
+  });
+});
+
+describe("P2-C6：--allow 文件缺失/坏档 → die 2 指路径（不再静默按空表）", () => {
+  const SCRIPT = path.resolve(import.meta.dirname, "..", "scripts", "api-diff.mjs");
+
+  /** 最小 app 布局（detectLayout = app：src/components + atelier.config.json）+ 空 baseline → diff 零漂移 */
+  function makeAppRoot() {
+    const dir = tmpDir();
+    fs.mkdirSync(path.join(dir, "src", "components"), { recursive: true });
+    fs.mkdirSync(path.join(dir, ".atelier"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "atelier.config.json"), JSON.stringify({ tokens: {} }), "utf8");
+    fs.writeFileSync(
+      path.join(dir, ".atelier", "api-surface.json"),
+      JSON.stringify({ schemaVersion: 1, generatedAt: "t", root: "x", layout: "app", surfaces: {} }) + "\n",
+      "utf8",
+    );
+    return dir;
+  }
+
+  it("红检：--allow 指向不存在路径 → exit 2 + stderr 指路径（修前 exit 0 静默空表）", () => {
+    const dir = makeAppRoot();
+    const r = spawnSync(process.execPath, [SCRIPT, "check", "--root", dir, "--allow", path.join(dir, "nope-allow.json")], { encoding: "utf8", windowsHide: true });
+    expect(r.status).toBe(2); // 修复前：readJson→null ?.accepted ?? [] 静默空表 → exit 0
+    expect(r.stderr).toContain("--allow");
+    expect(r.stderr).toContain("nope-allow.json");
+    expect(r.stderr).toContain("fix:");
+  });
+
+  it("红检：--allow 是无 accepted 键的合法 JSON → exit 2 指认形态", () => {
+    const dir = makeAppRoot();
+    const allowFile = path.join(dir, "allow.json");
+    fs.writeFileSync(allowFile, JSON.stringify({ exempted: ["mcp-tools:x"] }), "utf8"); // 键名拼错
+    const r = spawnSync(process.execPath, [SCRIPT, "check", "--root", dir, "--allow", allowFile], { encoding: "utf8", windowsHide: true });
+    expect(r.status).toBe(2); // 修复前：静默空表 exit 0——拼错键名假装「无破坏」
+    expect(r.stderr).toContain("accepted");
+    expect(r.stderr).toContain("fix:");
+  });
+
+  it("回归：--allow 形态正确且 accepted 真实豁免 → 照常 exit 0（守卫不误伤正常豁免）", () => {
+    const dir = makeAppRoot();
+    const allowFile = path.join(dir, "allow.json");
+    fs.writeFileSync(allowFile, JSON.stringify({ accepted: [] }), "utf8");
+    const r = spawnSync(process.execPath, [SCRIPT, "check", "--root", dir, "--allow", allowFile], { encoding: "utf8", windowsHide: true });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("PASS");
+  });
+});
