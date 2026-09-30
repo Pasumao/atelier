@@ -114,4 +114,16 @@ describe("P1 #7：cli init 参数缺值 / `--` 前缀混淆 → usage die（绝�
     expect(r.stderr).toContain("usage");
     expect(fs.existsSync(path.join(target, "package.json"))).toBe(false);
   });
+
+  it("补充钉：cli --force 透传——非空 target 显式覆盖成功（逃生口在 cli 装配面必须可用）", () => {
+    const work = tmp("atelier-cli-init-force-");
+    const target = path.join(work, "app");
+    fs.mkdirSync(target, { recursive: true });
+    fs.writeFileSync(path.join(target, "user.keep"), "user data", "utf8");
+    const r = run(CLI, ["init", "--target", target, "--name", "ForcedCli", "--no-ai", "--force"], work);
+    expect(r.status).toBe(0); // --force 不透传 = 逃生口在 cli 死路（init-project 会 die 2）
+    expect(fs.readFileSync(path.join(target, "user.keep"), "utf8")).toBe("user data"); // 名单外保留
+    const pkg = JSON.parse(fs.readFileSync(path.join(target, "package.json"), "utf8")); // 模板件重写
+    expect(pkg.name).toBe("forcedcli");
+  });
 });

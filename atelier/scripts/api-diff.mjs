@@ -28,7 +28,8 @@
  * 用法：
  *   node atelier/scripts/api-diff.mjs snapshot [--root <dir>] [--out <file>] [--json]
  *   node atelier/scripts/api-diff.mjs check    [--root <dir>] [--baseline <file>] [--allow <file>] [--strict] [--json]
- * 退出码：0 ok · 1 gate failed · 2 usage/缺 baseline
+ * 退出码：0 ok · 1 gate failed · 2 usage/缺 baseline/布局不可判 · 3 baseline 存在但不可评估
+ *   （JSON 损坏 / schema 不识别——与「布局不可判」分离，checkpoint 据此拒锚而非 vacuous pass，P1 #8）
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -371,9 +372,33 @@ if (isMain()) {
 
     if (sub === "check") {
       const baselinePath = path.resolve(flag("--baseline") ?? path.join(root, ".atelier", "api-surface.json"));
-      const baseline = readJson(baselinePath);
+      /* P1 #8：基线「存在但不可评估」（JSON 损坏 / schema 不识别）= exit 3，与「缺 baseline /
+       * usage / 布局不可判」的 2 分离——此前损坏基线 die 2，被 checkpoint 一律解释为「布局不可判
+       * → vacuous pass」，坏基线静默放行击穿「未检不锚」。校验先于 makeSnapshot（空 root 的布局
+       * 错误 exit 2 不得掩盖基线损坏 exit 3）。 */
+      let baseline;
+      try {
+        baseline = readJson(baselinePath);
+      } catch (e) {
+        die(
+          `error: baseline 损坏不可评估（${baselinePath}）: ${e.message}\n` +
+          `fix: 重跑 node atelier/cli.mjs api-diff snapshot --root ${root} 重新基线化（旧基线经 git 历史留痕）`,
+          3,
+        );
+      }
       if (!baseline) {
         die(`缺 baseline（${baselinePath}）——先跑: node atelier/cli.mjs api-diff snapshot --root ${root}`, 2);
+      }
+      if (
+        typeof baseline !== "object" || Array.isArray(baseline) ||
+        baseline.schemaVersion !== SCHEMA_VERSION ||
+        !baseline.surfaces || typeof baseline.surfaces !== "object"
+      ) {
+        die(
+          `error: baseline schema 不识别（${baselinePath}）：schemaVersion=${String(baseline?.schemaVersion)} surfaces 类型=${typeof baseline?.surfaces}，期望 ${SCHEMA_VERSION} + 对象\n` +
+          `fix: 重跑 node atelier/cli.mjs api-diff snapshot --root ${root} 重新基线化`,
+          3,
+        );
       }
       const current = makeSnapshot(root, flag("--surfaces"));
       const allowFile = flag("--allow");

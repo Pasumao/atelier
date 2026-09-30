@@ -10,6 +10,8 @@
  *     原样错误（如 EADDRINUSE 就换 server.port / 释放端口，绝不静默换口）；
  *   - <mount>/* 反向代理：方法/头/体透传、双向流式（req.pipe 上行、proxyRes writeHead+pipe 下行，
  *     SSE live 端点靠不缓冲自然流式）；未就绪/未托管/连接被拒 → 503 JSON（ATR-403，短暂、诚实）；
+ *     P1 #3 起 Origin/Host 白名单闸（镜像 P1-12，原语单源本文件）——承载写副作用的反代面不再是
+ *     跨站 no-cors 写的免检通道；
  *   - 热重启：调用方（dev 插件 watcher）debounce 后调 restart(reason)——停旧（SIGTERM，1.5s 后
  *     SIGKILL 兜底；Windows 上 kill 即终止语义）→ 重启 → 重新握手。前端 HMR 零牵连：server 文件
  *     不在 Vite 模块图，watch 只喂本监督器（决策 16 full-reload 前科不许重演——这是实现注记）。
@@ -17,7 +19,7 @@
  * 诚实边界：不代理 WebSocket 升级（server 面 live 走 SSE，无 WS 需求）；重启窗口期代理如实 503；
  * stdio pipe 全程持续消费（防 64KB 缓冲写满卡死子进程）。
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import readline from "node:readline";
 import path from "node:path";
@@ -28,6 +30,33 @@ export const READY_PREFIX = "ATELIER_SERVER_READY ";
 const SIGKILL_FALLBACK_MS = 1500;
 /** start() 等握手的最长时限（超时杀子进程并如实报错） */
 const DEFAULT_READY_TIMEOUT_MS = 10000;
+
+/* ---- P1 #3：Origin/Host 白名单原语（单源——dev 插件 P1-12 闸与本文件反代闸共用；
+ * 插件 re-export 保持 P1-12 既有导出面不变）----
+ * 威胁模型一句话：dev-token 是 dev 面唯一信任锚，而浏览器对跨站 no-cors 请求仍会打到
+ * /__atelier/* 与 <mount>/*（承载写副作用）——无来源闸时，token 门挡不住「伪造来源页驱动
+ * 浏览器直接跨站写」这一族 CSRF（P1-12）。 */
+
+/** 自身授权方 → 允许 Origin 列表（127.0.0.1/localhost/[::1] × 显式配置 host；通配 host 不是「自身 host」）。
+ *  http/https 双 scheme 都认：scheme 由部署形态决定，来源判定的实质是 host:port。 */
+export function originAllowlist(port, extraHosts = []) {
+  const authorities = new Set(["127.0.0.1", "localhost", "[::1]"]);
+  for (const h of Array.isArray(extraHosts) ? extraHosts : [extraHosts]) {
+    if (typeof h === "string" && !["0.0.0.0", "::", "*"].includes(h)) authorities.add(h);
+  }
+  const origins = [];
+  for (const a of authorities) for (const scheme of ["http", "https"]) origins.push(`${scheme}://${a}:${port}`);
+  return origins;
+}
+
+/** Origin 是否放行：白名单命中，或与 Host 头同授权方（浏览器设置的 Host = 实际连接的授权方——
+ *  覆盖自定义 host/局域网 IP 访问；跨站伪造时 Origin 与 Host 必然失配）。Origin: null / 乱值一律拒。 */
+export function originAllowed(origin, allowlist, hostHeader = null) {
+  let u;
+  try { u = new URL(String(origin)); } catch { return false; }
+  if (hostHeader && u.host === String(hostHeader).toLowerCase()) return true;
+  return allowlist.includes(u.origin);
+}
 
 /* keepAlive:false：热重启后同端口可能被新子进程复用，连接池里的旧 socket 会 ECONNRESET——
  * dev 代理性能不敏感，每请求新建连接换确定性。 */
@@ -73,14 +102,46 @@ function typeStripArgs() {
 }
 
 /**
+ * P1 #11：子进程击杀（win32 按 dev-screenshot/bench 的 taskkill /T 树杀先例——server 面虽是单
+ * node 进程，树杀一并覆盖其意外派生的子进程；POSIX SIGTERM + SIGKILL 兜底定时器）。调用返回即
+ * 「击杀已发出」，不等退出——握手超时路径要同步杀，绝不留占端口持 SQLite 句柄的孤儿。
+ */
+function killChildTree(c) {
+  if (!c || c.pid == null || (c.exitCode !== null && c.exitCode !== undefined) || c.signalCode !== null) return;
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/pid", String(c.pid), "/T", "/F"], { stdio: "ignore" });
+      return;
+    } catch {
+      /* fall through 到 kill() */
+    }
+  }
+  try {
+    c.kill("SIGTERM");
+  } catch {
+    /* already gone */
+  }
+  const t = setTimeout(() => {
+    try {
+      c.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }, SIGKILL_FALLBACK_MS);
+  t.unref?.();
+}
+
+/**
  * server 面监督器。用法（dev 插件）：
- *   const sup = createServerSupervisor({ root, port, mount, dbPath, env });
+ *   const sup = createServerSupervisor({ root, port, mount, dbPath, env, selfPort, selfHosts });
  *   server.middlewares.use(sup.middleware());   // 注册在 /__atelier 之前（路径不重叠，顺序只为清晰）
  *   await sup.start();                           // 就绪握手后 resolve {port}
  *   await sup.restart("src/server 变更");        // 热重启（watcher debounce 后调）
  *   await sup.stop();                            // vite 收尾（幂等，防双杀）
+ * selfPort/selfHosts：P1 #3 反代 Origin 闸的白名单口径 = dev 面自身端口（页面所在 port，number
+ * 或 () => number——端口漂移后取实际端口）× 显式配置 host；缺省回落到 server port（直连形态）。
  */
-export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPath = ".atelier/dev.db", env = {}, readyTimeoutMs = DEFAULT_READY_TIMEOUT_MS }) {
+export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPath = ".atelier/dev.db", env = {}, readyTimeoutMs = DEFAULT_READY_TIMEOUT_MS, selfPort = null, selfHosts = [] }) {
   const ENTRY = path.join("src", "server", "main-server.ts"); // 相对 root（spawn cwd=root，三方契约第 1 条）
   const entryAbs = path.join(root, ENTRY);
   const stripArgs = typeStripArgs();
@@ -101,10 +162,26 @@ export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPa
   /**
    * spawn 子进程并等就绪握手。resolve {port}；托管被跳过（Node < 22.6，已打诚实 warn）resolve null；
    * 握手超时 / 子进程握手前退出 reject（错误信息指向上方 [server] 原样输出）。
+   * P1 #11：握手超时同步杀子进程（killChildTree）——注释承诺「超时杀子进程并如实报错」必须兑现，
+   * 不留占端口持 SQLite 句柄的孤儿；start() re-entry（child 还挂着，如超时刚杀 exit 未落地）先
+   * stop() 清场再 spawn，绝不覆盖引用制造孤儿。
    * 约定：boot 期 await 一次；之后的变更一律走 restart()（stop 会作废在途 start 的等待）。
    */
   function start() {
     if (starting) return starting;
+    if (child) {
+      // P1 #11 re-entry 防孤儿：先停干净上一代，再走 spawn 路径（starting 先解引用防自引用死锁）
+      starting = (async () => {
+        await stop();
+        starting = null;
+        return spawnAndAwait();
+      })();
+      return starting;
+    }
+    return spawnAndAwait();
+  }
+
+  function spawnAndAwait() {
     if (stripArgs === null) {
       console.warn(
         `[atelier] dev 托管跳过：Node ${process.versions.node} < 22.6 无法原生跑 .ts（type stripping）——server 面不托管，前端照常跑；<${mount}>/* 将返回 503 ATR-403`,
@@ -114,6 +191,7 @@ export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPa
     const myGen = ++gen;
     starting = new Promise((resolve, reject) => {
       let settled = false;
+      let timedOut = false;
       const c = spawn(process.execPath, [...stripArgs, ENTRY], {
         cwd: root,
         env: {
@@ -137,7 +215,11 @@ export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPa
         else resolve(value);
       };
       const readyTimer = setTimeout(() => {
-        settle(new Error(`ATR-403: server 面握手超时（${readyTimeoutMs}ms 未收到 ATELIER_SERVER_READY 行）——检查 ${entryAbs} 是否按契约在 listen 后输出就绪行（上方 [server] 行是子进程原样输出）`));
+        // P1 #11：超时即杀（win32 taskkill /T /F，POSIX SIGTERM→SIGKILL）——先于 settle 发出，
+        // 子进程绝不越过握手超时存活
+        timedOut = true;
+        killChildTree(c);
+        settle(new Error(`ATR-403: server 面握手超时（${readyTimeoutMs}ms 未收到 ATELIER_SERVER_READY 行）——子进程已终止；检查 ${entryAbs} 是否按契约在 listen 后输出就绪行（上方 [server] 行是子进程原样输出）`));
       }, readyTimeoutMs);
 
       // stdio pipe 必须持续消费（防缓冲死锁）；就绪行解析，其余行 [server] 前缀透传
@@ -162,6 +244,7 @@ export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPa
         if (myGen !== gen) return;
         child = null;
         childPort = null;
+        if (timedOut) return; // 握手超时路径：子进程被本监督器终止，超时错误已如实上报，不叠加退出告警
         console.error(
           `[atelier] server 子进程退出（code=${code ?? "-"} signal=${signal ?? "-"}）——上方 [server] 行为原样错误输出（EADDRINUSE → 释放端口或改 atelier.config.json 的 server.port；固定端口被占绝不静默换口）`,
         );
@@ -230,6 +313,22 @@ export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPa
       const pathOnly = raw.split("?")[0];
       const onMount = pathOnly === mount || pathOnly.startsWith(`${mount}/`);
       if (!onMount) return next();
+      /* P1 #3：反代写面 Origin 闸——语义严格镜像 P1-12 闸（同一原语单源）：
+       * Origin 存在且不在白名单（127.0.0.1/localhost/[::1]/配置 host × selfPort）也不与 Host 头
+       * 同授权方 → 403。无 Origin = 非浏览器客户端（curl/MCP stdio）放行不误伤；Origin: null 拒；
+       * 跨站 no-cors fetch 驱动 POST /api/<写端点> 在此拦断。selfPort 函数口径使端口漂移后白名单
+       * 跟随实际端口（Origin ≡ Host 同授权放行对漂移天然成立——Host 头即实际连接授权方）。 */
+      const sp = typeof selfPort === "function" ? selfPort() : (selfPort ?? port);
+      if (req.headers.origin != null && !originAllowed(req.headers.origin, originAllowlist(sp, selfHosts), req.headers.host)) {
+        res.statusCode = 403;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({
+          ok: false,
+          error: "ATR-403-dev: cross-origin request to the proxied server face is rejected",
+          fix: "从应用自身 origin（127.0.0.1/localhost）访问 dev 面；工具链以无 Origin 通道调用（Origin 闸镜像 P1-12，与 /__atelier/* 同一 originAllowlist/originAllowed 单源）",
+        }));
+        return;
+      }
       if (!isReady()) {
         send503(
           res,

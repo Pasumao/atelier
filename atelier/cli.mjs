@@ -18,9 +18,10 @@ const script = (f) => path.join(PKG, "scripts", f);
 const HELP = `atelier v1.1 (script form — spec surface: atelier/docs/ARCHITECTURE.md §8)
 
 PROJECT
-  atelier init --target <dir> --name <Name> [--no-ai]              FULL  scaffold a self-contained
+  atelier init --target <dir> --name <Name> [--no-ai] [--force]        FULL  scaffold a self-contained
                                                                          app from framework pieces
-                                                                         (+ agent layer)
+                                                                         (+ agent layer; 非空 target 拒绝
+                                                                         指路 sync，--force 显式覆盖)
   atelier dev [--prod-db <path>]                                   MINI  run the app's dev server
                                                                          (forwards to package.json dev script;
                                                                          --prod-db 以 ATELIER_DB_PATH 注入 server
@@ -99,7 +100,7 @@ BENCHMARK
   atelier bench --app <dir> [--port N] [--json] [--keep]           MINI* P0-4 SPEC §7 four-metric baseline
                                                                           (gzip/mount/HMR/screenshot vs targets)
 
-Exit codes: 0 ok · 1 gate failed · 2 usage · 4 not-implemented (STUB)
+Exit codes: 0 ok · 1 gate failed · 2 usage · 3 unreadable baseline (api-diff/checkpoint gate) · 4 not-implemented (STUB)
 Examples:
   node atelier/cli.mjs init --target ./my-app --name MyApp && cd my-app && pnpm install && pnpm dev
   node atelier/cli.mjs checkpoint save "AI round 1: scaffold"
@@ -137,13 +138,20 @@ switch (cmd) {
   /* ---------- project lifecycle ---------- */
   case "init": {
     const argvAll = process.argv.slice(3); // everything after the literal word "init"
-    if (!argvAll.includes("--target")) die("usage: atelier init --target <dir> --name <Name> [--no-ai]", 2);
+    if (!argvAll.includes("--target")) die("usage: atelier init --target <dir> --name <Name> [--no-ai] [--force]", 2);
     const tIdx = argvAll.indexOf("--target");
     const nIdx = argvAll.indexOf("--name");
     const target = argvAll[tIdx + 1];
     const name = nIdx >= 0 ? argvAll[nIdx + 1] : path.basename(target ?? "");
     const noAi = argvAll.includes("--no-ai");
-    const r = spawnSync(process.execPath, [script("init-project.mjs"), "--target", target, "--name", name, ...(noAi ? ["--no-ai"] : [])], {
+    const force = argvAll.includes("--force"); // P1 #7：显式覆盖逃生口（透传 init-project.mjs）
+    /* P1 #7：缺值 / `--` 前缀混淆 → usage die，零目录副作用。spawnSync 会把 undefined 强转
+     * "undefined"——`init --name Foo --target` 曾把整棵脚手架静默落进 ./undefined（exit 0）；
+     * flag 充当值（`init --target --name Foo`）则目录字面为 `--name`。这里先拦死再 spawn。 */
+    if (!target || String(target).startsWith("--") || !name || String(name).startsWith("--")) {
+      die("usage: atelier init --target <dir> --name <Name> [--no-ai] [--force]", 2);
+    }
+    const r = spawnSync(process.execPath, [script("init-project.mjs"), "--target", target, "--name", name, ...(noAi ? ["--no-ai"] : []), ...(force ? ["--force"] : [])], {
       stdio: "inherit",
     });
     process.exit(r.status ?? 1);

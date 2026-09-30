@@ -148,4 +148,21 @@ describe("P1 #10：端口漂移后 cookie / 截图 / a11y 一律用实际端口�
       restore();
     }
   });
+
+  it("补充钉：/__atelier Origin 闸白名单漂移后跟随实际端口（配置端口 Origin 出局——请求期求值 selfOrigins）", async () => {
+    const { call, actualPort, token, restore } = await setupDrift("pre-listen");
+    try {
+      // 漂移前 4321 在白名单（configureServer 期求值）——修复后白名单请求期重建，配置端口出局
+      const stale = await call("/__atelier/state-snapshot", {
+        headers: { origin: `http://127.0.0.1:${CONFIG_PORT}`, "x-atelier-token": token },
+      });
+      expect(stale.statusCode).toBe(403); // 修复前：200（白名单钉死配置端口）
+      const live = await call("/__atelier/state-snapshot", {
+        headers: { origin: `http://127.0.0.1:${actualPort}`, "x-atelier-token": token },
+      });
+      expect(live.statusCode).toBe(200);
+    } finally {
+      restore();
+    }
+  });
 });

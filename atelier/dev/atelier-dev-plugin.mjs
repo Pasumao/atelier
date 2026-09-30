@@ -40,10 +40,14 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { capturePagePersistent as capturePage, captureA11yPersistent } from "./dev-screenshot.mjs";
-import { createServerSupervisor, resolveServerConfig } from "./dev-server-host.mjs";
+import { createServerSupervisor, originAllowlist, originAllowed, resolveServerConfig } from "./dev-server-host.mjs";
 /* FS-M6 尾件批（D-F16/§11.2/§11.3）：路由逻辑在独立模块——本文件只做接线注册 */
 import { buildReviewDataAsync } from "./dev-review-data.mjs";
 import { endpointsPageHtml, reviewExtScript } from "./dev-review-pages.mjs";
+
+/* P1 #3 起 Origin/Host 白名单原语单源 dev-server-host.mjs（反代闸与 P1-12 闸共用同一实现）——
+ * 此处 re-export 保持 P1-12 既有导出面（tests/dev-face-security 与应用侧消费）不变。 */
+export { originAllowlist, originAllowed };
 
 /** P2-4 agent 体检：UA 启发式分类（Astro 7 模式借鉴）。诚实边界：启发式可被伪造——
  * 面向的是检视而非鉴权；页面桥 SSE 连接自报 UA 是最可靠的信号（MCP 工具链调用无 UA）。 */
@@ -58,29 +62,9 @@ function classifyAgent(ua) {
 
 /* ---- P1-12 ①：dev 面 Origin/Host 白名单 + JSON content-type 原语（导出=单元红检可达；闭包内只能整链黑盒）----
  * 威胁模型一句话：dev-token 是 dev 面唯一信任锚，而浏览器对跨站 no-cors 请求仍会打到 /__atelier/*——
- * 无来源闸时，token 门挡不住「伪造来源页驱动浏览器直接跨站写」这一族 CSRF（P1-12）。 */
+ * 无来源闸时，token 门挡不住「伪造来源页驱动浏览器直接跨站写」这一族 CSRF（P1-12）。
+ * P1 #3 起 originAllowlist/originAllowed 单源下沉 dev-server-host.mjs（文件顶部 re-export）。 */
 export const DEV_COOKIE = "atelier_dev_token";
-
-/** 自身授权方 → 允许 Origin 列表（127.0.0.1/localhost/[::1] × 显式配置 host；通配 host 不是「自身 host」）。
- *  http/https 双 scheme 都认：scheme 由部署形态决定，来源判定的实质是 host:port。 */
-export function originAllowlist(port, extraHosts = []) {
-  const authorities = new Set(["127.0.0.1", "localhost", "[::1]"]);
-  for (const h of Array.isArray(extraHosts) ? extraHosts : [extraHosts]) {
-    if (typeof h === "string" && !["0.0.0.0", "::", "*"].includes(h)) authorities.add(h);
-  }
-  const origins = [];
-  for (const a of authorities) for (const scheme of ["http", "https"]) origins.push(`${scheme}://${a}:${port}`);
-  return origins;
-}
-
-/** Origin 是否放行：白名单命中，或与 Host 头同授权方（浏览器设置的 Host = 实际连接的授权方——
- *  覆盖自定义 host/局域网 IP 访问；跨站伪造时 Origin 与 Host 必然失配）。Origin: null / 乱值一律拒。 */
-export function originAllowed(origin, allowlist, hostHeader = null) {
-  let u;
-  try { u = new URL(String(origin)); } catch { return false; }
-  if (hostHeader && u.host === String(hostHeader).toLowerCase()) return true;
-  return allowlist.includes(u.origin);
-}
 
 /** JSON 体路由 content-type 收紧：仅 application/json（可带参数）受理——封 no-cors text/plain 伪装。 */
 export function isJsonContentType(ct) {
@@ -247,11 +231,46 @@ export function atelierDevPlugin() {
       };
     },
     configureServer(server) {
+      /* ---------- P1 #10：actualPort 单源 ----------
+       * Vite strictPort 缺省 false：配置端口被占时自动 +1，config.server.port 不变——此前 7 处硬用
+       * 配置端口（fetchChildStatus host / selfPort〔cookie 名 + Origin 白名单〕/ mcp devUrl /
+       * screenshot appUrl+navUrl / a11y appUrl+navUrl）在漂移后全错：截图导航打到错误端口（可能
+       * 拍到另一项目）、cookie `atelier_dev_token-5173` 两实例互踩（P1-12 承诺的并行隔离恰在并行
+       * 场景失效）。listen 后从 httpServer.address() 取实际端口缓存为唯一真相；configureServer 期
+       * （listen 前）配置值先顶上，listening 事件里 adopt。无 httpServer（测试桩 / middlewareMode）
+       * → 配置值即终值。所有消费点全部请求期求值，漂移后天然拿到实际端口。 */
+      const configuredPort = server.config?.server?.port ?? 5173;
+      let actualPort = configuredPort;
+      const announceTokenUrl = () =>
+        console.log(
+          `[atelier] dev bridge：浏览器首访 http://127.0.0.1:${actualPort}/?token=${TOKEN} 建立会话（P1-12：token 已不内嵌页面；` +
+          `工具链照旧读 .atelier/dev-token 走 x-atelier-token 头）`,
+        );
+      const devHttpServer = server.httpServer ?? null;
+      if (devHttpServer) {
+        const adoptActualPort = () => {
+          const addr = devHttpServer.address?.();
+          if (addr && typeof addr === "object" && Number.isFinite(addr.port) && addr.port > 0 && addr.port !== actualPort) {
+            actualPort = addr.port;
+            console.log(
+              `[atelier] dev face 端口漂移：配置 ${configuredPort} 被占 → 实际 ${actualPort}（strictPort 缺省 false）——` +
+              `token URL/cookie/Origin 白名单/截图/a11y 全部改用实际端口`,
+            );
+          }
+          announceTokenUrl();
+        };
+        if (devHttpServer.listening) adoptActualPort();
+        else devHttpServer.once("listening", adoptActualPort);
+      } else {
+        announceTokenUrl();
+      }
+
       /* ---------- FS-7 dev 托管（FS-DESIGN §11.1）：server 面 = 子进程 + <mount>/* 反向代理 ----------
        * 中间件注册在 /__atelier 之前（两者路径不重叠，顺序只为清晰）；src/server/** 与 src/contract.ts
        * 不在 Vite 前端模块图，watcher 事件只喂本监督器做热重启——前端 HMR 零牵连（决策 16
        * full-reload 死循环前科不允许重演，实现注记）。入口不存在（纯前端应用）则诚实跳过，
-       * 插件其余功能照旧。 */
+       * 插件其余功能照旧。P1 #3：监督器带 selfPort（函数口径=actualPort，漂移后白名单跟随）与
+       * 配置 host——反代 <mount>/* 与 /__atelier/* 同一 Origin 闸口径。 */
       const serverEntry = path.join(ROOT, "src", "server", "main-server.ts");
       if (fs.existsSync(serverEntry)) {
         let appCfg = {};
@@ -260,7 +279,7 @@ export function atelierDevPlugin() {
         } catch { /* 读不到/坏 JSON → 全缺省（5174 / /api / .atelier/dev.db） */ }
         const sc = resolveServerConfig(appCfg, process.env);
         serverDbPath = sc.dbPath; // server-status 父进程侧补充事实（review-data 的 sqlite 兜底也用它）
-        serverSupervisor = createServerSupervisor({ root: ROOT, port: sc.port, mount: sc.mount, dbPath: sc.dbPath, env: process.env });
+        serverSupervisor = createServerSupervisor({ root: ROOT, port: sc.port, mount: sc.mount, dbPath: sc.dbPath, env: process.env, selfPort: () => actualPort, selfHosts: server.config?.server?.host });
         server.middlewares.use(serverSupervisor.middleware());
         serverSupervisor.start().catch((e) => console.error(`[atelier] ${e?.message ?? e}`));
 
@@ -314,7 +333,7 @@ export function atelierDevPlugin() {
               ...(child.server ?? {}),
               restarts: serverRestarts,
               dbPath: serverDbPath,
-              host: `127.0.0.1:${server.config.server.port ?? 5173}`, // 公共入口 = dev 面端口（/api 反代）
+              host: `127.0.0.1:${actualPort}`, // P1 #10：公共入口 = dev 面实际端口（漂移后不再是配置值）
             },
           };
         } catch {
@@ -324,10 +343,11 @@ export function atelierDevPlugin() {
 
       /* ---------- P1-12 ①② 闸位预置 ----------
        * selfOrigins：Origin 白名单（自身授权方集合）；cookieName 带端口后缀——cookie 不隔离端口，
-       * 同机并行多只 dev server 各持各的 token，同名 cookie 会互相踩。 */
-      const selfPort = server.config.server.port ?? 5173;
-      const selfOrigins = originAllowlist(selfPort, server.config.server.host);
-      const cookieName = `${DEV_COOKIE}-${selfPort}`;
+       * 同机并行多只 dev server 各持各的 token，同名 cookie 会互相踩。
+       * P1 #10：两者一律请求期求值 actualPort——漂移后白名单与 cookie 名跟随实际端口
+       * （`atelier_dev_token-4321` 写死配置端口时，并行隔离恰在并行场景失效）。 */
+      const selfOrigins = () => originAllowlist(actualPort, server.config.server.host);
+      const cookieName = () => `${DEV_COOKIE}-${actualPort}`;
       // JSON 体路由统一收紧：content-type 一旦存在必须 application/json——封 no-cors text/plain
       // 族 simple-type 伪装写（P1-12）。缺失 = 非浏览器工具链（curl/MCP 直连不带头）放行：浏览器
       // 带体 POST 必有 content-type；浏览器写的主闸是 Origin 门（sendBeacon 连伪造的
@@ -340,12 +360,14 @@ export function atelierDevPlugin() {
         res.end(JSON.stringify({ ok: false, error: "ATR-415: dev face JSON routes accept application/json only", fix: "send Content-Type: application/json（no-cors text/plain 伪装写通道已封——P1-12）" }));
         return false;
       };
-      console.log(
-        `[atelier] dev bridge：浏览器首访 http://127.0.0.1:${selfPort}/?token=${TOKEN} 建立会话（P1-12：token 已不内嵌页面；` +
-        `工具链照旧读 .atelier/dev-token 走 x-atelier-token 头）`,
-      );
+      // P1 #10：就绪公告在 actualPort 单源块统一打（announceTokenUrl，漂移后重打实际端口）——
+      // 此处不再重复打印配置端口版本
 
-      server.middlewares.use(async (req, res, next) => {
+      /* P1 #12：async 中间件错误围栏。connect/Vite 不 await 中间件 promise——路由处理裸抛
+       * （如 /__atelier/registry、/__atelier/docs 的 readFileSync ENOENT）= 请求永久悬挂 +
+       * unhandledRejection 击杀 dev server。外层统一 catch → 500 ATR JSON（error 含原始原因；
+       * 响应已开始改不了头 → 如实 destroy）。 */
+      const atelierFace = async (req, res, next) => {
         const rawUrl = req.url ?? "";
 
         /* ---------- P1-12 ② token 一次性通道 ----------
@@ -359,7 +381,7 @@ export function atelierDevPlugin() {
           u.searchParams.delete("token");
           res.statusCode = 302;
           res.setHeader("Location", `${u.pathname}${u.search}`);
-          res.setHeader("Set-Cookie", `${cookieName}=${TOKEN}; Path=/; HttpOnly; SameSite=Strict`);
+          res.setHeader("Set-Cookie", `${cookieName()}=${TOKEN}; Path=/; HttpOnly; SameSite=Strict`);
           res.setHeader("Cache-Control", "no-store");
           res.end();
           return;
@@ -371,7 +393,7 @@ export function atelierDevPlugin() {
          * Origin 头存在且不属于自身授权方（127.0.0.1/localhost/[::1]/配置 host）也不与 Host 头同源
          * → 403：跨站页面驱动的浏览器请求（含 no-cors 写）在此拦断。无 Origin 的非浏览器客户端
          * （curl/MCP HTTP 直连）不受影响——token 仍是其凭证。 */
-        if (req.headers.origin != null && !originAllowed(req.headers.origin, selfOrigins, req.headers.host)) {
+        if (req.headers.origin != null && !originAllowed(req.headers.origin, selfOrigins(), req.headers.host)) {
           res.statusCode = 403;
           res.setHeader("Content-Type", "application/json; charset=utf-8");
           res.end(JSON.stringify({ ok: false, error: "ATR-403-dev: cross-origin request to the dev face is rejected", fix: "从应用自身 origin（127.0.0.1/localhost）打开 dev 面；工具链以无 Origin 通道携 x-atelier-token 调用" }));
@@ -382,7 +404,7 @@ export function atelierDevPlugin() {
         const hasToken =
           tokenEq(req.headers["x-atelier-token"], TOKEN) ||
           tokenEq(qToken, TOKEN) ||
-          tokenEq(cookieValue(req.headers.cookie, cookieName), TOKEN);
+          tokenEq(cookieValue(req.headers.cookie, cookieName()), TOKEN);
         if (!hasToken) {
           res.statusCode = 401;
           res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -420,7 +442,7 @@ export function atelierDevPlugin() {
             });
             out = await bridge.handleMcpHttp(mcpRequest, {
               projectRoot: ROOT,
-              devUrl: `http://127.0.0.1:${server.config.server.port ?? 5173}`,
+              devUrl: `http://127.0.0.1:${actualPort}`, // P1 #10：漂移后跟实际端口
               devToken: TOKEN,
             });
           } catch (e) {
@@ -558,10 +580,10 @@ export function atelierDevPlugin() {
           // compare=1 → P1-8 像素级对比：与 .atr/snapshots/baseline.png 同实例 canvas evaluate
           const wantsCompare = rawUrl.includes("compare=1");
           const wantsFull = rawUrl.includes("full=1"); // m11 批 C：全页捕获变体（快照门首屏盲区销账）
-          const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?snapshot=1`;
+          const appUrl = `http://127.0.0.1:${actualPort}/?snapshot=1`;
           // P1-12：无头实例与真人浏览器同权——经 token 一次性通道换得 cookie 后再捕获（页面已不再
           // 内嵌 token）；navUrl 只用于导航，token 不进响应/审计（capturedFrom 仍报清洗后的 appUrl）
-          const navUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?token=${TOKEN}&snapshot=1`;
+          const navUrl = `http://127.0.0.1:${actualPort}/?token=${TOKEN}&snapshot=1`;
           try {
             let compareBase64 = null;
             let threshold = 0.12;
@@ -614,8 +636,8 @@ export function atelierDevPlugin() {
 
         /* ---------- P2-2③ a11y 快照（无障碍树文本化；agent 检视语义优先于像素）---------- */
         if (url === "/__atelier/a11y") {
-          const appUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/`;
-          const navUrl = `http://127.0.0.1:${server.config.server.port ?? 5173}/?token=${TOKEN}`; // P1-12：先换 cookie 再捕获
+          const appUrl = `http://127.0.0.1:${actualPort}/`;
+          const navUrl = `http://127.0.0.1:${actualPort}/?token=${TOKEN}`; // P1-12：先换 cookie 再捕获
           try {
             a11yInflight ??= captureA11yPersistent({ url: navUrl }).finally(() => { a11yInflight = null; });
             const r = await a11yInflight;
@@ -817,7 +839,25 @@ loadState(); loadImages(); loadHistory();
           return;
         }
         next();
-      });
+      };
+      server.middlewares.use((req, res, next) =>
+        atelierFace(req, res, next).catch((e) => {
+          try {
+            if (res.headersSent) {
+              res.destroy?.();
+              return;
+            }
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.end(
+              JSON.stringify({
+                ok: false,
+                error: `ATR-500: dev face route error: ${e?.message ?? e}`,
+                fix: "多为应用模板件缺失/损坏（src/manifest.json、src/llms.txt、atelier.config.json）——补齐文件或 node <repo>/atelier/cli.mjs sync --target <appDir> 拉齐 vendor；error 字段含原始原因",
+              }),
+            );
+          } catch { /* 响应已终结——如实放弃，绝不二次抛出击穿 dev server */ }
+        }));
     },
     closeBundle() {
       // 收尾兜底：httpServer close 之外的路径（如 --force 关停）；stop 幂等，双调用安全
