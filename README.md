@@ -5,7 +5,7 @@
 >
 > 系统是什么 → `atelier/docs/ARCHITECTURE.md`；代理怎么用 → `atelier/docs/SPEC-Agentic-DX-v0.2.md`；完整文档地图见文末。
 
-![version](https://img.shields.io/badge/version-1.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)
+![version](https://img.shields.io/badge/version-1.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522.12-brightgreen)
 
 **v1.0.0**（2026-09-27，首个正式版本）· 变更史见 [CHANGELOG.md](CHANGELOG.md)（Keep a Changelog + 语义化版本，兼容性执行器 = `atelier api-diff`，见决策 28）。1.0 = release-ready：npm publish 等发布日外部动作见 [`atelier/docs/RELEASE-CHECKLIST.md`](atelier/docs/RELEASE-CHECKLIST.md)。
 **v1.1.0**（2026-09-29）· 1.1 = 全站化 server 面从骨架到生产可用——队列/幂等/备份/健康/持久审计/双通道鉴权/email/上传/分页/FTS5/cache/REST 读端点，外加 12 项 P1 安全加固与 MCP 工具族 36→40（变更史见 [CHANGELOG.md](CHANGELOG.md)）。
@@ -55,7 +55,7 @@ S0 服务层      atelier/server —— defineQuery/defineCommand 读写二分 �
 
 ## 获取与运行
 
-> 框架版本 1.1.0（release-ready）；**尚未发布 npm**（发布日外部动作，见 RELEASE-CHECKLIST），目前需 clone 仓库使用。前置要求：Node.js ≥ 22（实测 Node 24）与 pnpm。
+> 框架版本 1.1.0（release-ready）；**尚未发布 npm**（发布日外部动作，见 RELEASE-CHECKLIST），目前需 clone 仓库使用。前置要求：Node.js ≥ 22.12（vite 7 engines 地板；实测 Node 24）与 pnpm。
 
 ```bash
 git clone https://github.com/Pasumao/atelier.git

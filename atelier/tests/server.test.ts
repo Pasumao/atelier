@@ -203,7 +203,7 @@ describeSqlite("sqlite 薄宿主适配（决策 19，FS-3 基座；node 路径�
   it("SqliteUnavailableError 四段式形状（code/fix）", () => {
     const e = new SqliteUnavailableError("测试注入");
     expect(e.code).toBe("ATR-330");
-    expect(e.fix).toContain("Node ≥22.5");
+    expect(e.fix).toContain("Node ≥22.13");
     expect(e.fix).toContain("bun:sqlite");
   });
 });

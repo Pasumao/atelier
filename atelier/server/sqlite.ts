@@ -1,6 +1,7 @@
 /**
  * SQLite 薄宿主适配（决策 19，FS-3 基座）。
- * bun:sqlite（Bun）/ node:sqlite（Node ≥22.5）双宿主均零依赖内建；两套 API 形状差异
+ * bun:sqlite（Bun）/ node:sqlite（Node ≥22.5 内建；免旗可 import 自 22.13/23.4 起——本适配不注旗，
+ * 更低版本须以 --experimental-sqlite 启动）双宿主均零依赖内建；两套 API 形状差异
  * **锁死在本文件**（prepare/run/all/get 四原语量级），上层只见 SqliteDb 接口——与 dev 面
  * 多运行时 vendor 策略同构。决策 19 红线：不引 libSQL（维护态）、不用 Bun.SQL 多方言
  * 统一 API；**参数化是唯一路径**（无字符串拼接逃生门，Kysely CVE-2026-33442 教训）。
@@ -60,7 +61,7 @@ export class SqliteUnavailableError extends Error {
   readonly fix: string;
   constructor(detail: string) {
     super(`无可用 SQLite 宿主（${detail}）`);
-    this.fix = "atelier-server 数据层需 Bun（bun:sqlite）或 Node ≥22.5（node:sqlite）——两者均零依赖内建，换运行时即解";
+    this.fix = "atelier-server 数据层需 Bun（bun:sqlite）或 Node ≥22.13（node:sqlite 免旗可 import 的 22.x 首版；22.5~22.12 虽内建但须 --experimental-sqlite 旗，本适配不注旗）——两者均零依赖内建，换运行时/升版即解";
   }
 }
 
