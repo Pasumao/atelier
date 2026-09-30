@@ -4,7 +4,7 @@ dist/
 .atelier/approval-secret
 .atelier/audit.jsonl
 .atelier/dev.db
-.atr/snapshots/current.png
+.atr/snapshots/**/current*.png
 src/tailwind.input.css
 src/atelier-tailwind.css
 *.log

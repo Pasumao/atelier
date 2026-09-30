@@ -23,5 +23,6 @@ DAgentic.m3-runs_react-tpl/
 # FS-M2 多智能体协作 worktrees（主智能体编排用；分支合并回 main 后可删）
 .worktrees/
 
-# snapshot 瞬态捕获不入库（m10 批 C：per-platform 基线 baseline.png 入库，current.png 是 check 的瞬态产物）
-.atr/snapshots/**/current.png
+# snapshot 瞬态捕获不入库（m10 批 C：per-platform 基线 baseline*.png 入库，current*.png 是 check 的瞬态产物——
+# 含 per-platform/current-full.png 变体，P-D#3 起通配 `current*` 防瞬态捕获进锚点提交）
+.atr/snapshots/**/current*.png
