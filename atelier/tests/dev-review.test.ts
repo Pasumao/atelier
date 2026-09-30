@@ -511,10 +511,10 @@ describe("dev 插件接线（token 门 + 路由注册 + 降级）", () => {
     fs.rmSync(TMP, { recursive: true, force: true });
   });
 
-  it("token 门：无 token → 401 ATR-402", async () => {
+  it("token 门：无 token → 401 ATR-405（R3 拆分：dev-token 校验失败独立成码，ATR-402 归 confirm 档拒绝——红态：仍是 ATR-402 双语义）", async () => {
     const res = await call("/__atelier/server-status");
     expect(res.statusCode).toBe(401);
-    expect(String(res.body)).toContain("ATR-402");
+    expect(String(res.body)).toContain("ATR-405");
   });
 
   it("server-status：server 面未托管 → ok:false 诚实降级（不假数据）", async () => {
