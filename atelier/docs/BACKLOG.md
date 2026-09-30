@@ -69,6 +69,17 @@
 | P-C CLI/工具链 | P1-4 build --out 守卫 · P1-5 dump codeMask · P2-C1/C2 缺值与旗标崩栈 · P2-C4 jsonl 坏行×2 · P2-C5 tokens-dtcg 同径 · P2-C6 api-diff --allow · judge strict 双向 · P2-G1 SQLite 147 词闸 · P2-G2 撞名闸 · P2-G3 解码归一 · P2-G4 __proto__ 族 · sync-project 缺值 | ✅（merge `4c6d1d0`；评审 ACCEPT_WITH_NOTES → 2 nit `3c80557` 收口） |
 | P-D 文档诚实面 | P2-D2 三处 push 口径 · P2-D1 approval-secret 入 ignore · P2-C3 快照模式统一（自 P-C 移入避文件冲突）· stream-intro 下线 · Node ≥22.12 + engines · docs 导航刷新 · init 收尾提示 · main-server 措辞（+CHANGELOG 状态行归统筹者收口） | ✅（merge `fb4c1fc`；评审 ACCEPT） |
 
+### REL 批（发布工程批——2026-09-30 第四遍全仓复校立项；push+CI 首跑+1.1.0 切版发布，**待用户拍板启动**）
+
+> 任务书唯一源：`research/2026-09-30-release-engineering-batch.md`（第四遍复校：五路并行深扫 + 统筹者亲核；**无新 P1**，7 项 P2 发布前置应修 + ~40 项 P3 收获；门禁实测 1103 绿 + 1 时序红〔jobs misfire 单文件复跑绿，flake 非回归——远端 CI 随机红风险〕）。四支：**A** 正确性收口（live SSE 标量 input 500 归一〔亲核坐实，P2-S1 同洞〕/extract-schema 签名误提取〔实跑复现〕/dev-token config 期覆写解除快照门/compiler Node 版本闸死代码 vs engines 22.12 承诺/cli review 死分支/ATR-405 漏 snapshotDiffHandler 一处/misfire 用例负载加固）∥ **B** 文档计数对真（性能四指标复测+README 刷新〔表仍 09-29 口径而 runtime 已过 R/P 两批〕/310→push 实测数四处/切版三钉/BACKLOG 队列可信化〔划除已销账 + P3 清单抄送评审队列〕/docs 导航补行）→ **C** push 远端 + CI 首跑（外向动作须用户确认；两轮绿摘 snapshot continue-on-error；api-diff strict 终检对账刷基线；①段 13 道全量重跑留痕）→ **D** 发布日外部动作（RELEASE-CHECKLIST ②段既有单源 + 任务书 §5-D 三点补充：包面字段齐套含 npm pack --dry-run 核验道/files 白名单须显式决策 scripts+compiler 入包否则 Registry 三工具恒失败/Registry 前过 inspector）。执行纪律照旧：worktree 分支、红检先红后绿、全套门禁。A/B 支无外部依赖可先行。
+
+| 支 | 范围 | 状态 |
+|---|---|---|
+| REL-A 正确性收口 | 任务书 §5-A1~A7 | ⏸ 待拍板 |
+| REL-B 文档计数对真 | 任务书 §5-B | ⏸ 待拍板 |
+| REL-C push+CI 首跑+切版 | 任务书 §5-C（外向动作） | ⏸ 待拍板 |
+| REL-D 发布日外部动作 | RELEASE-CHECKLIST ②段 9 项 | ⏸ 发布日（D-3 口径） |
+
 ### F 线 — 功能债（壮大框架的主菜）
 
 | # | 项 | 状态 | 剩余 |

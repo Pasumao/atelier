@@ -24,6 +24,7 @@
 | `research/2026-09-report1-frontend.md` | 前端框架深度调研（决策 17/23 证据） | 2026-09-19 检索口径 · 现势 |
 | `research/2026-09-report2-backend.md` | 后端与数据层深度调研（决策 18/19/22 证据） | 同上 · 现势 |
 | `research/2026-09-report3-fullstack-ai.md` | 全栈框架与 AI/agent 生态调研（决策 17/20/21 证据） | 同上 · 现势 |
+| `research/2026-09-30-release-engineering-batch.md` | **REL 批（发布工程批）任务书唯一源**：第四遍全仓复校结论 + push/CI 首跑/1.1.0 切版四支计划 | 2026-09-30 · 待用户拍板启动 |
 
 ## 已归档（文档整理时删除；git 可回溯）
 
