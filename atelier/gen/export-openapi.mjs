@@ -52,7 +52,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { matchDelim, stripComments, identOf, walkTsFiles, findEndpointCalls } from "./gen-endpoint.mjs";
+import { matchDelim, stripComments, identOf, walkTsFiles, findEndpointCalls, decodeEscapesCore } from "./gen-endpoint.mjs";
 import { projectJsonSchema, projectFlatField } from "../compiler/project-json.mjs";
 // gen auth 产物形态的本地契约解析用（运行时同一实现——绝不复刻列→FlatSchema 映射，gen-auth.mjs
 // 直 import server/db.ts 渲染 DDL 同一先例）：table() 重构表定义 → pick() 投影 rowSchema 子集。
@@ -105,37 +105,6 @@ function splitTopLevel(text) {
   return parts;
 }
 
-/** 字符串字面量体内文 → 实际值（decodeEscapesCore 同款内联——gen-endpoint.mjs 单源注释；
- *  行为由 tests/gen-literal-parity.test.ts 跨面对拍钉住）。 */
-function decodeEscapesCore(inner) {
-  let out = "";
-  for (let i = 0; i < inner.length; i++) {
-    const c = inner[i];
-    if (c !== "\\") {
-      out += c;
-      continue;
-    }
-    const d = inner[i + 1];
-    if (d === undefined) return { ok: false, error: "转义序列悬空（字面量以反斜杠结尾）" };
-    if (d === "n") { out += "\n"; i++; continue; }
-    if (d === "t") { out += "\t"; i++; continue; }
-    if (d === "r") { out += "\r"; i++; continue; }
-    if (d === "b") { out += "\b"; i++; continue; }
-    if (d === "f") { out += "\f"; i++; continue; }
-    if (d === '"' || d === "'" || d === "\\" || d === "/" || d === "`") { out += d; i++; continue; }
-    if (d === "u") {
-      const hex = inner.slice(i + 2, i + 6);
-      if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
-        return { ok: false, error: "转义 \\u 需要 4 位十六进制（实际「" + inner.slice(i, i + 6) + "」）" };
-      }
-      out += String.fromCharCode(parseInt(hex, 16));
-      i += 5;
-      continue;
-    }
-    return { ok: false, error: "转义序列超出扁平字面量纪律（只认 JSON 转义集 \\n \\t \\r \\b \\f 引号 反斜杠 斜杠 \\uXXXX；\\x/八进制等越界）" };
-  }
-  return { ok: true, value: out };
-}
 
 /** 字符串字面量解析（禁插值/拼接——内容含未转义同种引号或 ${ 即错，与 gen-db 同口径）。
  *  转义解码 = JSON.parse 语义（R1-C §4.7：此前仅映射 \n/\t，\u4e2d 解成 "u4e2d"） */

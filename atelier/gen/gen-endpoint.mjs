@@ -110,7 +110,7 @@ function assertEndpointName(name, line) {
  * 按字面字符还原）；越界转义（\x/八进制/未知）与悬空反斜杠 = 超出扁平字面量纪律（§2.1）
  * → { ok: false }，调用方按各自四段式 die（绝不静默猜）。
  */
-function decodeEscapesCore(inner) {
+export function decodeEscapesCore(inner) {
   let out = "";
   for (let i = 0; i < inner.length; i++) {
     const c = inner[i];
