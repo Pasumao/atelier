@@ -8,7 +8,7 @@
 ![version](https://img.shields.io/badge/version-1.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522.12-brightgreen)
 
 **v1.0.0**（2026-09-27，首个正式版本）· 变更史见 [CHANGELOG.md](CHANGELOG.md)（Keep a Changelog + 语义化版本，兼容性执行器 = `atelier api-diff`，见决策 28）。1.0 = release-ready：npm publish 等发布日外部动作见 [`atelier/docs/RELEASE-CHECKLIST.md`](atelier/docs/RELEASE-CHECKLIST.md)。
-**v1.1.0**（2026-09-29）· 1.1 = 全站化 server 面从骨架到生产可用——队列/幂等/备份/健康/持久审计/双通道鉴权/email/上传/分页/FTS5/cache/REST 读端点，外加 12 项 P1 安全加固与 MCP 工具族 36→40（变更史见 [CHANGELOG.md](CHANGELOG.md)）。
+**v1.1.0**（2026-09-30）· 1.1 = 全站化 server 面从骨架到生产可用——队列/幂等/备份/健康/持久审计/双通道鉴权/email/上传/分页/FTS5/cache/REST 读端点，外加 12 项 P1 安全加固与 MCP 工具族 36→40；发布前另经第三遍全仓复校做一轮硬化（P 批 38 项：runtime 正确性九件 · server 三件 · MCP 五件 · CLI/生成器十三件 · 文档诚实面八件）（变更史见 [CHANGELOG.md](CHANGELOG.md)）。
 
 ## Why：AX（Agentic Experience）是新的第一公民
 
@@ -95,17 +95,17 @@ node <atelier仓库路径>/atelier/mcp/server.mjs   # MCP 工具面（ATELIER_PR
 
 AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@num:tools-->40<!--@/--> 工具；structured error = `structuredContent{code,message,fix}`；`ATELIER_TOOLSETS` 按面分组按需启用）· W3C Design Tokens（DTCG）标准互导（`atelier tokens export|import`）· 无障碍树快照（`ui.a11y`，语义优先于像素）· agent 体检（`/__atelier/agent-health`）。
 
-## 性能基线（`atelier bench` 实测 2026-09-29 / Windows / Node 24 · 1.1.0 复测口径）
+## 性能基线（`atelier bench` 实测 2026-09-30 / Windows / Node 24 · 1.1.0 切版复测口径）
 
 | 指标 | 目标 | 实测 | 判定 |
 |---|---|---|---|
-| 核心运行时体积 | gzip ≤ 30 KB | **12.69 KB** | PASS |
-| 10³ 节点挂载+首渲染 | ≤ 50 ms | **3.4 ms** | PASS |
-| HMR（保存→可见） | ≤ 100 ms | **61 ms**（热交换按名锚定保留 `$state`，不清零） | PASS |
-| 截图回环 | ≤ 500 ms | **293 ms**（常驻无头实例） | PASS |
+| 核心运行时体积 | gzip ≤ 30 KB | **13.85 KB** | PASS |
+| 10³ 节点挂载+首渲染 | ≤ 50 ms | **2.8 ms** | PASS |
+| HMR（保存→可见） | ≤ 100 ms | **52 ms**（热交换按名锚定保留 `$state`，不清零） | PASS |
+| 截图回环 | ≤ 500 ms | **300 ms**（常驻无头实例） | PASS |
 
 复现：`node atelier/cli.mjs init --target my-app --name App && cd my-app && pnpm install && node <atelier仓库路径>/atelier/cli.mjs bench --app ./my-app`。
-诚实性：FAIL 不粉饰、不豁免；数字会随修复移动（HMR 曾 108ms → 51ms → 1.1 复测 61ms，截图曾 1933ms → 318ms → 1.1 复测 293ms；体积自 09-06 的 9.09KB 随 bind 指令族/事件修饰/schema 提取/error 语义增长至 12.69KB，仍远低于判据）。
+诚实性：FAIL 不粉饰、不豁免；数字会随修复移动（HMR 曾 108ms → 51ms → 61ms → 52ms，截图曾 1933ms → 318ms → 293ms → 300ms；体积自 09-06 的 9.09KB 随 bind 指令族/事件修饰/schema 提取/error 语义/R·P 两批正确性与 dev 警示面增长至 13.85KB，仍远低于判据）。
 
 ## 路线与现状（详见 ROADMAP.md）
 
@@ -120,7 +120,7 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 - **未发布 npm**：框架 1.0.0 = release-ready，安装仍需 clone 仓库（`atelier init` 产物自包含、不依赖框架仓库驻留）。影响：没有 `npm create atelier` 一键脚手架。出路：按上文 clone + init 三步；`create-atelier` 脚手架列发布日动作（RELEASE-CHECKLIST）。
 - **平台覆盖以 Windows 实证为主**：常规测试门禁与视觉快照基线在 win32 实武装；linux/darwin 的快照基线未武装（快照门在这些平台如实 vacuous，不假红）。影响：非 Windows 用户的视觉回归门禁需先在本地 `atelier snapshot save` 捕获基线。出路：per-platform 布局已就绪，各平台本地武装即启用。
 - **Bun 路径实测过但无 CI 常规覆盖**：SQLite 薄宿主适配经真实 Bun 1.4.2 全语义面冒烟 + 全栈落库/持久化验证；但冒烟脚本需 bun 宿主手动跑（`scripts/bun-adapter-smoke.mjs`），未进常规测试门禁。影响：bun 回归依赖手动冒烟，报错文案匹配归一可能随 bun 升级失效（失效=差异重新可见，非静默）。出路：`atelier build --target=bun` 产物冒烟自证兜底。
-- **R 批门禁未在远端验证**：CI 矩阵已接线（linux/windows × node 22/24），且远端 CI 真实跑过多轮（末轮 success，2026-09-06）；但此后远端 main 滞后本地 310 commits（2026-09-30 实测，末次 push 2026-09-06）——R 批与 1.1.0 的当前门禁（测试/结构/API 面）从未在远端跑过，视觉冒烟作业保留 continue-on-error。影响：最新代码的门禁承诺尚未经第三方环境兑现。出路：push 远端首跑当前门禁后再摘 continue-on-error（RELEASE-CHECKLIST 发布日动作）。
+- **R 批门禁未在远端验证**：CI 矩阵已接线（linux/windows × node 22/24），且远端 CI 真实跑过多轮（末轮 success，2026-09-06）；但此后远端 main 滞后本地 344 commits（2026-09-30 实测，末次 push 2026-09-06）——R 批与 1.1.0 的当前门禁（测试/结构/API 面）从未在远端跑过，视觉冒烟作业保留 continue-on-error。影响：最新代码的门禁承诺尚未经第三方环境兑现。出路：push 远端首跑当前门禁后再摘 continue-on-error（RELEASE-CHECKLIST 发布日动作）。
 - **Windows 进程收尾语义**：`atelier dev` 托管的 server 子进程在 Windows 上 kill = 即终止，优雅关停兜底窗口形同保障。影响：热重启瞬间可能有极小概率的端口/句柄残留。出路：监督器 SIGTERM 1.5s 兜底 + 未就绪 503 自愈，重启即恢复。
 - **command journal 保留窗口为行数基**：命令审计 journal 持久化为追加事件表（db 已装配即写、重启不灭；缺省保留 1 万行、写时裁最老，`createHandler({ journal: { persist: false } })` 可显式关闭回内存环形）；live 重算失败诊断条目仍只在内存。影响：超出保留窗口的最老事件滚出即不可查（时间基窗口 v1 不做）；删除库文件即丢失全部审计史（同迁移 journal 口径）。出路：窗口经 `journal.maxRows` 调大；关键节点以 checkpoint 台账为锚；库文件进常规备份（`atelier db backup`）。
 - **server 面 prod 激活为行为级**：服务面无打包器，prod 语义靠旗关断（调试面隐身/校验跳过），代码仍在产物内；构建期 DCE 只覆盖浏览器面。影响：server 产物体积不是最小。出路：单容器整目录部署语义（`atelier build`），体积优化非 1.0 目标。
@@ -131,7 +131,7 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 - **FTS5 分词器为 unicode61 缺省**：按空格/标点切词，连续中文串 = 整串单 token——整串与前缀 `*` 查询可命中、中段子串不命中。影响：中文按词检索受限（不切词）。出路：整串/前缀查询形态可用；真分词需应用侧预处理或手改迁移加 tokenize 选项，表契约不变。
 - **vendored 应用按 init 时点冻结**：应用获得的是 init 时刻的框架拷贝；新能力（MCP HTTP 直连、全页快照等）需 `atelier sync` 拉齐。影响：未 sync 的旧应用 MCP 直连 503（诚实指路 stdio）。出路：`node atelier/cli.mjs sync --target <dir>` 幂等拉齐，应用源码不受影响。
 - **正确率主张克制**：三臂对照实验在简单层与加难层（Wave-7 正式波 45 run）均全平——绝对口径 100% 达标、相对区分力为零；「技能包优势」主张悬置待干扰面/混合实验出数，我们不引用任何"首遍正确率优势"数字，请引用者同样克制。
-- **性能数字为单机实测**（2026-09-29 / Windows / Node 24，1.1.0 复测口径），会随修复移动；FAIL 不粉饰、不豁免。
+- **性能数字为单机实测**（2026-09-30 / Windows / Node 24，1.1.0 切版复测口径），会随修复移动；FAIL 不粉饰、不豁免。
 - **未实现即明说**：CLI 命令按实现程度标注（完整 / 最小 / 未实现），未实现的命令返回 exit 4 并指路规格文档，永不伪造成功。
 - 所有"未确认"结论明确标注，不写成事实。
 
@@ -143,12 +143,12 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 | `atelier/docs/README.md` | 文档导航（每份一行：定位 + 状态 + 时点） |
 | `atelier/docs/ARCHITECTURE.md` | 系统是什么（五层 + S0 服务层、仓库布局、模块边界） |
 | `atelier/docs/SPEC-Agentic-DX-v0.2.md` | 代理怎么用（硬约定 / 错误导航表 / DoD / 工作循环 / 全站化行为契约；v0.1 留档 superseded） |
-| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-28 + 未决项） |
+| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-35 + 未决项） |
 | `atelier/docs/AI-OPTIMAL-STRUCTURE.md` | 六层 AI 友好结构公理与机检规则集 |
 | `atelier/docs/ROADMAP.md` | 路线计划（方向与里程碑） |
 | `atelier/docs/BACKLOG.md` | 缺口与改进执行队列（唯一源） |
 | `atelier/docs/SKILLS-PLAN.md` | 技能包设计规格（已落地转规格） |
-| `atelier/docs/research/` | 2026-09 三路深度调研（决策 17-23 证据基线） |
+| `atelier/docs/research/` | 调研与评审档案（8 份：三路深度调研〔决策 17-23 证据基线〕+ 全栈差距调研 + 0930 两遍架构复校 + REL 批任务书 + 代码评审建议书；每份一行见 docs/README 导航） |
 | `AGENTS.md` | 本仓库的常用命令与维护纪律 |
 
 ## License

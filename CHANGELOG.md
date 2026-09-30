@@ -4,7 +4,7 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)（major = 破坏性变更 / minor = 向后兼容的新增 / patch = 向后兼容的修复）。兼容性的执行器 = `atelier api-diff`（见 `atelier/docs/design-decisions.md` 决策 28）。批合并时同步向 `[Unreleased]` 节添条目（Keep a Changelog 惯例），发版时将 `[Unreleased]` 改名为版本号。
 
-## [Unreleased]
+## [1.1.0] - 2026-09-30
 
 **P 批（发布前硬化）收口——1.1.0 可进入发布工程批**（2026-09-30 第三遍全仓架构复校立项：任务书 = `atelier/docs/research/2026-09-30-third-architecture-review.md`，5 项新 P1 + ~15 项 P2 逐项实读坐实；主/子智能体 git worktree 协作四支并行 + 两路 fresh-context 独立评审。R 批条目见下方既有节；阶段四 npm 发布（D-3）前置 = push 310 commits + 远端 CI 首跑摘 snapshot continue-on-error）。
 
@@ -44,8 +44,6 @@
 - **MCP 五件**：ATR-402→405 拆分漏改两处（认证失败恒 ATR-405，与 confirm 拒绝双语义拆清）；`ATELIER_TOOLSETS` 只滤 tools/list 广告不滤执行（callTool 入口执行闸——隐藏工具凭名直呼 ATR-404，「权限面收敛」注释成真）；`endpoint.impact` 广告参数 `root` 静默丢弃（真实消费 + FS6 消费面元数据 `FS6_CONSUMED_ARGS` 单源 + 机检扩双向 consumes∪gate=广告）；HTTP 通道 tasks/update 携标准体形 `_meta` 被拒（params 构造时剥离，对齐 tools/call 先例）；`ui.screenshot` TOOL_META timeoutMs 4s 与同端点 snapshot.diff 60s 自相矛盾（提至 60s + fetch 超时/不可达文案分列）
 - **CLI/生成器十三件（P1×2 + P2×11）**：`build --out` 无根目录关系守卫（越 root/==root/覆盖 package.json+src die 2——`--emptyOutDir` 清空应用源码面关闭；「..」判据整段化免误伤 `..foo`）（`4c6d1d0`）；dump stage② 扫描器无视注释/字符串（接入 extract-schema codeMaskOf——注释幻影模板/注释单反引号吞真模板/幻影组件三例关闭，无注释代码 dump 字节不变）；`review --target`/`sync --target` 缺值与 `struct --json` 旗标当子命令崩栈三件（套 init 同款 die 2 守卫）；checkpoint+struct 台账 jsonl 坏行裸 TypeError（逐行 try/catch die 1 指行号）；tokens-dtcg `--out` 同径覆写 token SSOT（samePath 拒 + atelier.config.json 告警）；api-diff `--allow` 坏档静默空表（die 2 诚实档）+ judge strict 双向反推（--budget 超限误标/--strict+removed 漏标修正，显式第三参）；gen-db SQLite 关键字只挡 JS 词表（db.ts assertIdent 加官方 147 词全集闸——构造期单一真相源，gen-db 回灌复验同闸）；gen-endpoint 派生标识符跨端点撞名无闸（camelOf/pascalOf seen-set，ATR-313 die 列双源名）；export-openapi 表名解码残留修复前旧语义（decodeEscapesCore 归一 + parity 测试）；字面量解析器 `__proto__` 原型键族（gen-db/extract-schema 显式 die、openapi/project-json `in`→`Object.hasOwn`）
 - **文档诚实面八件**：三处「未 push 远端」口径改真实（origin/main 滞后 310 commits、末次 2026-09-06、CI 2026-09-06 实跑在案——「R 批与 1.1.0 门禁未在远端验证，push 后首跑再摘 continue-on-error」，旗标本批不动）（`fb4c1fc`）；`.atelier/approval-secret` HMAC 密钥入模板 .gitignore + init 兜底名单；快照瞬态捕获模式三处统一 `.atr/snapshots/**/current*.png`（per-platform 形态不再进 git 锚点）；`/__atelier/stream-intro` 营销演示路由下线（文案与实现脱节且从未入队追踪）；Node 地板 ≥22.12 统一（README ×2 + package.json engines；sqlite ATR-330 fix 改 ≥22.13 免旗真实阈值诚实口径）；docs/README.md 导航刷新（1.1.0 / design-decisions 0-35，ARCHITECTURE 行如实标注 0-28 未并入）；init 收尾提示改真实 CLI 形态（框架无全局 bin）；模板 main-server.ts fix 措辞「改 server.port」→「新增 server.port 键」
-
-## [1.1.0] - 2026-09-29
 
 **全站化 server 面从骨架到生产可用。** 1.0.0（合并锚 `6bb411c`，2026-09-27）之后四批（评审批 / 差距批 W1-W9 / 第三批 W10-W13 / MCP 工具族扩张批）的版本化提炼，条目由 `atelier/docs/BACKLOG.md` 四批归档行逐条对账提炼（代表性 git 锚点，经逐枚核验）；minor 判定依据 = 决策 28（api-diff 历次门禁全为 additive 零 breaking：+4 MCP 工具 / `db` CLI 命令 / `StreamError`·`RevertErrorEntry` 导出等纯加法）。本版新增决策 29-34（journal 持久化 / API key / email / 上传 / cache / GET for query）；新能力的使用者视角边界见根 README「Known Limitations」节。
 
@@ -141,6 +139,5 @@
 
 1.0.0 = release-ready 口径，不是功能完备声明：npm publish / MCP Registry 提交 / 真实 CI 首跑 / linux·darwin 快照基线 / create-atelier 脚手架均为**发布日外部动作**（本仓未验证，逐项见 `atelier/docs/RELEASE-CHECKLIST.md`）。1.0 已知限制（使用者视角清单）详见根 README「Known Limitations」节；内部缺口、候选池与语义边界台账见 `atelier/docs/BACKLOG.md`。
 
-[Unreleased]: https://github.com/Pasumao/atelier/compare/v1.1.0...HEAD
 [1.1.0]: https://github.com/Pasumao/atelier/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Pasumao/atelier/compare/v0.2.0...v1.0.0

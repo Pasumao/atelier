@@ -8,7 +8,7 @@
 | # | 项 | 命令 | 期待结果 |
 |---|---|---|---|
 | 1 | 框架测试全绿 | `cd atelier && pnpm test` | 全绿 + 8 skip（实验台用例无 env 按环境跳过）；1.0.0 基线 = 618 绿 + 8 skip（含 `tests/release-form.test.ts` 3 例发布形态钉） |
-| 2 | 发布形态钉 | `cd atelier && npx vitest run tests/release-form.test.ts` | 3/3 绿（version=1.0.0 / CHANGELOG 含 [1.0.0] / private:true）——版本号改动必过此钉 |
+| 2 | 发布形态钉 | `cd atelier && npx vitest run tests/release-form.test.ts` | 3/3 绿（version=当前版本 / CHANGELOG 含 `[<当前版本>] - <切版日期>` 条目 / private:true）——版本号改动必过此钉（断言随版翻转先红后绿；1.1.0 时点 = version 1.1.0 + `[1.1.0] - 2026-09-30`） |
 | 3 | 技能包一致性 | `node atelier/scripts/check-skills.mjs` | 56-0，exit 0 |
 | 4 | API 面漂移门禁 | `node atelier/cli.mjs api-diff check` | PASS（removed/changed = breaking exit 1；发布前终检可加 `--strict` 连新增也红——1.0 后新增默认 additive，破坏性变更必须升 minor/major 且 `--allow` 豁免留痕，决策 28） |
 | 5 | 数字标记位机检 | `node atelier/scripts/docs-numbers.mjs sync && node atelier/scripts/docs-numbers.mjs check` | sync 后 check PASS（tests/tools 两标记位与实跑一致；禁止手写） |
@@ -32,8 +32,8 @@
 | 1 | `atelier` 裸名可用性实测（决策 14 注意项） | `npm view atelier` 实测；占用则退 `atelierjs` / `atelier-js`（决策 14 预案）。**注意**：裸名撞名核查是 2026-01 时点结论，发布日必须重测 | 本机无 npm 账号，未登录 registry 实测 |
 | 2 | 发布形态决策（publish 时点拍板，D-3） | `private: true` 是否摘除（摘除须连 `tests/release-form.test.ts` 断言一起有意识改）；发布物布局（`atelier/` 目录直发 vs 打包单源）；`atelier-framework` 包名 vs 裸名 `atelier` | 属 D-3 发布日决策，本批明确不代拍（决策 28） |
 | 3 | npm publish | ①段全绿 + #1/#2 拍板后 `npm publish`（首次建议 `--tag next` 灰度） | 同 #1，无账号 |
-| 4 | 版本 tag + GitHub Release | `git tag v1.0.0 && git push origin v1.0.0` + 以 CHANGELOG 1.0.0 段为 Release 说明（比较链接已在 CHANGELOG 尾部预置） | 远端无 tag（`git ls-remote --tags` 2026-09-30 实测），tag 推送流程未实测；远端 main 滞后 310 commits（2026-09-30 实测，末次 push 2026-09-06） |
-| 5 | push 远端 + 真实 CI 首跑 | push 后观察 matrix（linux/windows × node 22/24）首跑；视首跑稳定性摘除 snapshot-smoke 的 continue-on-error（BACKLOG 尾巴既有条目销账） | 远端 push 历史存在（末次 2026-09-06，CI 同日多轮真实运行、末轮 success）；但此后 310 commits（R 批 + 1.1.0，2026-09-30 实测）从未上远端——当前门禁在最新代码上从未于远端跑过；视觉冒烟环境敏感性需当前代码首跑取证 |
+| 4 | 版本 tag + GitHub Release | `git tag v1.0.0 && git push origin v1.0.0` + 以 CHANGELOG 1.0.0 段为 Release 说明（比较链接已在 CHANGELOG 尾部预置） | 远端无 tag（`git ls-remote --tags` 2026-09-30 实测），tag 推送流程未实测；远端 main 滞后 344 commits（2026-09-30 实测，末次 push 2026-09-06） |
+| 5 | push 远端 + 真实 CI 首跑 | push 后观察 matrix（linux/windows × node 22/24）首跑；视首跑稳定性摘除 snapshot-smoke 的 continue-on-error（BACKLOG 尾巴既有条目销账） | 远端 push 历史存在（末次 2026-09-06，CI 同日多轮真实运行、末轮 success）；但此后 344 commits（R/P 批 + 1.1.0，2026-09-30 实测）从未上远端——当前门禁在最新代码上从未于远端跑过；视觉冒烟环境敏感性需当前代码首跑取证 |
 | 6 | MCP Registry 提交 | 官方 MCP Registry 注册 atelier server（P2-2 阶段即挂账的外部依赖） | 需 Registry 账号/组织身份，本仓无 |
 | 7 | linux / darwin 快照基线武装 | 各平台本地 `node atelier/cli.mjs snapshot save` 捕获 per-platform 基线入库 + `check` 双 MATCH | 本机仅 win32；基线像素档平台敏感，不可代捕 |
 | 8 | create-atelier 脚手架 | `npm create atelier` 形态脚手架包（薄壳调 atelier init），依赖 #3 完成 | 同 #1 |

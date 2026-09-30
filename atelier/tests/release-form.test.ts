@@ -3,7 +3,9 @@
  * 背景：m12 = 1.0 发布工程批——版本正式化（0.2.0 → 1.0.0）+ CHANGELOG 建立 + 发布工件；
  *       1.1.0 版本批（2026-09-29）——1.0 后四批（评审批/差距批/第三批/MCP 扩张批）版本化工件。
  * 本文件钉三件事（每版先红后绿：版本与 CHANGELOG 两断言在版本号翻转前实证为红——
- *   m12 红检 ea4d013 先例，1.1.0 同款）：
+ *   m12 红检 ea4d013 先例，1.1.0 同款；REL-B 批（2026-09-30）切版红检同径：
+ *   [Unreleased]（R/P 两批）并入 [1.1.0] 同版发布〔该版本从未对外发布，无需另起版本号〕，
+ *   日期断言在 CHANGELOG 标题翻转后、断言更新前实证 1 failed | 2 passed）：
  *   ① 框架版本 === "1.1.0"（防意外降级——版本回退 = 发布形态破坏，属 api-diff 门禁
  *      无法覆盖的 package.json 字段面，此处机检兜底）；
  *   ② 仓库根 CHANGELOG.md 存在且含 1.1.0 条目（Keep a Changelog 惯例落点 = 仓库根，
@@ -31,8 +33,7 @@ describe("发布形态钉（决策 28）", () => {
 
   it("仓库根 CHANGELOG.md 存在且含 1.1.0 条目（Keep a Changelog）", () => {
     const changelog = readFileSync(`${repoRoot}CHANGELOG.md`, "utf-8");
-    expect(changelog).toContain("## [1.1.0]");
-    expect(changelog).toContain("2026-09-29");
+    expect(changelog).toContain("## [1.1.0] - 2026-09-30");
   });
 
   it("package.json 保持 private: true（npm publish = 发布日外部动作，非仓库形态）", () => {
