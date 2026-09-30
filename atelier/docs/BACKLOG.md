@@ -60,7 +60,7 @@
 
 ### P 批（发布前硬化——2026-09-30 第三遍架构复校立项，npm 1.1.0 发布前最后制作批）
 
-> 任务书唯一源：`research/2026-09-30-third-architecture-review.md`（5 项新 P1 + ~15 项 P2 + 留队项复核关键修正）。**全批收口（2026-09-30 当日）**：四支 38 项 + 独立评审 2 nit 全部合并，1104 绿 + 8 skip / check-skills 56-0 / contract-checks 7-0 / api-diff PASS / docs-numbers PASS（tests=1104 tools=40）。明细见已完成归档表同日行。第三遍复校 §3 留队项中 struct jsonl 坏行、sync-project 缺值、api-diff judge strict 三件随 P-C 销账；其余留队维持原位（评审队列），SSE 心跳/背压归属修正为 **dev 面代理**（server 侧 live.ts 已修）；gen-db 共享库抽取闭包红线理由失效已录（1.2+ 候选池）。下一步 = **发布工程批**（push 344 commits → 远端 CI 首跑 → 摘 continue-on-error → 1.1.0 切版发布，RELEASE-CHECKLIST ② 段 9 项；需用户拍板时点与包名）。
+> 任务书唯一源：`research/2026-09-30-third-architecture-review.md`（5 项新 P1 + ~15 项 P2 + 留队项复核关键修正）。**全批收口（2026-09-30 当日）**：四支 38 项 + 独立评审 2 nit 全部合并，1104 绿 + 8 skip / check-skills 56-0 / contract-checks 7-0 / api-diff PASS / docs-numbers PASS（tests=1104 tools=40）。明细见已完成归档表同日行。第三遍复校 §3 留队项中 struct jsonl 坏行、sync-project 缺值、api-diff judge strict 三件随 P-C 销账；其余留队维持原位（评审队列），SSE 心跳/背压归属修正为 **dev 面代理**（server 侧 live.ts 已修）；gen-db 共享库抽取闭包红线理由失效已录（1.2+ 候选池）。下一步 = **发布工程批**（push 361 commits → 远端 CI 首跑 → 摘 continue-on-error → 1.1.0 切版发布，RELEASE-CHECKLIST ② 段 9 项；需用户拍板时点与包名）。
 
 | 支 | 范围 | 状态 |
 |---|---|---|
@@ -75,12 +75,12 @@
 
 | 支 | 范围 | 状态 |
 |---|---|---|
-| REL-A 正确性收口 | 任务书 §5-A1~A7 | 🚧 进行中（rel/a-fixes） |
-| REL-B 文档计数对真 | 任务书 §5-B | 🚧 进行中（rel/b-docs） |
-| REL-C push+CI 首跑+切版 | 任务书 §5-C（外向动作） | ⏸ 待拍板 |
+| REL-A 正确性收口 | 任务书 §5-A1~A7 | ✅（merge `5a8e688`；评审 ACCEPT_WITH_NOTES → N1 自检空转绿 `5233fb0` 收口；全量 1122 绿+8 skip 两轮） |
+| REL-B 文档计数对真 | 任务书 §5-B | ✅（merge `4066a0e`；评审 ACCEPT_WITH_NOTES → Note1 划除行勘正/Note2 P3 实数 47 随收口提交落；性能四指标真跑复测+切版三钉） |
+| REL-C push+CI 首跑+切版 | 任务书 §5-C（外向动作） | ⏸ 待用户确认 push（A/B 已收口、切版三钉已落、344+ 提交待上远端） |
 | REL-D 发布日外部动作 | RELEASE-CHECKLIST ②段 9 项 | ⏸ 发布日（D-3 口径） |
 
-### REL 批 P3 收获（2026-09-30 第四遍全仓复校，~40 项抄送评审队列——定位+定性，入队后按需展开）
+### REL 批 P3 收获（2026-09-30 第四遍全仓复校，四域 47 项〔runtime 12/server 10/dev+cli+scripts 17/mcp+skills+templates 8〕抄送评审队列——定位+定性，入队后按需展开）
 
 > 源：`research/2026-09-30-release-engineering-batch.md` §2.3（五路并行深扫；file:line 以原报告为准，制作时以实读为准——本仓先例：评审报告曾有勘误）。不阻塞 1.1.0 切版发布；按域分组，与上方既有队列及第三遍 P3 清单的重叠面已去重。
 
@@ -124,6 +124,7 @@
 - snapshot flag-first 仍 usage exit 2（cli.mjs:307-309）
 - usage die exit 码 1/2 不一（checkpoint.mjs:299,340 等）
 - checkpoint `--db` flag-当值静默 vacuous（checkpoint.mjs:128-133）
+- checkpoint 对 dev 面 401 一律判 vacuous 放行——「未检不锚」防御残端（checkpoint.mjs:226,237；REL-A3 已修框架自致诱因〔build 覆写 token〕，`!r.ok` 一律 vacuous 的防御缺口本身仍开，REL-A 评审 N3）
 - api-diff `snapshot --out` 无覆盖守卫（api-diff.mjs:363-366）
 - struct skillsRoot 非目录裸抛击穿 struct（struct.mjs:91-96）
 - esc() 不转义引号、属性上下文可逃逸（dev-review-pages.mjs:108,219-221，token 门内自伤面）
@@ -234,7 +235,7 @@ task6 缺 token/未登记引用）+ 机检门 `negative-check.mjs` 6/6 抓住 + 
 - ~~**巨型函数拆分**：callTool（~412 行七段平铺）按工具族分文件、createHandler（~200 行十职责）拆 gateAuth/runWithTimeout/settleCommand、probeChecks（~394 行）八层各一函数、dev 中间件闭包（~435 行 20+ 路由）；registry/docs 两处读盘补 try/catch（文件缺失 unhandled rejection 击杀 dev server）。~~ → **已落地（2026-09-30，R 批 R3 统筹件 + r3r + r3b，见同日归档行）**：createHandler 路由表化（237 行十段→6 条目+匹配层七纯函数 30 例矩阵直测）· callTool 分发 Map（431 行→40 件 TOOL_HANDLERS+per-tool 元数据表，Map 键集=广告面机检）· probeChecks 八层各一函数表驱动 · dev 中间件路由表化 23 条；registry/docs 读盘缺 try/catch 一并由 P1-12 错误围栏兜底（第三遍复校 §3 判「已修」）。
 - ~~**MCP 契约面修复**：广告参数透传（tokens.list group/state.snapshot root/ui.screenshot format 现被静默丢弃）；confirm 未知档位 fail-closed（拼错 ask 即静默 auto）；requestState 一次性 nonce（5 分钟窗可无限重放）；MCP 输入 schema min/max→minimum/maximum 翻译；ui.screenshot MCP 侧 4s↔插件侧 40s 超时失配。~~ → **已落地（2026-09-30，R 批 R3 统筹件 + P 批 P-B，见同日归档行）**：幻影广告参数删除 · confirm 未知档位 fail-closed（ATR-402，认证失败另拆 ATR-405）· 审批句柄 nonce 一次性台账（TTL 内重放拒绝）+ 审批 HMAC 密钥与 dev-token 分离 · min/max→minimum/maximum · 受闸三工具 `_approval` inputSchema 声明 · ui.screenshot timeoutMs 4s→60s（P2-M5）。
 - **checkpoint/api-diff 断链（半销账）**：~~api-diff baseline 损坏被当 vacuous 静默放行（exit 2 一律解释为 vacuous 的解释链）~~ → **已落地（2026-09-30，P 批 P-C：api-diff 坏基线 exit 3 诚实档 + checkpoint 对「基线存在但不可评估」拒锚，见同日归档行）**；checkpoint API 门无法使用它自己指路的 `--allow` 豁免**仍开且加重**（第三遍复校 §3 复核：门内 spawn 不带 `--allow`〔checkpoint.mjs:256〕，save 侧 `--allow` 被 :382 过滤式静默吞——用户以为豁免了、门照红；本队列勘误行曾判「已随 R 批销账」与复校实况不符，以复校为准）。
-- **CLI 面尾巴（两件销账）**：~~`struct --json`/`snapshot --full` 等 flag 被当子命令 usage 退出 2~~ → **已落地（2026-09-30，R 批 R1-D，见同日归档行）**；~~init 对已存在目录零守卫（重跑覆盖用户文件）~~ → **已落地（2026-09-30，R 批 R1-D：init die 指路 `atelier sync` + `--force` 显式逃生 + 参数缺值不再落 `./undefined`）**；DEP0190 win32 spawn 风格归一（同款两种写法并存，测试输出仍见告警）；gen-endpoint RESERVED_WORDS 补 `eval`/`arguments`（P3，评审批 R1 建议）；gen-endpoint 文件尾补换行符（P3 格式）。
+- **CLI 面尾巴（部分销账）**：~~`struct --json`/`snapshot --full` 等 flag 被当子命令 usage 退出 2~~ → **部分落地（2026-09-30 REL-B 评审 Note1 勘正：struct 首参旗标折叠实修于 P 批 P-C `41215e5`，非 R1-D——原注记沿袭勘误行失准句；`snapshot` flag-first 实测仍 usage exit 2 仍开，见下方 P3 收获 dev/cli 域席位）**；~~init 对已存在目录零守卫（重跑覆盖用户文件）~~ → **已落地（2026-09-30，R 批 R1-D：init die 指路 `atelier sync` + `--force` 显式逃生 + 参数缺值不再落 `./undefined`）**；DEP0190 win32 spawn 风格归一（同款两种写法并存，测试输出仍见告警）；gen-endpoint RESERVED_WORDS 补 `eval`/`arguments`（P3，评审批 R1 建议）；gen-endpoint 文件尾补换行符（P3 格式）。
 - **dev 面尾巴（两件销账）**：~~dev-server-host 握手超时不杀子进程（迟到 READY 使已 rejected 监督器复活）~~ → **已落地（2026-09-30，R 批 R1-D：握手超时杀子进程 + start() re-entry 清场）**；~~resolved Map 无界修剪~~ → **已落地（2026-09-30，R 批 r3b：resolved Map 200 上限 FIFO 修剪）**；SSE 心跳**仍开且归属修正**（第三遍复校：server 侧 live.ts 已有心跳/背压，留队实指 **dev 面代理 SSE**〔dev-plugin 无心跳、写入不看返回值〕）；gen-tailwind-theme token 键值零校验直拼 CSS；runtime bridge.ts/index.ts `__ATELIER_TOKEN__` 注释清理（评审批 W6 相邻发现；第三遍复校：dev 侧已移除注入，四读点成死代码）。
 - **性能尾巴**（长期）：无 key `{#each}` 全清重建增量化、streamValue push O(n²)（primitives.ts:51-53）、`store._checkpoints` 无上限（core.ts:298,312-321，被 HMR 快照重锚放大）、bridge sig-N 索引键不稳定（bridge.ts:31-33,49-64——dispose 后下标漂移→`sig-?`）、公开 unmount/dispose API 补全 SPA 生命周期；基准链路换异步执行消除 win32 shell:true 族。（性能债四项席位 2026-09-30 REL-B 按第三遍复校 §3 补全——streamValue/bridge 两项原仅存于 R 批收口行叙述）
 

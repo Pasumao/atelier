@@ -8,6 +8,8 @@
 
 **P 批（发布前硬化）收口——1.1.0 可进入发布工程批**（2026-09-30 第三遍全仓架构复校立项：任务书 = `atelier/docs/research/2026-09-30-third-architecture-review.md`，5 项新 P1 + ~15 项 P2 逐项实读坐实；主/子智能体 git worktree 协作四支并行 + 两路 fresh-context 独立评审。R 批条目见下方既有节；阶段四 npm 发布（D-3）前置 = push 310 commits + 远端 CI 首跑摘 snapshot continue-on-error）。
 
+**REL 批 REL-A（发布工程批·发布前正确性收口）七项全落**（2026-09-30 第四遍全仓复校立项：任务书 = `atelier/docs/research/2026-09-30-release-engineering-batch.md`，无新 P1、7 项发布前置应修逐项红检先红后绿；主/子智能体 git worktree 协作 A∥B 两支并行 + 两路 fresh-context 独立评审；merge `5a8e688`。同批 REL-B 文档计数对真+1.1.0 切版三钉 merge `4066a0e`；REL-C push+远端 CI 首跑与 REL-D npm 发布 = 外向动作待用户拍板）。
+
 ### 安全与加固
 
 - **资产下载面收口（决策 35，评审 P1#1/#2）**：`defineUpload` 新增 `downloadAuth` 声明位（复用 gateAuth 单源，缺省跟随上传面 auth、全链 fail-closed，多面合取）；下载句柄改 sha256 内容寻址（`GET <mount>/assets/<sha256hex>`，顺序整数 id 退役为内部主键——匿名枚举私有文件面关闭）；下载响应恒 `X-Content-Type-Options: nosniff` + 危险 mime（html/xhtml/svg 族）缺省 `Content-Disposition: attachment`；上传入口拒控制字符 mime、下载发射侧对存量毒化行 fail-safe 回落（独立评审对抗探针补充洞一并收口）（`5b22efe`/`dfc76c4`）
@@ -44,6 +46,16 @@
 - **MCP 五件**：ATR-402→405 拆分漏改两处（认证失败恒 ATR-405，与 confirm 拒绝双语义拆清）；`ATELIER_TOOLSETS` 只滤 tools/list 广告不滤执行（callTool 入口执行闸——隐藏工具凭名直呼 ATR-404，「权限面收敛」注释成真）；`endpoint.impact` 广告参数 `root` 静默丢弃（真实消费 + FS6 消费面元数据 `FS6_CONSUMED_ARGS` 单源 + 机检扩双向 consumes∪gate=广告）；HTTP 通道 tasks/update 携标准体形 `_meta` 被拒（params 构造时剥离，对齐 tools/call 先例）；`ui.screenshot` TOOL_META timeoutMs 4s 与同端点 snapshot.diff 60s 自相矛盾（提至 60s + fetch 超时/不可达文案分列）
 - **CLI/生成器十三件（P1×2 + P2×11）**：`build --out` 无根目录关系守卫（越 root/==root/覆盖 package.json+src die 2——`--emptyOutDir` 清空应用源码面关闭；「..」判据整段化免误伤 `..foo`）（`4c6d1d0`）；dump stage② 扫描器无视注释/字符串（接入 extract-schema codeMaskOf——注释幻影模板/注释单反引号吞真模板/幻影组件三例关闭，无注释代码 dump 字节不变）；`review --target`/`sync --target` 缺值与 `struct --json` 旗标当子命令崩栈三件（套 init 同款 die 2 守卫）；checkpoint+struct 台账 jsonl 坏行裸 TypeError（逐行 try/catch die 1 指行号）；tokens-dtcg `--out` 同径覆写 token SSOT（samePath 拒 + atelier.config.json 告警）；api-diff `--allow` 坏档静默空表（die 2 诚实档）+ judge strict 双向反推（--budget 超限误标/--strict+removed 漏标修正，显式第三参）；gen-db SQLite 关键字只挡 JS 词表（db.ts assertIdent 加官方 147 词全集闸——构造期单一真相源，gen-db 回灌复验同闸）；gen-endpoint 派生标识符跨端点撞名无闸（camelOf/pascalOf seen-set，ATR-313 die 列双源名）；export-openapi 表名解码残留修复前旧语义（decodeEscapesCore 归一 + parity 测试）；字面量解析器 `__proto__` 原型键族（gen-db/extract-schema 显式 die、openapi/project-json `in`→`Object.hasOwn`）
 - **文档诚实面八件**：三处「未 push 远端」口径改真实（origin/main 滞后 310 commits、末次 2026-09-06、CI 2026-09-06 实跑在案——「R 批与 1.1.0 门禁未在远端验证，push 后首跑再摘 continue-on-error」，旗标本批不动）（`fb4c1fc`）；`.atelier/approval-secret` HMAC 密钥入模板 .gitignore + init 兜底名单；快照瞬态捕获模式三处统一 `.atr/snapshots/**/current*.png`（per-platform 形态不再进 git 锚点）；`/__atelier/stream-intro` 营销演示路由下线（文案与实现脱节且从未入队追踪）；Node 地板 ≥22.12 统一（README ×2 + package.json engines；sqlite ATR-330 fix 改 ≥22.13 免旗真实阈值诚实口径）；docs/README.md 导航刷新（1.1.0 / design-decisions 0-35，ARCHITECTURE 行如实标注 0-28 未并入）；init 收尾提示改真实 CLI 形态（框架无全局 bin）；模板 main-server.ts fix 措辞「改 server.port」→「新增 server.port 键」
+
+### 修复（REL 批 REL-A：发布前正确性收口，第四遍复校）
+
+- **live SSE 带契约分支形状闸归一（REL-A1，P2-S1 同洞收尾）**：形状闸从无契约分支提升至契约分支之前——带输入契约的 live 端点收 `?input=5` 标量/数组不再 `(5 ?? {})` 直进 `validateFlat` 抛 TypeError 兜底 500（dev 泄原文），改 400 ATR-312 族与 POST 面完全同形；live×auth 恒 ATR-315 ⇒ 该面原为免鉴权可触发（`250f6df`）
+- **extract-schema 签名命中位限定（REL-A2）**：`findPropsSig` 只认 `component(` 开括号后首个实参头——组件体内层箭头函数 `(props: {...})` 不再被误当签名静默产出错 schema，超界降 warn 绝不静默（评审动态重放实证旧版误提零告警）（`754ce56`）
+- **dev-token 铸造时机（REL-A3）**：vite config 期铸造/覆写 → `configureServer` serve 期「磁盘非空即复用、无则铸造」——`atelier build` 不再覆写运行中 dev 的 token，读盘 token 的 snapshot/bench/checkpoint 不再 401，「未检不锚」快照门不再被静默解除（checkpoint 对 401 一律 vacuous 的防御残端仍开留队）（`af121e6`）
+- **compiler Node 版本闸复活（REL-A4）**：`node-guard.mjs` 纯函数单源 + dump.mjs 顶层静态 import 改闸后动态 import + codegen.mjs 补闸 + `ERR_UNKNOWN_FILE_EXTENSION` 双保险转四段式——Node 22.12~22.17 不再在闸前死于 Node 内部错误；engines/README/sqlite 三面地板值零触碰（22.13 vs 22.18 统一待拍板入 BACKLOG 待拍板节）（`d0385e8`）
+- **cli stub 死分支摘除（REL-A6）**：不可达 `case "review"` 摘除（STUB_NOTES 缺键 TypeError 崩栈面关闭）+ STUB 分支集 ⊆ STUB_NOTES 键集结构自检（评审 N1 收口：锚前缀化 + 解析面 toEqual 兜底防空转绿）（`5b1d7b3`+`5233fb0`）
+- **ATR-405 清扫残端（REL-A7）**：snapshotDiffHandler 401 补同款映射——认证失败恒 ATR-405 口径全量对齐（mcp/ 全域甄别仅此一处漏网）（`9150f20`）
+- **jobs misfire 用例去负载敏感（REL-A5）**：sleep(150) 观察窗 → 事件化断言（补跑已触发 + 行重排未来锚谓词）+ 容负载计数上界——远端 CI 陌生负载下不随机红（jobs.ts 行为零变化）（`df5dbe9`）
 
 **全站化 server 面从骨架到生产可用。** 1.0.0（合并锚 `6bb411c`，2026-09-27）之后四批（评审批 / 差距批 W1-W9 / 第三批 W10-W13 / MCP 工具族扩张批）的版本化提炼，条目由 `atelier/docs/BACKLOG.md` 四批归档行逐条对账提炼（代表性 git 锚点，经逐枚核验）；minor 判定依据 = 决策 28（api-diff 历次门禁全为 additive 零 breaking：+4 MCP 工具 / `db` CLI 命令 / `StreamError`·`RevertErrorEntry` 导出等纯加法）。本版新增决策 29-34（journal 持久化 / API key / email / 上传 / cache / GET for query）；新能力的使用者视角边界见根 README「Known Limitations」节。
 
