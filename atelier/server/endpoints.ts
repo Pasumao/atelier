@@ -799,6 +799,125 @@ function gateAuth(kindLabel: string, name: string, authMeta: EndpointAuthMeta, r
   return { ok: true, auth: identity };
 }
 
+/* ---- R3 收口批（2026-09-30 架构评审 §2.2 风险 2 / §4.5 createHandler 项 / §6 批次 R3）：路由匹配层 ----
+ * 原形：createHandler 返回闭包约 240 行十段 if-chain——「这条路径属于哪条路由」的匹配判定与
+ * 「命中后的闸门/分发」执行交织平铺，匹配逻辑没有可测试面（mount 前缀边界 P1#14 能存活至今，
+ * 正说明路由匹配无法被单独测试）。现在：匹配层 = 本节模块级**纯函数**（输入 = mount 剥离后的
+ * (method, name) + 查表窄口，输出 = RouteDecision 穷尽槽位；零 IO、零宿主依赖——单测矩阵
+ * 直喂断言，tests/r3-route-matchers.test.ts），执行层 = createHandler 内路由表
+ * Array<{ match, handle }> 的 handle（鉴权/体限/契约/超时/journal 闸门与分发，闭包装配项在那层）。
+ * 判定条件与原 if-chain 逐条同构（method/prefix/精确名全部原样）——匹配语义零漂移。 ---- */
+
+/** 匹配层输入（纯数据）：mount 剥离 + 首尾 "/" 修剪后的剩余路径与动词——与分发器既有 `name` 同源同形 */
+export type RouteProbe = { method: string; name: string };
+
+/** 端点表查询窄口（匹配层不做注册表 IO——查表经此注入，单测可喂假表） */
+export type RouteLookup = { getEndpoint: (name: string) => EndpointDef | undefined };
+
+/** 穷尽路由槽位（执行层按 decision.route 收口；`def` 携带命中定义省二次查表） */
+export type LiveRoute = { route: "live"; base: string };
+export type IntrospectRoute = { route: "introspect" };
+export type HealthRoute = { route: "health" };
+export type UploadRoute = { route: "upload"; uploadName: string };
+export type AssetsRoute = { route: "assets"; sha: string };
+export type RestfulGetRoute = { route: "restful-get"; def: EndpointDef };
+export type EndpointPostRoute = { route: "endpoint-post"; def: EndpointDef };
+export type NotPostRoute = { route: "not-post" };
+export type UnknownEndpointRoute = { route: "unknown-endpoint" };
+export type RouteDecision =
+  | LiveRoute
+  | IntrospectRoute
+  | HealthRoute
+  | UploadRoute
+  | AssetsRoute
+  | RestfulGetRoute
+  | EndpointPostRoute
+  | NotPostRoute
+  | UnknownEndpointRoute;
+
+/**
+ * mount 前缀剥离（R1 批 P1#14 口径的纯函数化）：mount 非空且 rest === mount（挂载根，剥离为空）
+ * 或 rest.startsWith(mount + "/")（"/" 边界完整段）才切片——裸 startsWith 会把 /apifoo 切成端点
+ * foo、/apiupload/x 切成 upload/x（可绕过按路径前缀设防的反代 ACL）；未知挂载原样保留
+ * （直挂宿主的 404 面）。对照 static-host.ts 同款正确口径。
+ */
+export function stripMountPrefix(pathname: string, mount: string): string {
+  if (mount && (pathname === mount || pathname.startsWith(mount + "/"))) return pathname.slice(mount.length);
+  return pathname;
+}
+
+/** live 后缀路由（FS-7）：GET <name>/live → SSE 槽位（base = 去后缀名）；非 GET / 无后缀不命中 */
+export function matchLiveRoute(probe: RouteProbe): LiveRoute | null {
+  if (probe.method !== "GET" || !probe.name.endsWith("/live")) return null;
+  return { route: "live", base: probe.name.slice(0, -"/live".length) };
+}
+
+/** 内省保留路由（§10.3）：GET __atelier/server-status 精确名；prod 隐身的放行在执行层（handle 回 null） */
+export function matchIntrospectRoute(probe: RouteProbe): IntrospectRoute | null {
+  if (probe.method !== "GET" || probe.name !== INTROSPECT_NAME) return null;
+  return { route: "introspect" };
+}
+
+/**
+ * 健康保留路由（B4）：__atelier/health 精确名——匹配层与方法无关（非 GET 的 405 ATR-311
+ * 在执行层；健康面对任何动词都要给出确定性应答，不能静默落进端点面兜底）。
+ */
+export function matchHealthRoute(probe: RouteProbe): HealthRoute | null {
+  if (probe.name !== HEALTH_NAME) return null;
+  return { route: "health" };
+}
+
+/**
+ * 上传面路由（B1）：upload/ 前缀——匹配层与方法无关（面未装配 404 / 非 POST 405 / 未知上传面
+ * 404 都在执行层）；空名形态（"upload/"）照命中，未知上传面由执行层诚实报错。
+ */
+export function matchUploadRoute(probe: RouteProbe): UploadRoute | null {
+  if (!probe.name.startsWith("upload/")) return null;
+  return { route: "upload", uploadName: probe.name.slice("upload/".length) };
+}
+
+/**
+ * 资产面路由（B1/R1）：assets/ 前缀——匹配层不做 64-hex 形态闸（R1 收口批的形态闸与下载鉴权
+ * 在执行层：未装配先 404 指路装配、非 GET 先 405 指路动词，非法形态统一 404——匹配层只定路由归属）。
+ */
+export function matchAssetsRoute(probe: RouteProbe): AssetsRoute | null {
+  if (!probe.name.startsWith("assets/")) return null;
+  return { route: "assets", sha: probe.name.slice("assets/".length) };
+}
+
+/**
+ * 端点面终局路由（恒命中恒有判定——循环必经它出）：GET × restful query → restful-get；
+ * GET 其余 → not-post（兜底序：405 方法闸先于 404 端点查表——既有口径）；非 POST 非 GET →
+ * not-post；POST × 已注册 → endpoint-post；POST × 未注册 → unknown-endpoint。
+ * 保留名（__atelier/*）含 "/" 不在 NAME_RE 文法、upload//assets//live 后缀由前置表项先行
+ * 命中——本匹配器只看端点表（表序前提，见 createHandler 路由表）。
+ */
+export function matchEndpointRoute(probe: RouteProbe, lookup: RouteLookup): RestfulGetRoute | EndpointPostRoute | NotPostRoute | UnknownEndpointRoute {
+  if (probe.method === "GET") {
+    const def = lookup.getEndpoint(probe.name);
+    if (def != null && def.kind === "query" && def.restful === true) return { route: "restful-get", def };
+    return { route: "not-post" };
+  }
+  if (probe.method !== "POST") return { route: "not-post" };
+  const def = lookup.getEndpoint(probe.name);
+  if (!def) return { route: "unknown-endpoint" };
+  return { route: "endpoint-post", def };
+}
+
+/** 路由表条目：匹配层谓词 × 执行层闸门。match 回 null = 未命中（放行下一条）；handle 回 null = 显式放行（introspect prod 隐身唯一来源） */
+type RouteTableEntry = {
+  match: (probe: RouteProbe, lookup: RouteLookup) => RouteDecision | null;
+  handle: (decision: RouteDecision, req: Request, url: URL, name: string) => Promise<Response | null> | Response | null;
+};
+
+/** 表项构造器（槽位配对）：decision 必然来自同条目 match 的产出——`as D` 是 narrowing 的单一受控点，纯类型层零运行时行为 */
+function route<D extends RouteDecision>(
+  match: (probe: RouteProbe, lookup: RouteLookup) => D | null,
+  handle: (decision: D, req: Request, url: URL, name: string) => Promise<Response | null> | Response | null
+): RouteTableEntry {
+  return { match, handle: (decision, req, url, name) => handle(decision as D, req, url, name) };
+}
+
 export class EndpointRegistry {
   private defs = new Map<string, EndpointDef>();
   /**
@@ -1220,23 +1339,18 @@ export class EndpointRegistry {
         if (capture) endWriteCapture(capture);
       }
     };
-    return async (req: Request): Promise<Response> => {
-      // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
-      if (rateLimit != null && rateBuckets != null) {
-        const verdict = tickRateLimit(rateBuckets, rateLimit, rateKeyOf(req), Date.now());
-        if (!verdict.ok) return rateLimitResponse(verdict.retryAfterSec);
-      }
-      const url = new URL(req.url);
-      let rest = url.pathname;
-      // R1 批（P1#14）：mount 前缀须有 "/" 边界（对照 static-host.ts 同款正确口径）——裸 startsWith
-      // 会把 /apifoo 切成端点 foo、/apiupload/x 切成 upload/x 命中上传路由（可绕过按路径前缀设防的
-      // 反代 ACL）；根路径 rest === mount 照常剥离（mount 根语义不变）。
-      if (mount && (rest === mount || rest.startsWith(mount + "/"))) rest = rest.slice(mount.length);
-      const name = rest.replace(/^\/+|\/+$/g, "");
-
-      // ---- FS-7 live 路由：GET /<mount>/<name>/live → SSE（仅声明 live 的 query 端点；其余非 POST 维持 ATR-311） ----
-      if (req.method === "GET" && name.endsWith("/live")) {
-        const base = name.slice(0, -"/live".length);
+    /* ---- R3 收口批（评审 §2.2 风险 2 / §4.5 createHandler 项 / §6 批次 R3）：路由表 = Array<{ match, handle }> ----
+     * 匹配层（模块级纯函数 match*Route 族 + stripMountPrefix——见文件「路由匹配层」节；单测矩阵
+     * tests/r3-route-matchers.test.ts）与执行层（本表 handle：鉴权/体限/契约/超时/journal 闸门与
+     * 分发）分层。表序 = 原十段 if-chain 判定序（live → introspect → health → upload → assets →
+     * 端点面终局），首条命中即分发；handle 回 null = 显式放行下一条（唯一来源：introspect prod
+     * 隐身——收口前 `if (res) return res` 直通落回既有 ATR 路径的同构形态）；终局条目恒命中恒回
+     * 响应（循环必经它出）。各 handle 内语句 = 原对应 if 段逐字搬运（含注释），闸门序/码位/文案
+     * 零漂移——既有全部断言零修改为行为逐字节等价的成功标准。 ---- */
+    const ROUTES: RouteTableEntry[] = [
+      route(matchLiveRoute, (decision, req, url) => {
+        // ---- FS-7 live 路由：GET /<mount>/<name>/live → SSE（仅声明 live 的 query 端点；其余非 POST 维持 ATR-311） ----
+        const base = decision.base;
         const liveDef = base !== "" ? this.defs.get(base) : undefined;
         if (liveDef && liveDef.kind === "query" && isLiveDeclared(liveDef)) { // live:false 通道关闭（硬化7）
           const sse = this.liveEngine.handleLive(req, liveDef);
@@ -1251,25 +1365,23 @@ export class EndpointRegistry {
             this.names()
           )
         );
-      }
-
-      // ---- D-F16 保留内省路由（§10.3）：GET <mount>/__atelier/server-status → 运行时事实 JSON。
-      //      dev 面 server-status（父进程代理）与 MCP endpoint.* 族、调试页三处同源；prod 旗下
-      //      introspectResponse 返回 null，落回下方既有 ATR 路径（调试面不进生产 API 面）。
-      //      A2 硬化5：statusToken 装配项透传——设置后该路由要求 x-atelier-token 头（401 ATR-340），
-      //      未设置 = 行为零变化；prod 隐身优先于 token 判定（判定在 introspect 内部）。 ----
-      if (req.method === "GET" && name === INTROSPECT_NAME) {
-        const res = introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs, email: opts.email, uploads: uploadsStatus });
-        if (res) return res;
-      }
-
-      // ---- B4 差距批（2026-09-28）：健康面路由 GET <mount>/__atelier/health → 三事实 JSON（health.ts）。
-      //      与 introspect 同族命名空间、语义分离：server-status=内省面（prod 405 隐身，上方路由）、
-      //      health=健康面（prod 恒在——docker/orchestrator 的探活口，永不离线）；**不走 statusToken 门**
-      //      （健康面无秘密，门禁只会把探活变成假死报警）；非 GET → 405 ATR-311（既有口径复用，不新配码）；
-      //      db 探活抛错 → 503（ok:false + db:"error"——状态码即报警面）。限流闸（本函数最前）对
-      //      health 同样计数（闸位单一不分路由豁免）。三事实组装单源 = healthResponse（health.ts）。 ----
-      if (name === HEALTH_NAME) {
+      }),
+      route(matchIntrospectRoute, (_decision, req) =>
+        // ---- D-F16 保留内省路由（§10.3）：GET <mount>/__atelier/server-status → 运行时事实 JSON。
+        //      dev 面 server-status（父进程代理）与 MCP endpoint.* 族、调试页三处同源；prod 旗下
+        //      introspectResponse 返回 null → 本 handle 回 null 放行下一条，落回既有 ATR 路径
+        //      （调试面不进生产 API 面）。A2 硬化5：statusToken 装配项透传——设置后该路由要求
+        //      x-atelier-token 头（401 ATR-340），未设置 = 行为零变化；prod 隐身优先于 token 判定
+        //      （判定在 introspect 内部）。 ----
+        introspectResponse(this, { db, mount: mount || "/", statusToken, req, jobs: opts.jobs, email: opts.email, uploads: uploadsStatus })
+      ),
+      route(matchHealthRoute, (_decision, req, url) => {
+        // ---- B4 差距批（2026-09-28）：健康面路由 GET <mount>/__atelier/health → 三事实 JSON（health.ts）。
+        //      与 introspect 同族命名空间、语义分离：server-status=内省面（prod 405 隐身，上方路由）、
+        //      health=健康面（prod 恒在——docker/orchestrator 的探活口，永不离线）；**不走 statusToken 门**
+        //      （健康面无秘密，门禁只会把探活变成假死报警）；非 GET → 405 ATR-311（既有口径复用，不新配码）；
+        //      db 探活抛错 → 503（ok:false + db:"error"——状态码即报警面）。限流闸（本函数最前）对
+        //      health 同样计数（闸位单一不分路由豁免）。三事实组装单源 = healthResponse（health.ts）。 ----
         if (req.method !== "GET") {
           return errorResponse(
             405,
@@ -1277,21 +1389,20 @@ export class EndpointRegistry {
           );
         }
         return healthResponse({ db, version: opts.version ?? null, startedAtMs });
-      }
-
-      // ---- B1 差距批（2026-09-28，决策 32）：上传/资产面路由（兄弟注册表——不入端点表，
-      //      introspect 端点表形状零变化）。POST <mount>/upload/<name> + GET <mount>/assets/<sha256hex>。
-      //      端点名文法不含 "/"，upload//assets/ 前缀与端点名空间天然不相交（assets/ 命名空间整族
-      //      归资产面：sha 限 64 位十六进制、upload 限 NAME_RE 名，形态不匹配诚实 404 ATR-310——
-      //      端点面零扰动）。面未装配 = 诚实 404 ATR-310 指路装配（落回既有路径会把 GET 资产误报成
-      //      405「改 POST」、把上传路由报成「未知端点」——都误导指路）。限流闸（本函数最前）对上传/
-      //      下载同样计数（上传是最贵的请求形态——闸位单一不分路由豁免）。
-      //      R1 收口批（2026-09-30，P1#1 + R-D2 拍板缺省）：下载句柄 = sha256 内容寻址（64 hex 形态
-      //      闸在分发器；旧整数 id 与非法形态统一 404 ATR-310——顺序 id 可匿名枚举，整数主键退役为
-      //      内部不再对外）；下载鉴权闸 = UploadDef.downloadAuth 缺省跟随该面 auth（再缺省 session
-      //      fail-closed），gateAuth 单源同链（见下块内注）。 ----
-      const uploadRoute = name.startsWith("upload/") ? name.slice("upload/".length) : null;
-      if (uploadRoute != null) {
+      }),
+      route(matchUploadRoute, (decision, req, url) => {
+        // ---- B1 差距批（2026-09-28，决策 32）：上传/资产面路由（兄弟注册表——不入端点表，
+        //      introspect 端点表形状零变化）。POST <mount>/upload/<name> + GET <mount>/assets/<sha256hex>。
+        //      端点名文法不含 "/"，upload//assets/ 前缀与端点名空间天然不相交（assets/ 命名空间整族
+        //      归资产面：sha 限 64 位十六进制、upload 限 NAME_RE 名，形态不匹配诚实 404 ATR-310——
+        //      端点面零扰动）。面未装配 = 诚实 404 ATR-310 指路装配（落回既有路径会把 GET 资产误报成
+        //      405「改 POST」、把上传路由报成「未知端点」——都误导指路）。限流闸（本函数最前）对上传/
+        //      下载同样计数（上传是最贵的请求形态——闸位单一不分路由豁免）。
+        //      R1 收口批（2026-09-30，P1#1 + R-D2 拍板缺省）：下载句柄 = sha256 内容寻址（64 hex 形态
+        //      闸在分发器；旧整数 id 与非法形态统一 404 ATR-310——顺序 id 可匿名枚举，整数主键退役为
+        //      内部不再对外）；下载鉴权闸 = UploadDef.downloadAuth 缺省跟随该面 auth（再缺省 session
+        //      fail-closed），gateAuth 单源同链（见下块内注）。 ----
+        const uploadRoute = decision.uploadName;
         if (uploadsFace == null) {
           return errorResponse(
             404,
@@ -1319,12 +1430,11 @@ export class EndpointRegistry {
           if (!gate.ok) return gate.response;
         }
         return uploadsFace.handleUpload({ req, def: upDef, mount: mount || "" });
-      }
-      // assets/ 命名空间整族归资产面（端点名不含 "/"——天然不相交）：形态闸（64 hex 内容寻址 id）
-      // 在面未装配/动词闸之后——未装配先 404 指路装配、非 GET 先 405 指路动词，旧整数 id 与一切
-      // 非法形态统一 404 ATR-310（不落「改 POST」误导兜底）。
-      const assetRoute = name.startsWith("assets/") ? name.slice("assets/".length) : null;
-      if (assetRoute != null) {
+      }),
+      route(matchAssetsRoute, (decision, req, url) => {
+        // assets/ 命名空间整族归资产面（端点名不含 "/"——天然不相交）：形态闸（64 hex 内容寻址 id）
+        // 在面未装配/动词闸之后——未装配先 404 指路装配、非 GET 先 405 指路动词，旧整数 id 与一切
+        // 非法形态统一 404 ATR-310（不落「改 POST」误导兜底）。
         if (uploadsFace == null) {
           return errorResponse(
             404,
@@ -1338,12 +1448,12 @@ export class EndpointRegistry {
         if (req.method !== "GET") {
           return errorResponse(405, endpointError("ATR-311", `资产面只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/assets/<sha256hex>（内容寻址不可变——响应带 Cache-Control: immutable）`));
         }
-        if (!/^[0-9a-fA-F]{64}$/.test(assetRoute)) {
+        if (!/^[0-9a-fA-F]{64}$/.test(decision.sha)) {
           return errorResponse(
             404,
             endpointError(
               "ATR-310",
-              `资产 id 形态非法：assets/${assetRoute}`,
+              `资产 id 形态非法：assets/${decision.sha}`,
               "下载句柄 = 上传响应的 sha256/url 字段（64 位十六进制内容寻址 id，天然不可枚举）；1.1 起整数自增 id 退役为内部主键不再对外（R1 批 R-D2——顺序 id 可枚举私有文件），存量引用以重传同内容或账面 sha256 重建"
             )
           );
@@ -1361,26 +1471,59 @@ export class EndpointRegistry {
         });
         for (const decl of dlDecls.length > 0 ? dlDecls : [{ type: "session" } as EndpointAuthMeta]) {
           if (decl.type === "none") continue;
-          const sha = assetRoute.toLowerCase();
+          const sha = decision.sha.toLowerCase();
           const gate = gateAuth("资产面", `assets/${sha}`, decl, readAuth, apiKeys, req);
           if (!gate.ok) return gate.response;
         }
-        return uploadsFace.handleDownload({ sha: assetRoute.toLowerCase(), mount: mount || "" });
-      }
-
-      // ---- 差距批 A7（决策 34）：restful GET 分发（D-F11 留门的运行时扩张）——声明 restful:true 的
-      //      query 端点接受 GET <mount>/<name>?<query>。插在 POST 分发兜底之前；与上方 /live 后缀
-      //      路由天然无冲突（带 /live 后缀的请求先被截走走 SSE）；未声明 restful / command / 未知
-      //      端点的 GET 不在此拦截——落回下方既有 405 ATR-311 兜底（默认关零变化）。
-      //      鉴权与 POST 同链（gateAuth 单源，拦截在输入构造之前——「被拒之门前不触碰 handler」
-      //      同款语义）；输入构造 = buildRestfulInput（URL 查询串按契约显式投影，未知参数/投影失败
-      //      → 400 ATR-312）；投影产物照走 validateFlat 同链（缺必填/范围违规 ATR-201，与 POST
-      //      同码同文风，GET/POST 一致性由此保证）；成功路径复用 dispatchEndpoint——Cache-Control
-      //      注入/x-atelier-* 头/journal（query 永不入账）/超时与抛错映射与 POST 自动零差。 ----
-      if (req.method === "GET") {
-        const getDef = this.defs.get(name);
-        if (getDef != null && getDef.kind === "query" && getDef.restful === true) {
-          const authMeta = getDef.auth;
+        return uploadsFace.handleDownload({ sha: decision.sha.toLowerCase(), mount: mount || "" });
+      }),
+      route(
+        matchEndpointRoute,
+        async (decision, req, url, name): Promise<Response> => {
+          // ---- 差距批 A7（决策 34）：restful GET 分发（D-F11 留门的运行时扩张）——声明 restful:true 的
+          //      query 端点接受 GET <mount>/<name>?<query>。插在 POST 分发兜底之前；与上方 /live 后缀
+          //      路由天然无冲突（带 /live 后缀的请求先被截走走 SSE）；未声明 restful / command / 未知
+          //      端点的 GET 不在此拦截——落回 405 ATR-311 兜底（默认关零变化）。
+          //      鉴权与 POST 同链（gateAuth 单源，拦截在输入构造之前——「被拒之门前不触碰 handler」
+          //      同款语义）；输入构造 = buildRestfulInput（URL 查询串按契约显式投影，未知参数/投影失败
+          //      → 400 ATR-312）；投影产物照走 validateFlat 同链（缺必填/范围违规 ATR-201，与 POST
+          //      同码同文风，GET/POST 一致性由此保证）；成功路径复用 dispatchEndpoint——Cache-Control
+          //      注入/x-atelier-* 头/journal（query 永不入账）/超时与抛错映射与 POST 自动零差。 ----
+          if (decision.route === "restful-get") {
+            const getDef = decision.def;
+            const authMeta = getDef.auth;
+            const authRequired = authMeta != null && authMeta.type !== "none";
+            let gatedAuth: AuthInfo | null = null;
+            if (authRequired) {
+              const gate = gateAuth("端点", name, authMeta, readAuth, apiKeys, req);
+              if (!gate.ok) return gate.response;
+              gatedAuth = gate.auth;
+            }
+            const built = buildRestfulInput(getDef, url.searchParams);
+            if (!built.ok) return errorResponse(400, built.error);
+            if (getDef.contract != null) {
+              const v = validateFlat(getDef.contract, built.input, getDef.name);
+              if (!v.ok) return errorResponse(400, v.error!); // 与 POST 缺字段/类型错同链同码 ATR-201
+            }
+            return dispatchEndpoint(getDef, built.input, authRequired, gatedAuth, req);
+          }
+          // 非 restful / command / 未知名 → 405 兜底（restful 默认关 = 零变化；兜底序：405 方法闸先于 404 端点查表——既有口径）
+          if (decision.route === "not-post") {
+            return errorResponse(405, endpointError("ATR-311", `端点只接受 POST：${req.method} ${url.pathname}`, `GET 分发仅限声明 restful:true 的 query 端点（决策 34——声明后 GET ${mount}/${name}?<query-params>，查询串按契约投影；未声明端点行为零变化）；或改 POST ${mount}/${name}，JSON 体 = 契约输入`, this.names()));
+          }
+          if (decision.route === "unknown-endpoint") {
+            return errorResponse(404, endpointError("ATR-310", `未知端点：${name}`, `用以下已注册端点之一：${this.names().join(", ") || "（无）"}`, this.names()));
+          }
+          // ---- 鉴权拦截（§6.2，FS-M2(m2d) 加法）：只对声明 auth: { type } 且 type !== "none" 的端点生效 ----
+          // auth: { type: "none" } = 显式消警（"沉默缺省"才是 agent 高错区）。未声明端点连 readAuth 的
+          // 调用时机都维持原状（仍在 dispatchEndpoint ctx 装配处调用一次）——行为零变化。拦截在 handler 之前，
+          // journal 不记账（journal 语义 = "分发穿过 handler 之后"，§3.5——被拒之门的请求未触达 handler）。
+          // 声明了 auth 的端点：readAuth 在此处调用一次并复用进 ctx（总调用次数与旧路径相同）。
+          // B1 差距批：拦截链提为模块级 gateAuth 单源（上传面路由同链复用——两处消息/码位零漂移，
+          // 端点侧 kindLabel="端点" 时消息逐字节一致）；A7（决策 34）restful GET 分发同链复用（GET 与
+          // POST 鉴权零语义差——session/apikey/role 全支持）。
+          const def = decision.def;
+          const authMeta = def.auth;
           const authRequired = authMeta != null && authMeta.type !== "none";
           let gatedAuth: AuthInfo | null = null;
           if (authRequired) {
@@ -1388,74 +1531,63 @@ export class EndpointRegistry {
             if (!gate.ok) return gate.response;
             gatedAuth = gate.auth;
           }
-          const built = buildRestfulInput(getDef, url.searchParams);
-          if (!built.ok) return errorResponse(400, built.error);
-          if (getDef.contract != null) {
-            const v = validateFlat(getDef.contract, built.input, getDef.name);
-            if (!v.ok) return errorResponse(400, v.error!); // 与 POST 缺字段/类型错同链同码 ATR-201
+
+          // ---- A2 硬化3：请求体上限（缺省 1MiB，maxBodyBytes 可配）——超限 413 ATR-346 ----
+          // content-length 声明值先快速拒绝（不读体）；实际字节在缓冲后再兜底校验（声明可缺失/失真）。
+          const overLimitError = (bytes: number): Response =>
+            errorResponse(
+              413,
+              endpointError(
+                "ATR-346",
+                `请求体超限：${bytes} 字节 > 上限 ${maxBodyBytes}（端点 ${name}）`,
+                `缩小请求体（分批/裁剪字段）；服务端上限由装配点调整：createHandler({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）。超限请求不进 handler、不入审计 journal`
+              )
+            );
+          const declaredLength = Number(req.headers.get("content-length"));
+          if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) return overLimitError(declaredLength);
+
+          let input: unknown;
+          try {
+            const raw = await req.arrayBuffer();
+            if (raw.byteLength > maxBodyBytes) return overLimitError(raw.byteLength);
+            input = JSON.parse(new TextDecoder().decode(raw));
+          } catch {
+            return errorResponse(400, endpointError("ATR-312", `请求体不是合法 JSON`, "发送 application/json 体，例如 {\"id\": 1}"));
           }
-          return dispatchEndpoint(getDef, built.input, authRequired, gatedAuth, req);
+          if (def.contract != null) {
+            const v = validateFlat(def.contract, input as Record<string, unknown>, def.name);
+            if (!v.ok) return errorResponse(400, v.error!);
+          } else if (input != null && (typeof input !== "object" || Array.isArray(input))) {
+            return errorResponse(400, endpointError("ATR-312", `端点 ${name} 无契约，输入必须缺省或为 JSON 对象`, "发送空对象 {} 或为该端点补 contract（推荐：契约单源纪律）"));
+          }
+          const payload = (input ?? {}) as Record<string, unknown>;
+          // ---- 输入就绪：ctx 装配/handler/输出面/journal/响应构造走 dispatchEndpoint 共享 tail ----
+          // （A7 决策 34 提取为闭包——POST 与 restful GET 两通道同一构造，cache 联动自动一致）
+          return dispatchEndpoint(def, payload, authRequired, gatedAuth, req);
         }
-        // 非 restful / command / 未知名 → 不拦截，落回下方 405 兜底（restful 默认关 = 零变化）
+      ),
+    ];
+    return async (req: Request): Promise<Response> => {
+      // ---- A2 功能7：限流闸（最前——限的是「打到本 handler 的请求」，不分路由；SSE 订阅亦计一次） ----
+      if (rateLimit != null && rateBuckets != null) {
+        const verdict = tickRateLimit(rateBuckets, rateLimit, rateKeyOf(req), Date.now());
+        if (!verdict.ok) return rateLimitResponse(verdict.retryAfterSec);
       }
-
-      if (req.method !== "POST") {
-        return errorResponse(405, endpointError("ATR-311", `端点只接受 POST：${req.method} ${url.pathname}`, `GET 分发仅限声明 restful:true 的 query 端点（决策 34——声明后 GET ${mount}/${name}?<query-params>，查询串按契约投影；未声明端点行为零变化）；或改 POST ${mount}/${name}，JSON 体 = 契约输入`, this.names()));
+      const url = new URL(req.url);
+      // R1 批（P1#14）：mount 前缀须有 "/" 边界（对照 static-host.ts 同款正确口径）——裸 startsWith
+      // 会把 /apifoo 切成端点 foo、/apiupload/x 切成 upload/x 命中上传路由（可绕过按路径前缀设防的
+      // 反代 ACL）；根路径 rest === mount 照常剥离（mount 根语义不变）。
+      // R3 收口批：剥离口径提为模块级纯函数 stripMountPrefix（路由匹配层单测矩阵组成部分）。
+      const name = stripMountPrefix(url.pathname, mount).replace(/^\/+|\/+$/g, "");
+      const lookup: RouteLookup = { getEndpoint: (n) => this.defs.get(n) };
+      for (const entry of ROUTES) {
+        const decision = entry.match({ method: req.method, name }, lookup);
+        if (decision == null) continue;
+        const res = await entry.handle(decision, req, url, name);
+        if (res != null) return res; // null = 显式放行下一条（introspect prod 隐身唯一来源）
       }
-      const def = this.defs.get(name);
-      if (!def) {
-        return errorResponse(404, endpointError("ATR-310", `未知端点：${name}`, `用以下已注册端点之一：${this.names().join(", ") || "（无）"}`, this.names()));
-      }
-
-      // ---- 鉴权拦截（§6.2，FS-M2(m2d) 加法）：只对声明 auth: { type } 且 type !== "none" 的端点生效 ----
-      // auth: { type: "none" } = 显式消警（"沉默缺省"才是 agent 高错区）。未声明端点连 readAuth 的
-      // 调用时机都维持原状（仍在 dispatchEndpoint ctx 装配处调用一次）——行为零变化。拦截在 handler 之前，
-      // journal 不记账（journal 语义 = "分发穿过 handler 之后"，§3.5——被拒之门的请求未触达 handler）。
-      // 声明了 auth 的端点：readAuth 在此处调用一次并复用进 ctx（总调用次数与旧路径相同）。
-      // B1 差距批：拦截链提为模块级 gateAuth 单源（上传面路由同链复用——两处消息/码位零漂移，
-      // 端点侧 kindLabel="端点" 时消息逐字节一致）；A7（决策 34）restful GET 分发同链复用（GET 与
-      // POST 鉴权零语义差——session/apikey/role 全支持）。
-      const authMeta = def.auth;
-      const authRequired = authMeta != null && authMeta.type !== "none";
-      let gatedAuth: AuthInfo | null = null;
-      if (authRequired) {
-        const gate = gateAuth("端点", name, authMeta, readAuth, apiKeys, req);
-        if (!gate.ok) return gate.response;
-        gatedAuth = gate.auth;
-      }
-
-      // ---- A2 硬化3：请求体上限（缺省 1MiB，maxBodyBytes 可配）——超限 413 ATR-346 ----
-      // content-length 声明值先快速拒绝（不读体）；实际字节在缓冲后再兜底校验（声明可缺失/失真）。
-      const overLimitError = (bytes: number): Response =>
-        errorResponse(
-          413,
-          endpointError(
-            "ATR-346",
-            `请求体超限：${bytes} 字节 > 上限 ${maxBodyBytes}（端点 ${name}）`,
-            `缩小请求体（分批/裁剪字段）；服务端上限由装配点调整：createHandler({ maxBodyBytes })（缺省 1MiB = ${DEFAULT_MAX_BODY_BYTES} 字节）。超限请求不进 handler、不入审计 journal`
-          )
-        );
-      const declaredLength = Number(req.headers.get("content-length"));
-      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) return overLimitError(declaredLength);
-
-      let input: unknown;
-      try {
-        const raw = await req.arrayBuffer();
-        if (raw.byteLength > maxBodyBytes) return overLimitError(raw.byteLength);
-        input = JSON.parse(new TextDecoder().decode(raw));
-      } catch {
-        return errorResponse(400, endpointError("ATR-312", `请求体不是合法 JSON`, "发送 application/json 体，例如 {\"id\": 1}"));
-      }
-      if (def.contract != null) {
-        const v = validateFlat(def.contract, input as Record<string, unknown>, def.name);
-        if (!v.ok) return errorResponse(400, v.error!);
-      } else if (input != null && (typeof input !== "object" || Array.isArray(input))) {
-        return errorResponse(400, endpointError("ATR-312", `端点 ${name} 无契约，输入必须缺省或为 JSON 对象`, "发送空对象 {} 或为该端点补 contract（推荐：契约单源纪律）"));
-      }
-      const payload = (input ?? {}) as Record<string, unknown>;
-      // ---- 输入就绪：ctx 装配/handler/输出面/journal/响应构造走 dispatchEndpoint 共享 tail ----
-      // （A7 决策 34 提取为闭包——POST 与 restful GET 两通道同一构造，cache 联动自动一致）
-      return dispatchEndpoint(def, payload, authRequired, gatedAuth, req);
+      // 不可达：终局条目 matchEndpointRoute 恒产出判定、handle 恒回响应（类型层穷尽）——防御性出口
+      throw new Error("atelier-server: 路由表穿透终局路由（不可达）");
     };
   }
 }
