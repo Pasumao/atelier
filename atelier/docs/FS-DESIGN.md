@@ -345,7 +345,7 @@ M1 现状"只记成功写入"（310-320 注释口径）升级为**完整审计�
 > 同闸计数（闸位单一不分路由豁免）；④ 非 GET → 405 ATR-311（复用既有口径，不新配码）。dev 面
 > 插件闸现状（真实 dev server curl 实测，2026-09-28）：健康面**不进** dev 插件的 `/__atelier/`
 > 命名空间——该命名空间有 W6 Origin/Host 闸（伪造 Origin 403；无 Origin 的 curl 放行）+ P1-12
-> token 门（无 token 401 ATR-402，回环限定），带 token 也只会落回 Vite 静态回退（dev 面无此路由）
+> token 门（无 token 401 ATR-405，回环限定），带 token 也只会落回 Vite 静态回退（dev 面无此路由）
 > ——本批不加洞，健康面在 dev 的正门是 API mount：`GET /api/__atelier/health` 经 `/api` 反代直达
 > server 子进程，200 无门（实测证据）；生产经 dist 壳（无 dev 插件无 token 门）同路径公网可达
 > （dist/server.mjs spawn 实测：health 200 三事实 × server-status 405 对照）。
@@ -1271,7 +1271,8 @@ review 时间轴单视图呈现。"agent 这轮做了什么"一处可答（可�
 | ATR-352 | 3xx 运行 | 插值/属性值直接收到信号对象（忘写 `.value` 典型笔误）——信号被渲染成内部字段 JSON；dev 每信号一次性警示、prod 剥离（ATR-328 同款形态），渲染语义逐字不变 | R1 收口批 B 支（R-D4a，2026-09-30 评审 §4.4 静默错误族，已落地；skills ERR_CATALOG 同步） |
 | ATR-353 | 3xx 运行 | keyed each 重复身份键——自第二项起折叠进已有行（appendChild 移动语义），渲染行数少于数据项数；dev 每 each 块一次性警示、prod 剥离，折叠语义逐字不变 | R1 收口批 B 支（R-D4b，2026-09-30 评审 §4.4 静默错误族，已落地；skills ERR_CATALOG 同步） |
 | ATR-401 | 4xx 工具/dev 面 | 组件未注册 / MCP 工具或句柄未知（含审批句柄过期） | 既有（1.0 前；mcp 面） |
-| ATR-402 | 4xx 工具/dev 面 | confirm 档拒绝（deny 或人工否决）；dev-token 校验失败当前同码（双语义拆分归 R3 批） | 既有（1.0 前）/R2 批双语义注记 |
+| ATR-402 | 4xx 工具/dev 面 | confirm 档拒绝（deny、人工否决、非法档位 fail-closed） | 既有（1.0 前）；R3 收口批拆分注记（dev-token 侧分家） |
+| ATR-405 | 4xx 工具/dev 面 | dev-token 校验失败（插件 token 门 401 / snapshot 直调 / endpoint-tools 内省） | R3 收口批（2026-09-30 评审 §4.3 双语义拆分；402 归 confirm 单语义） |
 | ATR-403 | 4xx 工具/dev 面 | dev 托管 server 面不可用（未托管/未就绪/热重启中/子进程连接被拒——代理以 HTTP 503 返回，fix 可执行） | §11.1（FS-7，已落地） |
 | ATR-404 | 4xx 工具/dev 面 | 未知 MCP 工具名 | 既有（1.0 前；mcp/server.mjs·endpoint-tools） |
 | ATR-415 | 4xx 工具/dev 面 | 不支持的媒体类型（dev 面 JSON 路由/上传面强制 content-type——no-cors text/plain 伪装写通道已封） | dev 面收口（P1-12）/上传面同码 |

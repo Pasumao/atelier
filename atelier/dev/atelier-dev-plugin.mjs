@@ -408,7 +408,7 @@ export function atelierDevPlugin() {
         if (!hasToken) {
           res.statusCode = 401;
           res.setHeader("Content-Type", "application/json; charset=utf-8");
-          res.end(JSON.stringify({ ok: false, error: "ATR-402: invalid or missing X-Atelier-Token", fix: `tools: read ${ROOT}\\.atelier\\dev-token and send header x-atelier-token; browsers: open the page once with ?token=<token>` }));
+          res.end(JSON.stringify({ ok: false, error: "ATR-405: invalid or missing X-Atelier-Token", fix: `tools: read ${ROOT}\\.atelier\\dev-token and send header x-atelier-token; browsers: open the page once with ?token=<token>` }));
           return;
         }
 

@@ -60,7 +60,7 @@ async function fetchServerStatus(devUrl, devToken) {
     );
   });
   if (r.status === 401) {
-    throw toolError("ATR-402: dev token rejected", "读取应用根 .atelier/dev-token 作为 x-atelier-token（server-status 在 dev 面 token 门内）");
+    throw toolError("ATR-405: dev token rejected", "读取应用根 .atelier/dev-token 作为 x-atelier-token（server-status 在 dev 面 token 门内）");
   }
   if (!r.ok) {
     throw toolError(`ATR-4xx-dev: server-status HTTP ${r.status}`, "检查应用 dev 面日志（server-status 段由 dev 托管线提供）");

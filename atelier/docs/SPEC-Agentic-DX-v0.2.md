@@ -151,6 +151,7 @@ type AtrError = {
 |---|---|---|
 | ATR-401 | 组件未注册 / MCP 工具或句柄未知（含审批句柄过期） | 补 import 注册（显式传 `name`）；句柄过期 = 重跑该工具 |
 | ATR-402 | confirm 档拒绝（deny 或人工否决） | 询问用户；**不要重试同一调用** |
+| ATR-405 | dev 面 token 校验失败（401） | 读应用根 `.atelier/dev-token`，以 `x-atelier-token` 头重发 |
 | ATR-403 | dev 托管 server 面不可用（未托管/握手中/热重启中/子进程拒连——HTTP 503 透出） | 读 `[server] ` 前缀控制台行找子进程自身错误；CLI 直调场景指路应用目录 `pnpm dev` |
 | ATR-404 | 未知 MCP 工具名 | 用 `tools/list` 输出里的名字 |
 | ATR-415 | 不支持的媒体类型（dev 面 JSON 路由/上传面强制 content-type；no-cors text/plain 伪装写通道已封） | JSON 路由带 `Content-Type: application/json`；上传走标准 `multipart/form-data`（fetch FormData 自动带 boundary） |

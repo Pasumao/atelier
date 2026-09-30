@@ -133,7 +133,7 @@ async function captureTo(file, query = "") {
     signal: AbortSignal.timeout(40000),
     headers: { "x-atelier-token": devToken() },
   });
-  if (r.status === 401) throw new Error("ATR-402: dev token rejected — read .atelier/dev-token from the app root");
+  if (r.status === 401) throw new Error("ATR-405: dev token rejected — read .atelier/dev-token from the app root");
   if (!r.ok) throw new Error(`dev face HTTP ${r.status} (is 'atelier dev' running at ${DEV}?)`);
   const j = await r.json();
   if (!j.ok || !j.imageBase64) throw new Error(j.error ?? "screenshot payload missing");

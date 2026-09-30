@@ -9,8 +9,8 @@
  *            ⊆ 错误码总表。对账基准（SSOT）= skills/atelier-error-codes/SKILL.md（ERR_CATALOG，
  *            cause/example/fix 四段式唯一全表——check-skills D 检「skill 引用 ⊆ 表」已以此为准；
  *            FS-DESIGN §15 与 SPEC-Agentic-DX-v0.2 §3.2 是导航投影，三张表码集必须两两相等，
- *            由本检查钉死）。白名单：ATR-402 双语义（confirm 拒绝 + dev-token 校验失败同码）——
- *            拆分归 R3 批（confirm 侧归 R3；dev-token 侧文件在并行支线 D 手里），见 DUAL_SEMANTICS。
+ *            由本检查钉死）。白名单机制见 DUAL_SEMANTICS（ATR-402 双语义已于 R3 拆分：402 = confirm
+ *            档拒绝，405 = dev-token 校验失败——当前空表状态）。
  *
  *   CHECK 2  ARCHITECTURE §8 CLI 表 ↔ cli.mjs dispatch 对账：§8 动词 = dispatch 动词（双向，
  *            help 自指豁免），§8 旗标 ⊆ HELP 旗标——「init --ai 实为 --no-ai」「--static/--electron
@@ -41,12 +41,11 @@ const SCAN_EXT = new Set([".ts", ".mjs", ".js"]);
 
 /**
  * 双语义/例外白名单：码 → 理由。条目必须是总表已收录码（本检查顺带验证，防白名单引用幻影码）。
- * ATR-402：confirm 档拒绝（mcp 面）与 dev-token 校验失败（dev 面 / snapshot 直调）当前共用一码——
- * 拆分归 R3 批（confirm 侧归 R3；dev-token 侧的文件在并行支线 D 手里，本批不碰）。
+ * ATR-402 双语义已拆分（R3 统筹自执行，2026-09-30）：confirm 档拒绝保留 ATR-402；dev-token
+ * 校验失败独立为 ATR-405（plugin token 门 / snapshot.mjs / endpoint-tools.mjs 三处 + 总表与
+ * 两投影表同步）。白名单机制保留（空表）——未来再遇同码双语义按同款显式登记。
  */
-const DUAL_SEMANTICS = {
-  "ATR-402": "双语义（confirm 拒绝 + dev-token 校验失败）同码——拆分归 R3 批，本批显式白名单不拦",
-};
+const DUAL_SEMANTICS = {};
 
 /* ---------------- 派生函数（check-skills.mjs 复用；vitest 钉住） ---------------- */
 
