@@ -703,3 +703,30 @@ export const notSchema = "just a string";
     expect(() => parseFlatSchemaLiteral("{ ...spread }", "t")).toThrow(/无法解析的对象条目/);
   });
 });
+
+/* ---------------- P2-G4：plain-object 原型键族（第三遍架构复校 §2.6） ----------------
+ * __proto__ 显式拒绝（解析产物统一口径——普通对象上该键静默改原型，字段无声消失）；
+ * `in` 改 Object.hasOwn（toString 等继承键不再误判重复声明 / 误报声明冲突）。 */
+describe("P2-G4：原型键与继承键（解析器 / 契约扫描 / 投影器三面）", () => {
+  it("红检：parseFlatSchemaLiteral 的 __proto__ 键 → 显式拒绝（修前静默改原型，reqProps 无声消失）", () => {
+    expect(() => parseFlatSchemaLiteral('{ type: "object", reqProps: { __proto__: { type: "string" } } }', "契约 X")).toThrow(/__proto__/);
+  });
+
+  it("红检：scanContractSchemas 对继承键（toString）不再误判重复声明——契约名 toString 正常入册", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-openapi-proto-"));
+    try {
+      fs.mkdirSync(path.join(root, "src"), { recursive: true });
+      fs.writeFileSync(path.join(root, "src", "contract.ts"), 'export const toString = { type: "object", reqProps: {} };\n', "utf8");
+      const sc = scanContractSchemas(root);
+      expect(sc.idents, "修前：'toString' in byIdent 撞继承键 → 误判重复声明被跳过").toContain("toString");
+      expect(sc.byIdent.toString?.value).toMatchObject({ type: "object" });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("红检：projectJsonSchema 的 reqProps toString 不再被 `k in opt` 误报声明冲突", () => {
+    const out = projectJsonSchema({ type: "object", reqProps: { toString: { type: "string" } }, optProps: {} } as FlatSchema);
+    expect((out.properties as Record<string, unknown>)?.toString).toBeTruthy();
+  });
+});

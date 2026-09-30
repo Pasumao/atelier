@@ -446,3 +446,44 @@ describeSqliteFts("gen db fts 运行时对拍（B6）：真实 node:sqlite 应�
     db.close();
   });
 });
+
+/* ---------------- P2-G1 生成路径 + P2-G4 原型键（第三遍架构复校 §2.6） ----------------
+ * P2-G1：gen-db 生成路径经 parseSchema 的 defineTable() 回灌复验同受 SQLite 关键字闸
+ * （db.ts assertIdent 单一真相源）——schema 表名 order 在生成期即 die，破产物不落盘。
+ * P2-G4：列名 __proto__ 走普通对象赋值会静默改写原型——列无声消失，schema 与产物分叉零报错；
+ * 修法 = parseObjectEntries 键位显式 die。 */
+describe("P2-G1/P2-G4：生成路径 SQLite 关键字闸 + __proto__ 列名显式拒绝", () => {
+  it("红检 P2-G1：schema 表名 order → genDb 构造期 die（经 table() 回灌复验同受闸），破产物不落盘", () => {
+    const root = makeFixtureRoot(`import { table } from "../../vendor/atelier/server/db.ts";
+export const logs = table("order", {
+  id: { type: "integer", primaryKey: true },
+});
+`);
+    let err: Error | null = null;
+    try {
+      genDb(root);
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err, "修前：字符集闸放行 order——迁移 DDL 语法错误 migrate 时才炸").toBeTruthy();
+    expect(err!.message).toContain("SQLite 保留字");
+    expect(fs.existsSync(path.join(root, "src", "generated", "db", "tables.ts"))).toBe(false);
+  });
+
+  it("红检 P2-G4：列名 __proto__ → 显式 die（修前静默吞列——schema 与产物分叉零报错）", () => {
+    let err: (Error & { fix?: string }) | null = null;
+    try {
+      parseSchema(`import { table } from "../../vendor/atelier/server/db.ts";
+export const items = table("items", {
+  id: { type: "integer", primaryKey: true },
+  __proto__: { type: "text" },
+});
+`);
+    } catch (e) {
+      err = e as Error & { fix?: string };
+    }
+    expect(err, "修前：__proto__ 键静默改写原型，列无声消失").toBeTruthy();
+    expect(err!.message).toContain("__proto__");
+    expect(err!.fix).toBeTruthy();
+  });
+});

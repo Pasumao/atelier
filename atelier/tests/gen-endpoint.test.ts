@@ -581,3 +581,33 @@ describe("端点名与派生标识符校验（P1-8：坏名字产出编译不过
     expect(content).toContain(`export const appTwoXPing = Object.freeze({`);
   });
 });
+
+/* ---------------- P2-G2：派生标识符跨端点撞名闸（第三遍架构复校 §2.6） ----------------
+ * 背景：chat.ask / chat-ask / chat_ask 派生同 ChatAsk → api.ts 重复声明编译不过（恰是端点
+ * 重名闸 die 文案要防的终态；gen-db:591-598 函数名撞名闸有同型先例）。
+ * 修法：generateApi 产产物前对 pascalOf 派生建 seen-set，撞名 ATR-313 四段式 die 列两个源名。 */
+describe("P2-G2：派生标识符跨端点撞名闸（generateApi 产产物前）", () => {
+  it("红检：chat.ask × chat-ask（派生同 ChatAsk）→ ATR-313 die 且信息列双源名；破产物不落盘", () => {
+    const root = makeRoot();
+    writeFixtureFile(
+      root,
+      "src/server/endpoints/dup.ts",
+      [
+        'import { defineCommand } from "../../vendor/atelier/server/index.ts";',
+        'export const a = defineCommand("chat.ask", { handler: async (input) => ({ ok: true }) });',
+        'export const b = defineCommand("chat-ask", { handler: async (input) => ({ ok: true }) });',
+      ].join("\n"),
+    );
+    let err: (Error & { code?: string }) | null = null;
+    try {
+      generateApi(root, { mount: "/api" });
+    } catch (e) {
+      err = e as Error & { code?: string };
+    }
+    expect(err, "修前：静默产出 ChatAsk 重复声明的破碎 api.ts").toBeTruthy();
+    expect(err!.code).toBe("ATR-313");
+    expect(err!.message).toContain("chat.ask");
+    expect(err!.message).toContain("chat-ask");
+    expect(fs.existsSync(path.join(root, "src", "generated", "api.ts"))).toBe(false); // 破产物未落盘
+  });
+});

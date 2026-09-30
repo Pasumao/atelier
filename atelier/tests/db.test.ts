@@ -207,3 +207,45 @@ describe("fts 全文搜索声明（B6，FS-DESIGN §5.1/§5.2；FTS5 external-co
     expect(dropTableSql(messages)).toBe("DROP TABLE IF EXISTS messages;");
   });
 });
+
+/* ---------------- P2-G1：SQLite 关键字闸（构造期单一真相源，第三遍架构复校 §2.6） ----------------
+ * 背景：assertIdent 只查字符集——表名 order/group/values/limit 的产物 SQL 是语法错误且
+ * migrate 时才炸；列/索引名同族。修法：assertIdent（表/列/索引名全过它）加 SQLite 官方
+ * 关键字词表闸（大小写不敏感）；gen-db 生成路径经 table() 回灌复验同受闸（单一真相源）。 */
+describe("P2-G1：SQLite 关键字闸（assertIdent 构造期单一真相源）", () => {
+  it("红检：表名 order → 构造期四段式 die（ATR-343 命名闸族）", () => {
+    let err: (Error & { code?: string; fix?: string }) | null = null;
+    try {
+      table("order", { id: { type: "integer", primaryKey: true } });
+    } catch (e) {
+      err = e as Error & { code?: string; fix?: string };
+    }
+    expect(err, "修前：字符集闸放行 order——CREATE TABLE order 语法错误 migrate 时才炸").toBeTruthy();
+    expect(err!.message).toContain("SQLite 保留字");
+    expect(err!.message).toContain("order");
+    expect(err!.fix).toBeTruthy(); // 四段式：fix 指路
+    expect(err!.code).toBe("ATR-343"); // 命名闸族码（gen-db 表名闸同族）
+  });
+
+  it("红检：列名 limit / 索引名 where → 同闸（列与索引名也过词表）", () => {
+    expect(() => table("t", { id: { type: "integer", primaryKey: true }, limit: { type: "integer" } })).toThrow(/SQLite 保留字/);
+    expect(() =>
+      table("t", { id: { type: "integer", primaryKey: true } }, { indexes: [{ name: "where", columns: ["id"] }] }),
+    ).toThrow(/SQLite 保留字/);
+  });
+
+  it("红检：大小写不敏感（Order / LIMIT 同拦——SQLite 关键字大小写不敏感）", () => {
+    expect(() => table("Order", { id: { type: "integer", primaryKey: true } })).toThrow(/SQLite 保留字/);
+    expect(() => table("t", { LIMIT: { type: "text" } })).toThrow(/SQLite 保留字/);
+  });
+
+  it("回归：正常名零回归（词表近邻但非关键字的普通名照常构造）", () => {
+    expect(() =>
+      table(
+        "orders",
+        { id: { type: "integer", primaryKey: true }, ordering: { type: "text" } },
+        { indexes: [{ name: "idx_orders_ordering", columns: ["ordering"] }] },
+      ),
+    ).not.toThrow();
+  });
+});

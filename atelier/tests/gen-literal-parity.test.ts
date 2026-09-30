@@ -18,9 +18,9 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { scanEndpointSource } from "../gen/gen-endpoint.mjs";
+import { scanEndpointSource, decodeEscapesCore } from "../gen/gen-endpoint.mjs";
 import { parseSchema } from "../gen/gen-db.mjs";
-import { scanContractSchemas } from "../gen/export-openapi.mjs";
+import { scanContractSchemas, scanOpenApiEndpointFiles } from "../gen/export-openapi.mjs";
 
 const BS = String.fromCharCode(92); // 反斜杠（避免嵌套转义写法歧义）
 
@@ -85,5 +85,67 @@ describe("R1-C：字面量转义解码跨面对拍（JSON.parse 语义——三�
   it("越界转义显式拒绝（绝不静默猜）：\\x 十六进制转义超出扁平字面量纪律", () => {
     const src = "export const x = defineQuery(\"bad" + BS + "x41name\", { handler: () => 1 });";
     expect(() => scanEndpointSource(src)).toThrow(/转义/);
+  });
+});
+
+/* ---------------- P2-G3：export-openapi resolveLocalPickSchemas 表名解码阶梯对表（第三遍架构复校 §2.6） ----------------
+ * 背景：export-openapi.mjs:386 仍用修复前旧语义 `\\(.)→$1`（\u0072 解成 "u0072"）——与
+ * 「转义解码统一 decodeEscapesCore」宣告直接矛盾（gen-endpoint.mjs:488-489 新语义）；旧解码
+ * 把 "orde\u0072" 解成 ordeu0072（合法标识符）幻影放行，defineTable 校验的是错名。
+ * 修法 = decodeEscapesCore + ok 检查（gen-endpoint 同款）；本链此前不在 parity 测试内。
+ * 观察面：auth 产物 pick 链（resolveLocalPickSchemas）→ 表名经 table() 构造期闸——
+ * 解码后是 SQLite 关键字（order）→ P2-G1 闸拒绝 → pick 投影失败（惰性，outputFlat null）。 */
+describe("P2-G3：resolveLocalPickSchemas 表名字面量解码 = decodeEscapesCore 阶梯（gen-endpoint 同源）", () => {
+  /** auth 产物形态夹具：pick(<tbl>.rowSchema) 本地投影 + 同文件 import 表定义（表名字面量带转义） */
+  function makeAuthPickRoot(tableLiteral: string): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-lit-parity-pick-"));
+    fs.mkdirSync(path.join(root, "src", "server", "auth"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "src", "server", "auth", "users.table.ts"),
+      [
+        'import { table } from "../../../vendor/atelier/server/db.ts";',
+        "export const users = table(" + tableLiteral + ", {",
+        '  id: { type: "integer", primaryKey: true },',
+        "});",
+      ].join("\n"),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(root, "src", "server", "auth", "endpoints.ts"),
+      [
+        'import { users } from "./users.table.ts";',
+        'import { defineQuery } from "../../../vendor/atelier/server/index.ts";',
+        'const meOutput = pick(users.rowSchema, ["id"]);',
+        'export const authWhoami = defineQuery("auth.whoami", { output: meOutput, handler: () => ({ id: 1 }) });',
+      ].join("\n"),
+      "utf8",
+    );
+    return root;
+  }
+
+  it("红检：表名字面量 orde\\u0072（JSON 语义解出 order = SQLite 关键字）→ table() 闸拒绝 → pick 投影不幻影放行", () => {
+    const truth = decodeEscapesCore("orde" + BS + "u0072");
+    expect(truth.ok && truth.value, "解码阶梯 = decodeEscapesCore（JSON 语义；旧解码解成 ordeu0072）").toBe("order");
+    const root = makeAuthPickRoot('"orde' + BS + 'u0072"');
+    try {
+      const eps = scanOpenApiEndpointFiles(root);
+      const ep = eps.find((e) => e.name === "auth.whoami");
+      expect(ep).toBeTruthy();
+      expect(ep!.outputFlat, "修前：旧解码 ordeu0072 绕过 table() 闸 → 幻影 resolved（outputFlat 非 null）").toBeNull();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("对照：合法转义表名 user\\u005fsessions（解出 user_sessions）→ pick 投影照常解析（防过杀）", () => {
+    const root = makeAuthPickRoot('"user' + BS + 'u005fsessions"');
+    try {
+      const eps = scanOpenApiEndpointFiles(root);
+      const ep = eps.find((e) => e.name === "auth.whoami");
+      expect(ep?.outputFlat, "解码后合法标识符——resolveLocalPickSchemas 照常出 flat").toBeTruthy();
+      expect(ep?.outputFlat?.reqProps?.id).toBeTruthy();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
