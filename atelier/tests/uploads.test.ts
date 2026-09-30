@@ -1,9 +1,11 @@
 /**
  * uploads.test.ts — B1 文件上传/资产管道（2026-09-28 差距批；决策 32：显式注册上传面——
- * `defineUpload({ name, accept?, maxBytes?, auth? })` 兄弟注册表 + `POST <mount>/upload/<name>`
- * + `GET <mount>/assets/<id>`；磁盘内容寻址 `<uploads.dir>/<yyyy-mm>/<sha256>.<ext>` +
+ * `defineUpload({ name, accept?, maxBytes?, auth?, downloadAuth? })` 兄弟注册表 + `POST <mount>/upload/<name>`
+ * + `GET <mount>/assets/<sha256hex>`；磁盘内容寻址 `<uploads.dir>/<yyyy-mm>/<sha256>.<ext>` +
  * `atelier_assets` 记账。依据 docs/research/2026-09-28-fullstack-feature-gap.md §3-B1 与
- * FS-DESIGN §3.4 落地注记。
+ * FS-DESIGN §3.4 落地注记。R1 收口批 A 支（2026-09-30，架构评审 P1#1/#2/#14，R-D2 拍板缺省）：
+ * 下载句柄改 sha256 内容寻址（整数 id 退役为内部主键）、下载闸缺省跟随上传面 fail-closed、
+ * 下载响应恒 nosniff + 危险 mime attachment。
  *
  * 断言面（红检两段已随实现转绿，红/绿两段 commit 链可溯）：
  *   ① 路由契约（红检段）：multipart 打端点面 → 400 ATR-312 **永久负例**（端点面纯 JSON 纪律
@@ -11,7 +13,8 @@
  *      405 ATR-311「改 POST」误导 / 「未知端点」文案不指认上传面——红检 commit 91fa951 实证）；
  *   ② 注册面：defineUpload/registerUpload 同构端点纪律（NAME_RE/重名/maxBytes/accept → ATR-313）
  *      + introspect 端点表零变化负例（兄弟注册表不入端点表）；
- *   ③ 上传六事实 + 内容寻址去重（同 sha 单文件单行、响应名 = 首传名）+ ext 白名单清洗；
+ *   ③ 上传五事实（R1 批起整数 id 不再对外）+ 内容寻址去重（同 sha 单文件单行、响应名 = 首传名）
+ *      + ext 白名单清洗；
  *   ④ 闸位：定义精闸（声明值快速拒 + 无 content-length 缓冲兜底，413 ATR-346）/ accept
  *      前缀与通配（415 ATR-415）/ 非 multipart 415 / 缺 boundary·截断·多文件 part 400 ATR-312；
  *   ⑤ 解析器边界：引号转义 filename / RFC 2231 filename* 优先 + 坏 charset 回落 + fallback 名 /
@@ -211,8 +214,8 @@ describe("B1 注册面：defineUpload/registerUpload 同构端点纪律（ATR-31
 
 /* ================= ③ 上传六事实 + 内容寻址去重 + ext 白名单 ================= */
 
-describeSqlite("B1 上传主径：六事实 / 磁盘 sha 命名 / 记账行 / 去重 / ext 白名单", () => {
-  it("上传 → 200 六事实（id/name/mime/size/sha256/url）+ 磁盘 <yyyy-mm>/<sha256>.<ext> + 表行齐", async () => {
+describeSqlite("B1 上传主径：五事实 / 磁盘 sha 命名 / 记账行 / 去重 / ext 白名单", () => {
+  it("上传 → 200 五事实（name/mime/size/sha256/url，url = <mount>/assets/<sha256>，整数 id 不再对外）+ 磁盘 <yyyy-mm>/<sha256>.<ext> + 表行齐", async () => {
     const { handler, dir, db } = await fixtureHandler({ name: "avatar", accept: ["image/"] });
     const data = new TextEncoder().encode("PNG-bytes-⚙");
     const body = multipartBody([{ name: "file", filename: "logo.png", contentType: "image/png", data }], "b1test");
@@ -220,7 +223,7 @@ describeSqlite("B1 上传主径：六事实 / 磁盘 sha 命名 / 记账行 / �
     expect(res.status).toBe(200);
     const out = (await res.json()) as Record<string, unknown>;
     const sha = sha256Hex(data);
-    expect(out).toEqual({ id: expect.any(Number), name: "logo.png", mime: "image/png", size: data.byteLength, sha256: sha, url: `/api/assets/${out.id}` });
+    expect(out).toEqual({ name: "logo.png", mime: "image/png", size: data.byteLength, sha256: sha, url: `/api/assets/${sha}` }); // R1 批：sha 即下载句柄（url 内容寻址）；整数 id 退役为内部主键
 
     const files = fs.readdirSync(path.join(dir, utcYm()));
     expect(files).toEqual([`${sha}.png`]); // 内容寻址命名 + ext 白名单保留
@@ -228,19 +231,20 @@ describeSqlite("B1 上传主径：六事实 / 磁盘 sha 命名 / 记账行 / �
 
     const rows = assetRows(db);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: Number(out.id), name: "logo.png", mime: "image/png", size: data.byteLength, sha256: sha, path: `${utcYm()}/${sha}.png` });
+    expect(rows[0]).toMatchObject({ name: "logo.png", mime: "image/png", size: data.byteLength, sha256: sha, path: `${utcYm()}/${sha}.png` });
+    expect(rows[0]!.id).toBeGreaterThan(0); // AUTOINCREMENT 主键仍在——只是内部化不再对外
     expect(Number.isFinite(rows[0]!.created_at)).toBe(true);
   });
 
-  it("同内容重传去重：不同上传名 → 同 id/同 url/单文件单行（响应名 = 首传名——内容寻址资产身份）", async () => {
+  it("同内容重传去重：不同上传名 → 同 sha/同 url/单文件单行（响应名 = 首传名——内容寻址资产身份）", async () => {
     const { handler, dir, db } = await fixtureHandler({ name: "avatar" });
     const data = new TextEncoder().encode("dedup-me");
     const post = (filename: string) =>
       handler(new Request("http://local.test/api/upload/avatar", { method: "POST", headers: { "content-type": "multipart/form-data; boundary=b1test" }, body: multipartBody([{ name: "file", filename, contentType: "text/plain", data }], "b1test") }));
-    const first = (await (await post("first.txt")).json()) as { id: number };
-    const second = (await (await post("second.txt")).json()) as { id: number };
-    expect(second.id).toBe(first.id);
-    expect(second.url).toBe(`/api/assets/${first.id}`);
+    const first = (await (await post("first.txt")).json()) as { sha256: string; url: string };
+    const second = (await (await post("second.txt")).json()) as { sha256: string; url: string };
+    expect(second.sha256).toBe(first.sha256);
+    expect(second.url).toBe(first.url);
     expect(second.name).toBe("first.txt"); // 名保留首传——内容寻址资产身份
     expect(assetRows(db)).toHaveLength(1); // 单行
     expect(fs.readdirSync(path.join(dir, utcYm()))).toHaveLength(1); // 单文件
@@ -407,10 +411,10 @@ describeSqlite("B1 解析器边界：引号转义 / RFC 2231 filename* / 裸 UTF
 /* ================= ⑥ 下载：流式回文件 + 头面 + 404 两态 + 重传修复 ================= */
 
 describeSqlite("B1 下载：200 流式 / 头面 / 404 未知 id / 账在盘不在 404 + 重传幂等修复", () => {
-  it("GET assets/<id> → 200 逐字节同上传 + content-type/length + Cache-Control immutable；未知 id → 404 ATR-310", async () => {
+  it("GET assets/<sha> → 200 逐字节同上传 + content-type/length + Cache-Control immutable；未知 id → 404 ATR-310", async () => {
     const { handler } = await fixtureHandler({ name: "u" });
     const data = new TextEncoder().encode("download-me-⚙");
-    const up = (await (await handler.post("upload/u", multipartBody([{ name: "file", filename: "d.bin", contentType: "application/x-demo", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { id: number; url: string };
+    const up = (await (await handler.post("upload/u", multipartBody([{ name: "file", filename: "d.bin", contentType: "application/x-demo", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { sha256: string; url: string };
     const res = await handler(new Request(`http://local.test${up.url}`, { method: "GET" }));
     expect(res.status).toBe(200);
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(data);
@@ -423,21 +427,21 @@ describeSqlite("B1 下载：200 流式 / 头面 / 404 未知 id / 账在盘不�
     expect(((await missing.json()) as { code: string }).code).toBe("ATR-310");
   });
 
-  it("账在盘不在（人工删文件）→ 下载 404 指路重传；重传幂等补写修复（同 id 单行、文件还原、再下载 200）", async () => {
+  it("账在盘不在（人工删文件）→ 下载 404 指路重传；重传幂等补写修复（同 sha 单行、文件还原、再下载 200）", async () => {
     const { handler, dir, db } = await fixtureHandler({ name: "u" });
     const data = new TextEncoder().encode("repair-me");
-    const up = (await (await handler.post("upload/u", multipartBody([{ name: "file", filename: "r.txt", contentType: "text/plain", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { id: number };
+    const up = (await (await handler.post("upload/u", multipartBody([{ name: "file", filename: "r.txt", contentType: "text/plain", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { sha256: string };
     const file = path.join(dir, utcYm(), `${sha256Hex(data)}.txt`);
     fs.unlinkSync(file);
-    const gone = await handler(new Request(`http://local.test/api/assets/${up.id}`, { method: "GET" }));
+    const gone = await handler(new Request(`http://local.test/api/assets/${up.sha256}`, { method: "GET" }));
     expect(gone.status).toBe(404);
     expect(((await gone.json()) as { message: string }).message).toContain("账在盘不在");
-    // 重传修复：同内容不同名 → 同 id、行数不变、文件还原
-    const again = (await (await handler.post("upload/u", multipartBody([{ name: "file", filename: "other-name.txt", contentType: "text/plain", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { id: number };
-    expect(again.id).toBe(up.id);
+    // 重传修复：同内容不同名 → 同 sha、行数不变、文件还原
+    const again = (await (await handler.post("upload/u", multipartBody([{ name: "file", filename: "other-name.txt", contentType: "text/plain", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { sha256: string };
+    expect(again.sha256).toBe(up.sha256);
     expect(assetRows(db)).toHaveLength(1);
     expect(new Uint8Array(fs.readFileSync(file))).toEqual(data);
-    const healed = await handler(new Request(`http://local.test/api/assets/${up.id}`, { method: "GET" }));
+    const healed = await handler(new Request(`http://local.test/api/assets/${up.sha256}`, { method: "GET" }));
     expect(healed.status).toBe(200);
   });
 });
@@ -571,7 +575,7 @@ describe("node-host serve() 真实端口：FormData 上传→下载一轮 + 桥�
     return { server, writes };
   }
 
-  it("真 multipart 编码（fetch FormData/Blob）→ 上传六事实 → GET url 逐字节同源（流式回写过真 socket）", async () => {
+  it("真 multipart 编码（fetch FormData/Blob）→ 上传五事实 → GET url 逐字节同源（流式回写过真 socket）", async () => {
     const db = await fixtureDb();
     const dir = fixtureDir();
     const reg = new EndpointRegistry();
@@ -586,8 +590,8 @@ describe("node-host serve() 真实端口：FormData 上传→下载一轮 + 桥�
       form.append("file", new Blob([data], { type: "image/png" }), "real.png");
       const up = await fetch(`http://127.0.0.1:${port}/api/upload/avatar`, { method: "POST", body: form });
       expect(up.status).toBe(200);
-      const out = (await up.json()) as { id: number; name: string; mime: string; size: number; sha256: string; url: string };
-      expect(out).toEqual({ id: expect.any(Number), name: "real.png", mime: "image/png", size: 1024, sha256: sha256Hex(data), url: `/api/assets/${out.id}` });
+      const out = (await up.json()) as { name: string; mime: string; size: number; sha256: string; url: string };
+      expect(out).toEqual({ name: "real.png", mime: "image/png", size: 1024, sha256: sha256Hex(data), url: `/api/assets/${sha256Hex(data)}` }); // R1 批：url 内容寻址
       expect(fs.existsSync(path.join(dir, utcYm(), `${out.sha256}.png`))).toBe(true);
 
       const dl = await fetch(`http://127.0.0.1:${port}${out.url}`);
@@ -747,7 +751,7 @@ describeSqlite("MCP批A 内省：server-status uploads 段两态（装配 / 未�
 
 /* ================= R1-A（2026-09-30 架构评审 P1 #1/#2/#14 红检）：资产下载面收口 ================= */
 
-describeSqlite("R1-A 红检：下载闸 fail-closed（P1#1）+ sha 内容寻址（P1#1）+ 下载响应头闸（P1#2）+ mount 边界（P1#14）", () => {
+describeSqlite("R1-A 资产下载面收口（红检段已转绿）：下载闸 fail-closed（P1#1）+ sha 内容寻址（P1#1）+ 下载响应头闸（P1#2）+ mount 边界（P1#14）", () => {
   const MP = "multipart/form-data; boundary=b1test";
 
   it("红（P1#1 下载闸）：缺省 session 上传面的资产，匿名 GET → 401 ATR-340（现状下载路由直通 handleDownload 零鉴权 200——顺序整数 id 可匿名枚举私有文件）", async () => {
@@ -837,5 +841,50 @@ describeSqlite("R1-A 红检：下载闸 fail-closed（P1#1）+ sha 内容寻址�
     expect(((await res.json()) as { code: string }).code).toBe("ATR-310");
     const ok = await handler(new Request("http://local.test/api/upload/x", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
     expect(ok.status).toBe(415); // 正控：真前缀 /api/upload/x 照常进上传面媒介闸
+  });
+
+  it("钉（闸语义·跟随缺省）：auth none 上传面 → 匿名下载 200（缺省跟随上传面——公开面资产公开）；session 面 + 有效会话 → 200（闸只拦匿名）", async () => {
+    const open = await fixtureHandler({ name: "u", auth: { type: "none" } });
+    const data = new TextEncoder().encode("open-face-bytes");
+    const up = (await (await open.post("upload/u", multipartBody([{ name: "file", filename: "o.bin", contentType: "application/octet-stream", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { url: string };
+    const anon = await open.handler(new Request(`http://local.test${up.url}`, { method: "GET" }));
+    expect(anon.status).toBe(200); // 缺省跟随上传面：none 面 = 显式公开（唯一合法的匿名下载路径——显式声明优于沉默缺省）
+
+    const db = await fixtureDb();
+    const reg = new EndpointRegistry();
+    reg.registerUpload(defineUpload({ name: "s" })); // 缺省 session
+    const auth = (req: Request) => (req.headers.get("x-token") === "good" ? { type: "session", principal: "u1" } : null);
+    const sessioned = reg.createHandler({ db, uploads: createUploadsFace({ db, dir: fixtureDir() }), mount: "/api", auth: auth as (req: Request) => never });
+    const sdata = new TextEncoder().encode("session-face-bytes");
+    const sup = (await (await sessioned(new Request("http://local.test/api/upload/s", { method: "POST", headers: { "content-type": "multipart/form-data; boundary=b1test", "x-token": "good" }, body: multipartBody([{ name: "file", filename: "s.bin", contentType: "application/octet-stream", data: sdata }], "b1test") }))).json()) as { url: string };
+    const held = await sessioned(new Request(`http://local.test${sup.url}`, { method: "GET", headers: { "x-token": "good" } }));
+    expect(held.status).toBe(200);
+  });
+
+  it("钉（闸语义·合取兜底）：多面任一要求鉴权即全池要求（none 面 + session 面共存 → 匿名下载 401）；零注册面 session 兜底 401——永无匿名缺省路径", async () => {
+    const db = await fixtureDb();
+    const dir = fixtureDir();
+    const reg = new EndpointRegistry();
+    reg.registerUpload(defineUpload({ name: "open", auth: { type: "none" } }));
+    reg.registerUpload(defineUpload({ name: "locked" })); // 缺省 session
+    const handler = reg.createHandler({ db, uploads: createUploadsFace({ db, dir }), mount: "/api" });
+    const data = new TextEncoder().encode("mixed-pool-bytes");
+    const up = (await (await handler(new Request("http://local.test/api/upload/open", { method: "POST", headers: { "content-type": "multipart/form-data; boundary=b1test" }, body: multipartBody([{ name: "file", filename: "m.bin", contentType: "application/octet-stream", data }], "b1test") }))).json()) as { url: string };
+    const anon = await handler(new Request(`http://local.test${up.url}`, { method: "GET" }));
+    expect(anon.status).toBe(401); // 共享资产池任一面要求鉴权即收紧（fail-closed——新增受保护面只会收紧不会放松）
+    const noFaces = new EndpointRegistry();
+    const bare = noFaces.createHandler({ db, uploads: createUploadsFace({ db, dir: fixtureDir() }), mount: "/api" });
+    const hex = "a".repeat(64);
+    const gated = await bare(new Request(`http://local.test/api/assets/${hex}`, { method: "GET" }));
+    expect(gated.status).toBe(401); // 零注册面 = session 兜底闸（先于查表——不存在匿名可下载的缺省路径）
+  });
+
+  it("钉（句柄归一）：大写 hex 句柄可下载（内容寻址大小写不敏感——路由形态闸收、查询前小写归一）", async () => {
+    const { handler } = await fixtureHandler({ name: "u" });
+    const data = new TextEncoder().encode("case-fold-bytes");
+    const up = (await (await handler.post("upload/u", multipartBody([{ name: "file", filename: "c.bin", contentType: "application/octet-stream", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { sha256: string };
+    const upper = await handler(new Request(`http://local.test/api/assets/${up.sha256.toUpperCase()}`, { method: "GET" }));
+    expect(upper.status).toBe(200);
+    expect(new Uint8Array(await upper.arrayBuffer())).toEqual(data);
   });
 });
