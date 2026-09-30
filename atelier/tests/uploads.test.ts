@@ -887,4 +887,23 @@ describeSqlite("R1-A 资产下载面收口（红检段已转绿）：下载闸 f
     expect(upper.status).toBe(200);
     expect(new Uint8Array(await upper.arrayBuffer())).toEqual(data);
   });
+
+  it("钉（mime 头值闸·R1 评审收口）：part content-type 含控制字符（\\0）→ 400 ATR-312 不入库（评审红检实证：修复前 200 入库成永久毒化行——每次下载 Response 头发射 TypeError 500）", async () => {
+    const { handler } = await fixtureHandler({ name: "u" });
+    const up = await handler.post("upload/u", multipartBody([{ name: "file", filename: "x.bin", contentType: "text/html\0", data: "poison" }], "b1test"), "multipart/form-data; boundary=b1test");
+    expect(up.status).toBe(400); // 评审红态：200——NUL mime 入库，资产行永久毒化
+    expect(((await up.json()) as { code: string }).code).toBe("ATR-312");
+  });
+
+  it("钉（发射侧 fail-safe·R1 评审收口）：存量毒化行下载不再 500——content-type 回落 application/octet-stream + 强制 attachment + nosniff 恒加", async () => {
+    const { handler, db } = await fixtureHandler({ name: "u" });
+    const data = new TextEncoder().encode("legacy-poisoned-row");
+    const up = (await (await handler.post("upload/u", multipartBody([{ name: "file", filename: "l.bin", contentType: "application/octet-stream", data }], "b1test"), "multipart/form-data; boundary=b1test")).json()) as { sha256: string };
+    db.prepare("UPDATE atelier_assets SET mime = ? WHERE sha256 = ?").run("text/html\0", up.sha256); // 模拟入口闸之前入库的毒化行
+    const dl = await handler(new Request(`http://local.test/api/assets/${up.sha256}`, { method: "GET" }));
+    expect(dl.status).toBe(200); // 评审红态：500（Response 头值非法 TypeError，行被永久毒化）
+    expect(dl.headers.get("content-type")).toBe("application/octet-stream");
+    expect(dl.headers.get("content-disposition")).toBe("attachment"); // 类型不可验证 = 按危险处理
+    expect(dl.headers.get("x-content-type-options")).toBe("nosniff");
+  });
 });

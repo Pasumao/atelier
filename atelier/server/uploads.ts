@@ -3,8 +3,9 @@
  * **显式注册上传面**——side-channel 明示形态，非契约 bytes 型）。否决「契约 bytes 型 / multipart
  * 直进端点分发器」：FlatSchema 无 bytes 型（超面 = ATR-102 显式 throw 既有纪律），直进要同时动
  * 契约层/校验层/OpenAPI 投影三层，爆炸半径大；显式面 = 纯加法、边界清晰，与「执行位置是部署细节
- * 不是契约细节」同哲学——**资产引用以 URL/ID 进契约，字节走显式面**（端点 handler 拿 `{ url }`
- * 存库/返回，bytes 永不进 JSON 契约域）。
+ * 不是契约细节」同哲学——**资产引用以 URL 进契约，字节走显式面**（端点 handler 拿 `{ url }`
+ * 存库/返回，bytes 永不进 JSON 契约域；1.1 起 url = `<mount>/assets/<sha256>` 内容寻址句柄，
+ * 整数 id 退役为内部主键——见下方下载面注记）。
  *
  * 形态与装配（jobs/email 同款 option 注入——endpoints.ts 对本模块仅 type-import，运行时单向依赖
  * 本模块 → endpoints.ts〔endpointError/foldProdMessage 单源〕，零环）：
@@ -517,6 +518,13 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
           return errorResponse(400, endpointError("ATR-312", `multipart 体非法：${parsed.reason}`, `标准 multipart/form-data 编码（fetch FormData 产物即合规）；v1 单文件语义——多文件请分请求上传`));
         }
         const file = parsed.file;
+        // ---- 自报 mime 头值闸（R1 评审收口件）：multipart 头值含控制字符（\x00-\x1f/\x7f）即非法
+        // 头值——入库后每次下载在 Response 头发射处抛 TypeError，该资产行被永久毒化（auth:none 池
+        // 可匿名反复触发 500）。解析侧拒绝 + 下载侧 fail-safe 回落（见 handleDownload）双面封死；
+        // 闸位在 accept 之前——accept 前缀匹配（"image/"）拦不住尾随控制字符的合法前缀 mime。
+        if (file.contentType != null && /[\x00-\x1f\x7f]/.test(file.contentType)) {
+          return errorResponse(400, endpointError("ATR-312", `multipart part content-type 含控制字符（非法头值）`, `标准 MIME 类型（如 "image/png"）；合法客户端不会产生控制字符 content-type`));
+        }
         // ---- accept 精闸（mime 前缀语义）----
         if (def.accept != null && !acceptMatches(def.accept, file.contentType)) {
           return errorResponse(
@@ -607,15 +615,19 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
       // 缺省 attachment（浏览器直接导航 = 同源脚本执行面）；其余 mime 行为不变。
       // attachment 不带 filename 参数——下载名回落 URL 末段 <sha256>.<ext>（ext 白名单清洗过，
       // 库内 name 为攻击者可空原文，进响应头有注入面——不给）。
+      // 发射侧 fail-safe（R1 评审收口件）：存量行可能携带控制字符 mime（本批入口闸之前入库的行/
+      // 直调记账面写入）——非法头值会让 Response 构造抛 TypeError，下载被永久毒化。回落
+      // application/octet-stream 并强制 attachment（类型不可验证 = 按危险处理）；nosniff 恒加不变。
+      const headerMime = /[\x00-\x1f\x7f]/.test(asset.mime) ? "application/octet-stream" : asset.mime;
       const headers: Record<string, string> = {
-        "content-type": asset.mime,
+        "content-type": headerMime,
         "content-length": String(asset.size),
         // 内容寻址不可变：同 URL 恒同字节——激进缓存安全（决策 32）
         "cache-control": "public, max-age=31536000, immutable",
         "x-content-type-options": "nosniff",
         "x-atelier-asset": asset.sha256,
       };
-      if (isDangerousInlineMime(asset.mime)) headers["content-disposition"] = "attachment";
+      if (headerMime !== asset.mime || isDangerousInlineMime(asset.mime)) headers["content-disposition"] = "attachment";
       return Promise.resolve(new Response(stream, { status: 200, headers }));
     },
 
