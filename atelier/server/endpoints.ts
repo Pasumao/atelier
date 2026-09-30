@@ -1475,7 +1475,14 @@ export class EndpointRegistry {
           const gate = gateAuth("资产面", `assets/${sha}`, decl, readAuth, apiKeys, req);
           if (!gate.ok) return gate.response;
         }
-        return uploadsFace.handleDownload({ sha: decision.sha.toLowerCase(), mount: mount || "" });
+        // 缓存档位派生（P2-S3）：与上方合取闸同一声明源——全部声明显式 none 才发 public immutable
+        //（零注册面按 session 兜底 = private）；任一面要求鉴权即 private——共享缓存（CDN/代理）不得
+        // 暂存鉴权资产的响应（对齐端点面 public×auth ATR-313 fail-closed；内容寻址 immutable 语义
+        // 保留，档位消费单源在 uploads.ts handleDownload）。
+        const cacheVisibility = (dlDecls.length > 0 ? dlDecls : [{ type: "session" } as EndpointAuthMeta]).every((d) => d.type === "none")
+          ? "public"
+          : "private";
+        return uploadsFace.handleDownload({ sha: decision.sha.toLowerCase(), mount: mount || "", cacheVisibility });
       }),
       route(
         matchEndpointRoute,
@@ -1554,13 +1561,21 @@ export class EndpointRegistry {
           } catch {
             return errorResponse(400, endpointError("ATR-312", `请求体不是合法 JSON`, "发送 application/json 体，例如 {\"id\": 1}"));
           }
-          if (def.contract != null) {
-            const v = validateFlat(def.contract, input as Record<string, unknown>, def.name);
-            if (!v.ok) return errorResponse(400, v.error!);
-          } else if (input != null && (typeof input !== "object" || Array.isArray(input))) {
-            return errorResponse(400, endpointError("ATR-312", `端点 ${name} 无契约，输入必须缺省或为 JSON 对象`, "发送空对象 {} 或为该端点补 contract（推荐：契约单源纪律）"));
+          // ---- P2-S1（2026-09-30 第三遍架构复校）：输入形状闸提升到 contract 分支之前 ----
+          // 旧口径：形状闸只在无契约分支（else if），契约分支把 JSON 标量/null 体直接传进
+          // validateFlat → contract.ts `k in data` 对原始值抛 TypeError（调用点在解析 try 块之外）
+          // → 分发 promise 拒绝 = 线上 500，未鉴权即可远程触发。两分支口径归一：无论有无契约，
+          // 输入体必须缺省或为 JSON 对象，标量/数组一律 400 ATR-312（null 保持放行 = 缺省体语义，
+          // 经下方 payload ?? {} 归一后契约端点走 ATR-201 缺必填、无契约端点 handler 拿 {}——
+          // 既有语义零变化；闸位仍在鉴权闸与体上限之后，闸序零变化）。
+          if (input != null && (typeof input !== "object" || Array.isArray(input))) {
+            return errorResponse(400, endpointError("ATR-312", `端点 ${name} 输入必须缺省或为 JSON 对象`, "发送 JSON 对象体（契约端点经契约校验后进 handler；无契约端点发空对象 {} 或为该端点补 contract——契约单源纪律）"));
           }
           const payload = (input ?? {}) as Record<string, unknown>;
+          if (def.contract != null) {
+            const v = validateFlat(def.contract, payload, def.name);
+            if (!v.ok) return errorResponse(400, v.error!);
+          }
           // ---- 输入就绪：ctx 装配/handler/输出面/journal/响应构造走 dispatchEndpoint 共享 tail ----
           // （A7 决策 34 提取为闭包——POST 与 restful GET 两通道同一构造，cache 联动自动一致）
           return dispatchEndpoint(def, payload, authRequired, gatedAuth, req);

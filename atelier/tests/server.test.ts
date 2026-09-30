@@ -158,17 +158,24 @@ describe("atelier-server 端点运行时（决策 18/20，FS-1）", () => {
   // → 分发 promise 拒绝 = 线上 500，未鉴权即可远程触发；同文件无契约分支反而有 ATR-312
   // 形状闸——两分支口径分叉。目标：形状闸提升到 contract 分支之前，标量/null 体一律
   // 400 ATR-312（鉴权前后同口径）。红态：分发 promise 直接 reject（TypeError 逃逸）。----
-  it("红（P2-S1）：契约端点接受 JSON 标量/null 体 → 400 ATR-312（红态：validateFlat `k in data` 抛 TypeError——分发 promise 拒绝 = 线上 500，未鉴权可远程触发）", async () => {
+  it("红（P2-S1）：契约端点接受 JSON 标量/null 体 → 400 族（红态：validateFlat `k in data` 抛 TypeError——分发 promise 拒绝 = 线上 500，未鉴权可远程触发）", async () => {
     const reg = new EndpointRegistry();
     reg.register(defineQuery("echo.strict", { contract: echoContract, handler: (input) => input }));
     const handler = reg.createHandler();
-    for (const scalar of [7, -1.5, "plain", true, false, null]) {
+    for (const scalar of [7, -1.5, "plain", true, false]) {
       const res = await handler(
         new Request("http://local.test/echo.strict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(scalar) })
       );
       expect(res.status, `标量体 ${JSON.stringify(scalar)} 应 400 族（红态：TypeError 逃逸）`).toBe(400);
       expect(((await res.json()) as { code: string }).code).toBe("ATR-312");
     }
+    // null = 缺省体语义（形状闸刻意放行，payload ?? {} 归一）→ 契约端点按缺必填 400 ATR-201
+    //（红态：`k in null` TypeError 逃逸 = 500）
+    const nullRes = await handler(
+      new Request("http://local.test/echo.strict", { method: "POST", headers: { "content-type": "application/json" }, body: "null" })
+    );
+    expect(nullRes.status).toBe(400);
+    expect(((await nullRes.json()) as { code: string }).code).toBe("ATR-201");
   });
 
   it("红（P2-S1）：鉴权端点同口径——apikey 闸通过后标量体仍 400 ATR-312（鉴权前后都能安全拒绝；无 key 时 401 先于形状闸不变）", async () => {

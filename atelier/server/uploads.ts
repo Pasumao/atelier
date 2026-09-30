@@ -27,6 +27,10 @@
  * - **下载响应头闸**（本模块单源）：恒 `X-Content-Type-Options: nosniff`（mime 为上传方自报不可信，
  *   嗅探面封死）；危险 mime（text/html / application/xhtml+xml / image/svg+xml 族——浏览器直接导航
  *   即同源执行面）缺省 `Content-Disposition: attachment`；其余 mime 行为不变（P1#2 存储型 XSS 收口）。
+ * - **下载缓存档位**（P2-S3，2026-09-30 复校收口）：Cache-Control 的 public/private 由分发器按
+ *   下载面合取鉴权声明派生（全部声明显式 none 才 public immutable，否则 private immutable——
+ *   共享缓存不得暂存鉴权资产响应，对齐端点面 public×auth ATR-313 fail-closed；max-age/immutable
+ *   内容寻址语义保留）；本模块只消费派生结果，不做鉴权判定（闸在 endpoints.ts gateAuth 单源）。
  *
  * 磁盘布局 = `<dir>/<yyyy-mm>/<sha256>.<ext>`（**内容寻址 = 天然去重**）：sha256 流式无关——本批
  * 请求体经桥缓冲后解析（诚实边界：不流式入盘，桥内存上界见闸位），hash 对缓冲一次算得。同 sha
@@ -162,8 +166,11 @@ export type CreateUploadsFaceOptions = {
 export type UploadsFace = {
   /** POST <mount>/upload/<name>：解析 multipart 单文件 → accept/maxBytes 精闸 → 内容寻址落盘 → 记账 → 五事实 */
   handleUpload(args: { req: Request; def: UploadDef; mount: string }): Promise<Response>;
-  /** GET <mount>/assets/<sha256hex>：按 sha 查账 → 流式回文件（mime/Cache-Control immutable/nosniff，危险 mime attachment） */
-  handleDownload(args: { sha: string; mount: string }): Promise<Response>;
+  /** GET <mount>/assets/<sha256hex>：按 sha 查账 → 流式回文件（mime/Cache-Control immutable/nosniff，危险 mime attachment）。
+   *  cacheVisibility = 缓存档位（P2-S3）：分发器按下载面合取鉴权声明派生（全部声明显式 none =
+   *  "public"，否则 "private"）——鉴权资产的响应不入共享缓存（对齐端点面 public×auth ATR-313
+   *  fail-closed）；缺省 "private"（fail-closed——直调方只见字节不见声明，收紧不放松）。 */
+  handleDownload(args: { sha: string; mount: string; cacheVisibility?: "public" | "private" }): Promise<Response>;
   /** 内省窄口（MCP 批 A）：资产台账聚合 + 尾部投影（introspect.ts server-status uploads 段数据源——命名对齐 jobs.stats() 先例；纯读不建表，SQL 单源在本文件） */
   stats(): UploadsStats;
 };
@@ -584,7 +591,7 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
       }
     },
 
-    handleDownload({ sha, mount }): Promise<Response> {
+    handleDownload({ sha, mount, cacheVisibility }): Promise<Response> {
       void mount; // v1 下载响应不依赖 mount（url 已在记账/上传响应侧给出）——参数留位
       try {
         ensureTable();
@@ -622,8 +629,11 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
       const headers: Record<string, string> = {
         "content-type": headerMime,
         "content-length": String(asset.size),
-        // 内容寻址不可变：同 URL 恒同字节——激进缓存安全（决策 32）
-        "cache-control": "public, max-age=31536000, immutable",
+        // 内容寻址不可变：同 URL 恒同字节——max-age/immutable 激进缓存语义保留（决策 32）。
+        // 档位（P2-S3）：visibility 由分发器按下载面合取鉴权声明派生（endpoints.ts 资产路由）——
+        // 全部声明显式 none 才 public；任一面要求鉴权即 private（共享缓存旁路授权面封死，对齐
+        // 端点面 public×auth ATR-313 fail-closed）。缺省 private（fail-closed）。
+        "cache-control": `${cacheVisibility ?? "private"}, max-age=31536000, immutable`,
         "x-content-type-options": "nosniff",
         "x-atelier-asset": asset.sha256,
       };
