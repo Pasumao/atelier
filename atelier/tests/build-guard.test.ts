@@ -67,6 +67,15 @@ describe("P1-4：build --out 根目录关系守卫（--emptyOutDir 不得清应�
     expect(r.stderr).toContain("fix:");
   });
 
+  it("回归：--out ..foo（root 内字面名 ..foo 目录，非越界）→ 守卫放行——「..」判据须整段匹配，不得前缀误伤", () => {
+    const root = tmpRoot();
+    const r = runBuild(root, "..foo");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("不是 Atelier 应用"); // 守卫放行 → premise 检查接管（与 --out dist 同态）
+    expect(r.stderr).not.toContain("越出应用目录");
+    expect(r.stderr).not.toContain("覆盖应用要件");
+  });
+
   it("回归：--out dist（合法产物目录）不受守卫干扰——走到既有 premise 检查（缺 package.json 指路 init）", () => {
     const root = tmpRoot();
     const r = runBuild(root, "dist");

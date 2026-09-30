@@ -83,12 +83,15 @@ if (target !== "node" && target !== "bun") {
  * outDir 本就必须是 root 内 src 的兄弟目录——严在内不是过严而是语义要求。 */
 function outDirGuardError(rootDir, out) {
   const rel = path.relative(rootDir, out);
-  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+  // 「..」判据须整段匹配（rel===".." 或 "../" 前缀）——前缀 startsWith("..") 会把 root 内
+  // 字面名 ..foo 的目录误判成越界（评审 nit：同病双位，含下面 guarded 面的 vrel）。
+  const escapes = (v) => v === ".." || v.startsWith(".." + path.sep);
+  if (rel === "" || escapes(rel) || path.isAbsolute(rel)) {
     return `error: --out 越出应用目录：${out}（root=${rootDir}）——outDir 必须严格位于 root 内且 ≠ root；vite 以 --emptyOutDir 清空 outDir，outDir 越界时被清的是应用源码本体\nfix: --out 用应用内目录（缺省 dist）——产物壳以 ../src 相对引用 vendor（单容器整目录部署语义），产物本就必须与 src/ 同居一个 root`;
   }
   for (const guarded of ["package.json", "src"]) {
     const vrel = path.relative(path.join(rootDir, guarded), out);
-    if (vrel === "" || (!vrel.startsWith("..") && !path.isAbsolute(vrel))) {
+    if (vrel === "" || (!escapes(vrel) && !path.isAbsolute(vrel))) {
       return `error: --out 覆盖应用要件：${out} 含或等于应用 ${guarded}——--emptyOutDir 先清空 outDir 再写产物，要件会被一并清掉\nfix: --out 用应用内独立目录（缺省 dist）——不要指向 src/、package.json 或其任何上层目录`;
     }
   }

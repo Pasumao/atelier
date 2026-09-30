@@ -234,6 +234,10 @@ describe("P2-G1：SQLite 关键字闸（assertIdent 构造期单一真相源）"
     ).toThrow(/SQLite 保留字/);
   });
 
+  it("红检：表名 intersect → 同闸（官方 147 词收口补遗——评审 node:sqlite 实证裸用即语法错）", () => {
+    expect(() => table("intersect", { id: { type: "integer", primaryKey: true } })).toThrow(/SQLite 保留字/);
+  });
+
   it("红检：大小写不敏感（Order / LIMIT 同拦——SQLite 关键字大小写不敏感）", () => {
     expect(() => table("Order", { id: { type: "integer", primaryKey: true } })).toThrow(/SQLite 保留字/);
     expect(() => table("t", { LIMIT: { type: "text" } })).toThrow(/SQLite 保留字/);

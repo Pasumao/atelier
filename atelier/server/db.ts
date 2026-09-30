@@ -72,7 +72,7 @@ const SQLITE_KEYWORDS: ReadonlySet<string> = new Set([
   "desc", "detach", "distinct", "do", "drop", "each", "else", "end", "escape", "except", "exclude",
   "exclusive", "exists", "explain", "fail", "filter", "first", "following", "for", "foreign", "from",
   "full", "generated", "glob", "group", "groups", "having", "if", "ignore", "immediate", "in", "index",
-  "indexed", "initially", "inner", "insert", "instead", "into", "is", "isnull", "join", "key", "last",
+  "indexed", "initially", "inner", "insert", "instead", "intersect", "into", "is", "isnull", "join", "key", "last",
   "left", "like", "limit", "match", "materialized", "natural", "no", "not", "nothing", "notnull",
   "null", "nulls", "of", "offset", "on", "or", "order", "others", "outer", "over", "partition",
   "plan", "pragma", "preceding", "primary", "query", "raise", "range", "recursive", "references",
