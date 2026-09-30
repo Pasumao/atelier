@@ -88,7 +88,8 @@ describe("R3-B 件①：插件路由表（__atelierRouteTable 直测面）+ 分�
   let token = "";
   let plugin: any = null;
 
-  /** 23 条路由（= 原 if-chain 源顺序；exact-match 互斥，顺序仅为可读性保序） */
+  /** 22 条路由（= 原 if-chain 源顺序；exact-match 互斥，顺序仅为可读性保序）。
+   *  P-D#4 起 stream-intro 营销演示路由下线（2026-09-30 评审：内容与实现脱节且未入队追踪），表随之 -1。 */
   const EXPECTED_PATHS = [
     "/__atelier/mcp",
     "/__atelier/agent-health",
@@ -101,7 +102,6 @@ describe("R3-B 件①：插件路由表（__atelierRouteTable 直测面）+ 分�
     "/__atelier/state-snapshot",
     "/__atelier/audit",
     "/__atelier/docs",
-    "/__atelier/stream-intro",
     "/__atelier/screenshot",
     "/__atelier/a11y",
     "/__atelier/feedback",
@@ -166,7 +166,7 @@ describe("R3-B 件①：插件路由表（__atelierRouteTable 直测面）+ 分�
   handlers = captured as typeof handlers;
   token = fs.readFileSync(path.join(TMP, ".atelier", "dev-token"), "utf8").trim();
 
-  it("路由表直测面：23 条、路径唯一、全带 /__atelier/ 前缀、与原 if-chain 清单一一对应", () => {
+  it("路由表直测面：22 条、路径唯一、全带 /__atelier/ 前缀、与原 if-chain 清单一一对应", () => {
     const table = plugin.__atelierRouteTable;
     expect(Array.isArray(table), "__atelierRouteTable 应为路由表数组（直测面）").toBe(true);
     expect(table).toHaveLength(EXPECTED_PATHS.length);

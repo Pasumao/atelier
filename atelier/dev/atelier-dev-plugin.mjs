@@ -598,27 +598,6 @@ export function atelierDevPlugin() {
           res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.end(fs.readFileSync(`${ROOT}/src/llms.txt`, "utf-8"));
         }),
-        devRoute("/__atelier/stream-intro", async (req, res) => {
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          res.setHeader("Cache-Control", "no-store");
-          const intro =
-            "2026 年 8 月，DeepSeek-V4 正式接棒：deepseek-chat 与 deepseek-reasoner 统一升级至 V4 架构，" +
-            "1M 超长上下文与 MoE 架构带来旗舰级推理表现；7 月 31 日发布的轻量旗舰 V4-Flash 把输出价格打到每百万 token 约 $0.28。" +
-            "V3.2 开源的 DSA 稀疏注意力继续延用，权重保持开放下载，并适配华为昇腾生态。" +
-            "本页面本身，就是 Atelier —— 一个 AI 原生前端框架的现场演示。";
-          const chunked = Array.from(intro);
-          let i = 0;
-          const timer = setInterval(() => {
-            if (i >= chunked.length) {
-              clearInterval(timer);
-              res.end();
-              return;
-            }
-            res.write(chunked[i]);
-            i += 1;
-          }, 24);
-          req.on("close", () => clearInterval(timer));
-        }),
         devRoute("/__atelier/screenshot", async (req, res, rawUrl) => {
           // snapshot=1 → 页面进入确定性渲染（动画冻结、流式文本一次性落定），见 index.html
           // compare=1 → P1-8 像素级对比：与 .atr/snapshots/baseline.png 同实例 canvas evaluate

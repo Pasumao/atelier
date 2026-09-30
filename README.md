@@ -5,7 +5,7 @@
 >
 > 系统是什么 → `atelier/docs/ARCHITECTURE.md`；代理怎么用 → `atelier/docs/SPEC-Agentic-DX-v0.2.md`；完整文档地图见文末。
 
-![version](https://img.shields.io/badge/version-1.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)
+![version](https://img.shields.io/badge/version-1.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522.12-brightgreen)
 
 **v1.0.0**（2026-09-27，首个正式版本）· 变更史见 [CHANGELOG.md](CHANGELOG.md)（Keep a Changelog + 语义化版本，兼容性执行器 = `atelier api-diff`，见决策 28）。1.0 = release-ready：npm publish 等发布日外部动作见 [`atelier/docs/RELEASE-CHECKLIST.md`](atelier/docs/RELEASE-CHECKLIST.md)。
 **v1.1.0**（2026-09-29）· 1.1 = 全站化 server 面从骨架到生产可用——队列/幂等/备份/健康/持久审计/双通道鉴权/email/上传/分页/FTS5/cache/REST 读端点，外加 12 项 P1 安全加固与 MCP 工具族 36→40（变更史见 [CHANGELOG.md](CHANGELOG.md)）。
@@ -55,7 +55,7 @@ S0 服务层      atelier/server —— defineQuery/defineCommand 读写二分 �
 
 ## 获取与运行
 
-> 框架版本 1.1.0（release-ready）；**尚未发布 npm**（发布日外部动作，见 RELEASE-CHECKLIST），目前需 clone 仓库使用。前置要求：Node.js ≥ 22（实测 Node 24）与 pnpm。
+> 框架版本 1.1.0（release-ready）；**尚未发布 npm**（发布日外部动作，见 RELEASE-CHECKLIST），目前需 clone 仓库使用。前置要求：Node.js ≥ 22.12（vite 7 engines 地板；实测 Node 24）与 pnpm。
 
 ```bash
 git clone https://github.com/Pasumao/atelier.git
@@ -120,7 +120,7 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 - **未发布 npm**：框架 1.0.0 = release-ready，安装仍需 clone 仓库（`atelier init` 产物自包含、不依赖框架仓库驻留）。影响：没有 `npm create atelier` 一键脚手架。出路：按上文 clone + init 三步；`create-atelier` 脚手架列发布日动作（RELEASE-CHECKLIST）。
 - **平台覆盖以 Windows 实证为主**：常规测试门禁与视觉快照基线在 win32 实武装；linux/darwin 的快照基线未武装（快照门在这些平台如实 vacuous，不假红）。影响：非 Windows 用户的视觉回归门禁需先在本地 `atelier snapshot save` 捕获基线。出路：per-platform 布局已就绪，各平台本地武装即启用。
 - **Bun 路径实测过但无 CI 常规覆盖**：SQLite 薄宿主适配经真实 Bun 1.4.2 全语义面冒烟 + 全栈落库/持久化验证；但冒烟脚本需 bun 宿主手动跑（`scripts/bun-adapter-smoke.mjs`），未进常规测试门禁。影响：bun 回归依赖手动冒烟，报错文案匹配归一可能随 bun 升级失效（失效=差异重新可见，非静默）。出路：`atelier build --target=bun` 产物冒烟自证兜底。
-- **真实 CI 未首跑**：CI 矩阵已接线（linux/windows × node 22/24），但仓库未 push 远端，视觉冒烟作业保留 continue-on-error。影响：CI 门禁承诺（测试/结构/API 面）尚未在第三方环境兑现。出路：push 远端 + 首跑后摘除 continue-on-error（RELEASE-CHECKLIST 发布日动作）。
+- **R 批门禁未在远端验证**：CI 矩阵已接线（linux/windows × node 22/24），且远端 CI 真实跑过多轮（末轮 success，2026-09-06）；但此后远端 main 滞后本地 310 commits（2026-09-30 实测，末次 push 2026-09-06）——R 批与 1.1.0 的当前门禁（测试/结构/API 面）从未在远端跑过，视觉冒烟作业保留 continue-on-error。影响：最新代码的门禁承诺尚未经第三方环境兑现。出路：push 远端首跑当前门禁后再摘 continue-on-error（RELEASE-CHECKLIST 发布日动作）。
 - **Windows 进程收尾语义**：`atelier dev` 托管的 server 子进程在 Windows 上 kill = 即终止，优雅关停兜底窗口形同保障。影响：热重启瞬间可能有极小概率的端口/句柄残留。出路：监督器 SIGTERM 1.5s 兜底 + 未就绪 503 自愈，重启即恢复。
 - **command journal 保留窗口为行数基**：命令审计 journal 持久化为追加事件表（db 已装配即写、重启不灭；缺省保留 1 万行、写时裁最老，`createHandler({ journal: { persist: false } })` 可显式关闭回内存环形）；live 重算失败诊断条目仍只在内存。影响：超出保留窗口的最老事件滚出即不可查（时间基窗口 v1 不做）；删除库文件即丢失全部审计史（同迁移 journal 口径）。出路：窗口经 `journal.maxRows` 调大；关键节点以 checkpoint 台账为锚；库文件进常规备份（`atelier db backup`）。
 - **server 面 prod 激活为行为级**：服务面无打包器，prod 语义靠旗关断（调试面隐身/校验跳过），代码仍在产物内；构建期 DCE 只覆盖浏览器面。影响：server 产物体积不是最小。出路：单容器整目录部署语义（`atelier build`），体积优化非 1.0 目标。
