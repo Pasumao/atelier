@@ -7,7 +7,9 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { confirmGate, readAgentConfig } from "../mcp/confirm.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import { confirmGate, readAgentConfig, approvalSecret } from "../mcp/confirm.mjs";
 const confirmMjs = (await import("../mcp/confirm.mjs")) as any;
 const { approvalVerdict, createRequestState, verifyRequestState, isAskGated } = confirmMjs;
 
@@ -41,8 +43,16 @@ describe("confirmGate (decision 15 — auto/ask/deny tiers)", () => {
     }
   });
 
-  it("未知档位值按缺省 auto 处理（不误伤），但可被 deny 之外值放行", () => {
-    expect(confirmGate({ confirm: "yolo" }, "checkpoint.rollback")).toBeNull();
+  it("未知档位 fail-closed（R3 收口，评审 §4.2）：受闸工具不再静默放行——ATR-402 + fix 指路合法档位（红态：返回 null 放行）", () => {
+    for (const tier of ["yolo", "ask ", "Ask", "AUTO"]) {
+      const d = confirmGate({ confirm: tier }, "checkpoint.rollback");
+      expect(d, `tier=${JSON.stringify(tier)}`).not.toBeNull(); // 红态：null——拼错档位静默放行破坏性工具
+      expect(d!.code).toBe("ATR-402");
+      expect(d!.fix).toContain("auto");
+      expect(d!.fix).toContain("deny");
+    }
+    // 非受闸工具不受影响（闸只辖破坏性/操作族）
+    expect(confirmGate({ confirm: "yolo" }, "state.snapshot")).toBeNull();
   });
 });
 
@@ -118,16 +128,55 @@ describe("approvalVerdict（ask 档多轮审批的单一判定点）", () => {
     expect(v.expiresAt).toBeGreaterThan(0);
   });
 
-  it("ask + approve 有效句柄 → execute；deny 决定 → refused(ATR-402)；坏句柄 → refused(ATR-401)", () => {
+  it("ask + approve 有效句柄 → execute；同句柄重放 → refused ATR-401（R3 nonce 一次性台账——红态：重放再次 execute）；deny 决定 → refused(ATR-402)；坏句柄 → refused(ATR-401)", () => {
     const now = 2_000_000;
     const token = createRequestState({ tool: GATED, args: { id: "cp-1" }, secret: SECRET, now });
     const execute = approvalVerdict({ confirm: "ask" }, GATED, { id: "cp-1", _approval: { requestState: token, decision: "approve" } }, { secret: SECRET, now });
     expect(execute.kind).toBe("execute");
-    const refused = approvalVerdict({ confirm: "ask" }, GATED, { id: "cp-1", _approval: { requestState: token, decision: "deny" } }, { secret: SECRET, now });
+    const replay = approvalVerdict({ confirm: "ask" }, GATED, { id: "cp-1", _approval: { requestState: token, decision: "approve" } }, { secret: SECRET, now });
+    expect(replay.kind).toBe("refused"); // 红态：execute——TTL 内同一 approve 句柄可无限重放（一次审批→N 次回滚）
+    expect(replay.code).toBe("ATR-401");
+    expect(replay.message).toContain("一次性");
+    const denyToken = createRequestState({ tool: GATED, args: { id: "cp-1" }, secret: SECRET, now });
+    const refused = approvalVerdict({ confirm: "ask" }, GATED, { id: "cp-1", _approval: { requestState: denyToken, decision: "deny" } }, { secret: SECRET, now });
     expect(refused.kind).toBe("refused");
     expect(refused.code).toBe("ATR-402");
     const bad = approvalVerdict({ confirm: "ask" }, GATED, { id: "cp-1", _approval: { requestState: "v1.xx.yy", decision: "approve" } }, { secret: SECRET, now });
     expect(bad.kind).toBe("refused");
     expect(bad.code).toBe("ATR-401");
+  });
+
+  it("未知档位 fail-closed（R3 收口，评审 §4.2）：受闸工具 refused ATR-402 且 fix 指路合法档位；非受闸工具不受扰（红态：放行/默认 auto 语义）", () => {
+    for (const tier of ["ask ", "Ask", "yolo"]) {
+      const v = approvalVerdict({ confirm: tier }, GATED, { id: "cp-1" }, { secret: SECRET });
+      expect(v.kind, `tier=${JSON.stringify(tier)}`).toBe("refused"); // 红态："allow"——"ask " 尾空格静默放行破坏性工具
+      expect(v.code).toBe("ATR-402");
+      expect(v.fix).toContain("ask");
+    }
+    expect(approvalVerdict({ confirm: "yolo" }, "state.snapshot", {}, { secret: SECRET })).toMatchObject({ kind: "allow" });
+  });
+});
+
+describe("approvalSecret（R3 收口：审批密钥与 dev-token 分离——评审 §4.2：能读 dev-token 的客户端可自行伪造 requestState 自批）", () => {
+  it("首用生成 .atelier/approval-secret（独立于 dev-token），读取稳定；句柄跨实例可续（同一文件密钥）", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "atelier-approval-secret-"));
+    try {
+      fs.mkdirSync(path.join(root, ".atelier"), { recursive: true });
+      fs.writeFileSync(path.join(root, ".atelier", "dev-token"), "readable-dev-token-value", "utf8");
+      const first = approvalSecret(root);
+      expect(first).toBeTruthy();
+      expect(first).not.toBe("readable-dev-token-value"); // 红态：返回 dev-token 原值——持 token 方可自批
+      expect(first.length).toBeGreaterThanOrEqual(64); // 32 字节 hex——非平凡弱值
+      const onDisk = fs.readFileSync(path.join(root, ".atelier", "approval-secret"), "utf8").trim();
+      expect(onDisk).toBe(first); // 落盘即真相——跨进程/跨通道同钥
+      expect(approvalSecret(root)).toBe(first); // 二次读取稳定
+      // 旧 dev-token 密钥签的句柄不再通过（密钥分离的语义代价，dev 时点工具可接受）
+      const legacy = createRequestState({ tool: "checkpoint.rollback", args: { id: "x" }, secret: "readable-dev-token-value" });
+      const fresh = createRequestState({ tool: "checkpoint.rollback", args: { id: "x" }, secret: first });
+      expect(verifyRequestState({ requestState: fresh, tool: "checkpoint.rollback", args: { id: "x" }, secret: first }).ok).toBe(true);
+      expect(verifyRequestState({ requestState: legacy, tool: "checkpoint.rollback", args: { id: "x" }, secret: first }).ok).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -485,3 +485,17 @@ describe("FS-M6 接线：dev 面 /__atelier/mcp（token 门后最小桥接）", 
     }
   });
 });
+
+/* ---------- R3 收口（评审 §4.6）：TASK_ELIGIBLE 扩充——长 spawn 型工具 HTTP 通道 Tasks 化 ---------- */
+describe("TASK_ELIGIBLE 清单（R3 收口）", () => {
+  it("长 spawn 型工具入清单：checkpoint.source_* / graph.static / diff.report 与既有两件（红态：仅 structure.check/test.run）", async () => {
+    const { TASK_ELIGIBLE } = await import("../mcp/http.mjs");
+    for (const tool of ["structure.check", "test.run", "checkpoint.source_list", "checkpoint.source_commit", "graph.static", "diff.report"]) {
+      expect(TASK_ELIGIBLE.has(tool), tool).toBe(true); // 红态：后四件不在——HTTP 直连下内联阻塞 Vite 事件循环
+    }
+    // 受闸工具不入（confirm 闸先行）；普通快工具不入（内联执行语义保留）
+    expect(TASK_ELIGIBLE.has("checkpoint.source_rollback")).toBe(false);
+    expect(TASK_ELIGIBLE.has("endpoint.call")).toBe(false);
+    expect(TASK_ELIGIBLE.has("state.snapshot")).toBe(false);
+  });
+});
