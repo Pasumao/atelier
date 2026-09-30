@@ -257,6 +257,43 @@ export const logs = table("t_1", {
     const crud = read(root, "src/generated/db/crud.ts");
     expect(crud).toContain("export function t1GetByPk(");
   });
+
+  it("红检 R1-C：表名撞保留字（delete）→ ATR-343 die 而非产出破 SQL 产物（表名以裸标识符进 SQLite DDL/CRUD——CREATE TABLE delete = 语法错误）", () => {
+    const root = makeFixtureRoot(`import { table } from "../../vendor/atelier/server/db.ts";
+export const logs = table("delete", {
+  id: { type: "integer", primaryKey: true },
+  note: { type: "text" },
+});
+`);
+    let err: GenDbError | null = null;
+    try {
+      genDb(root);
+    } catch (e) {
+      err = e as GenDbError;
+    }
+    expect(err, "保留字表名必须生成器侧 die（生成的迁移 DDL 与 CRUD SQL 会以裸标识符进 SQLite——实证 CREATE TABLE delete 为语法错误）").toBeTruthy();
+    expect(err!.code).toBe("ATR-343");
+    expect(err!.message).toContain("delete");
+    expect(err!.fix, "die 必须带 fix 指引（四段式）").toBeTruthy();
+    expect(fs.existsSync(path.join(root, "src", "generated", "db", "tables.ts"))).toBe(false); // 破产物未落盘
+    expect(fs.existsSync(path.join(root, "src", "server", "db", "migrations", "001_delete.up.sql"))).toBe(false);
+  });
+
+  it("红检 R1-C 回归面：大写保留字（Delete）经 toCamel 同样闸下（SQLite 关键字大小写不敏感）；非保留字表名零影响", () => {
+    const root = makeFixtureRoot(`import { table } from "../../vendor/atelier/server/db.ts";
+export const logs = table("Delete", {
+  id: { type: "integer", primaryKey: true },
+});
+`);
+    let err: GenDbError | null = null;
+    try {
+      genDb(root);
+    } catch (e) {
+      err = e as GenDbError;
+    }
+    expect(err?.code).toBe("ATR-343");
+    expect(err!.fix).toBeTruthy();
+  });
 });
 
 /* ---------- B6：fts 全文搜索（FS-DESIGN §5.1/§5.2；FTS5 external-content 虚表 + 触发器同步 + CRUD 投影） ---------- */
