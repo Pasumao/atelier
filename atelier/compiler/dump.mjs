@@ -27,6 +27,10 @@
  *     --out     output dir (default: <root>/.atr/ast)
  *     --stdout  print the aggregate dump as JSON instead of writing files (machine pipe)
  *
+ * Output is byte-idempotent (R1-C): no timestamp, no absolute root — re-running the dump on an
+ * unchanged app reproduces byte-identical artifacts (safe to commit; codegen consumes only the
+ * per-component JSONs and uses index.json as an existence sentinel).
+ *
  * Zero npm dependencies. Requires Node ≥ 22.18 (unflagged TS type stripping) because the
  * runtime kernel is TypeScript and this script imports it directly.
  */
@@ -187,19 +191,19 @@ function main() {
     }
   }
 
-  const generatedAt = new Date().toISOString();
+  // R1-C：产物不含 generatedAt/root——regen 字节幂等（此前时间戳 + 绝对 root 已入 git 实证：
+  // 每次 regen 必漂移、跨机器不可复现）。codegen --ast 仅以 index.json 为存在哨兵，逐组件
+  // JSON 才是消费面（component/templates/schema）——root 字段无消费者，省略而非相对化。
   if (STDOUT) {
-    console.log(JSON.stringify({ $schema: SCHEMA, generatedAt, root: ROOT, components: [...components.entries()].map(([name, v]) => ({ name, file: v.file, templates: v.templates, ...(schemas.has(name) ? { schema: schemas.get(name) } : {}) })) }, null, 2));
+    console.log(JSON.stringify({ $schema: SCHEMA, components: [...components.entries()].map(([name, v]) => ({ name, file: v.file, templates: v.templates, ...(schemas.has(name) ? { schema: schemas.get(name) } : {}) })) }, null, 2));
   } else {
     fs.mkdirSync(OUT, { recursive: true });
     for (const [name, v] of components) {
-      const payload = { $schema: SCHEMA, generatedAt, component: name, file: v.file, templates: v.templates, ...(schemas.has(name) ? { schema: schemas.get(name) } : {}) };
+      const payload = { $schema: SCHEMA, component: name, file: v.file, templates: v.templates, ...(schemas.has(name) ? { schema: schemas.get(name) } : {}) };
       fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify(payload, null, 2) + "\n");
     }
     const index = {
       $schema: SCHEMA,
-      generatedAt,
-      root: ROOT.replaceAll("\\", "/"),
       components: [...components.entries()].map(([name, { file, templates }]) => ({ name, file, templateCount: templates.length, out: `${name}.json` })),
     };
     fs.writeFileSync(path.join(OUT, "index.json"), JSON.stringify(index, null, 2) + "\n");

@@ -14,7 +14,12 @@
  *                          不投影即丢约束、错投影即偏离单源，取语义正确项并在此留档）
  *   array 的 items      → items（一层；元素只投影 type——validateFlat 对元素只做类型检查，
  *                          元素约束属扁平之外 → ATR-107）
- *   enum                → enum（validateFlat 对任意叶子类型做 includes 检查，原样投影；仅许字符串）
+ *   enum                → enum（validateFlat 对任意叶子类型做 includes 检查，原样投影。R1-C §4.7
+ *                          放行数值枚举：取值同质（全字符串或全数字——db.ts table() 同一口径）
+ *                          且与叶子 type 一致（type 按成员推导并显式核对，矛盾 = 契约自相矛盾
+ *                          → ATR-107）。此前「仅许字符串」与 db.ts rowSchema 的数值枚举透传
+ *                          直接分叉：同一契约经 api.ts（渲染 1|2|3）与 export openapi（硬错）
+ *                          得出两套真相）
  *   显式不投影 additionalProperties:false——validateFlat 忽略未知键（宽松），收紧即偏离单源语义。
  *
  * 红线（决策 22）：遇到扁平语义之外的结构（$ref/oneOf/allOf/not/未知键/嵌套数组/items 携带约束/
@@ -94,16 +99,30 @@ export function projectFlatField(field, target = "draft-2020-12", opts = {}) {
     );
   }
 
-  // enum：validateFlat 对任意叶子类型做 includes 检查 → 原样投影；仅许非空字符串数组
+  // enum：validateFlat 对任意叶子类型做 includes 检查 → 原样投影。取值同质（全字符串或全
+  // 数字——db.ts table() 同一口径）且与叶子 type 一致（type 按成员推导并显式核对——矛盾即
+  // 契约自相矛盾：validateFlat 的 type 检查会拒绝全部取值，绝不静默投影矛盾 schema）
   let enumValues;
   if (field.enum != null) {
     if (!Array.isArray(field.enum) || field.enum.length === 0) {
-      fail(`${at}：enum 必须是非空字符串数组`, "删除空 enum 或补齐取值（空 enum 在 JSON Schema 中非法且 validateFlat 恒拒绝）", { at });
+      fail(`${at}：enum 必须是非空数组`, "删除空 enum 或补齐取值（空 enum 在 JSON Schema 中非法且 validateFlat 恒拒绝）", { at });
     }
-    for (const v of field.enum) {
-      if (typeof v !== "string") {
-        fail(`${at}：enum 取值必须是字符串，实际 ${String(v)}`, "FlatField.enum 形态为 string[]——改用字符串取值", { at, value: String(v) });
-      }
+    const allStr = field.enum.every((v) => typeof v === "string");
+    const allNum = field.enum.every((v) => typeof v === "number");
+    if (!allStr && !allNum) {
+      fail(
+        `${at}：enum 取值必须同质（全字符串或全数字——db.ts table() 同一口径），实际 ${JSON.stringify(field.enum)}`,
+        "统一 enum 取值类型（全字符串或全数字）",
+        { at }
+      );
+    }
+    const memberType = allStr ? "string" : "number";
+    if (t !== memberType) {
+      fail(
+        `${at}：enum 取值全是${allStr ? "字符串" : "数字"}，与叶子 type「${t}」矛盾——validateFlat 的 type 检查会拒绝全部取值`,
+        `叶子 type 改为「${memberType}」，或把 enum 取值改为 ${t} 类型`,
+        { at, declared: t, members: memberType }
+      );
     }
     enumValues = field.enum.slice();
   }

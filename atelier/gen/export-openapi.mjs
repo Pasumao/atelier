@@ -8,10 +8,14 @@
  *
  * 端点枚举：复用 gen-endpoint.mjs 的文本扫描原语（parseProps/stripComments/identOf/
  * stringArrayOf/matchDelim/walkTsFiles 加法导出，gen-endpoint 行为零改动、生成产物字节不变）。
+ * R1-C（P1-4）起 define* 调用点发现复用 gen-endpoint 的 findEndpointCalls 单一真相 walk
+ * （codeMask 注释/字符串掩码 + ATR-342 名字闸 + live/invalidate/emits/idempotent 公共投影单点）——
+ * 本文件第二份 define* 扫描 walk（DEFINE_RE + 私有 matchAngle）已消灭，仅保留导出面独有的
+ * 超集元数据政策（auth/restful/timeoutMs/cache 值解析与行内字面量禁令）。本文件自己的历史
+ * define* walk 曾与 gen-endpoint 各持一份且无掩码（注释掉的 defineQuery 产幻影端点进
+ * openapi.json、多行注释区间吞真实端点、坏名字静默导出）——红绿测试钉在 openapi.test.ts。
  * 扫描面：src/server/endpoints/ 递归 + src/server/auth/endpoints.ts（gen auth 产物三件套，
- * 加法语义；openapi-golden auth 联测段先红后绿钉住）。本文件自己的 define* walk 提取 OpenAPI
- * 需要的超集元数据（auth/restful/timeoutMs/cache 值），live/invalidate/emits/idempotent 语义与
- * scanEndpointSource 同构（同一原语、同一测试钉住）。泛型标注形态 defineCommand<Input, Output>(…)
+ * 加法语义；openapi-golden auth 联测段先红后绿钉住）。泛型标注形态 defineCommand<Input, Output>(…)
  * （模板 example.ts / gen-compile-gate 的应用规范形态）与裸调用形态 defineCommand(…) 都认——
  * golden 机检（tests/openapi-golden.test.ts）先红后绿钉住：泛型形态曾整端点漏导出（文档漏端点 =
  * naive 文档驱动的机检盲区）。gen auth 产物三形态专项解析（同批红绿）：①端点级内联契约字面量
@@ -48,7 +52,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { matchDelim, parseProps, stripComments, identOf, stringArrayOf, walkTsFiles } from "./gen-endpoint.mjs";
+import { matchDelim, stripComments, identOf, walkTsFiles, findEndpointCalls } from "./gen-endpoint.mjs";
 import { projectJsonSchema, projectFlatField } from "../compiler/project-json.mjs";
 // gen auth 产物形态的本地契约解析用（运行时同一实现——绝不复刻列→FlatSchema 映射，gen-auth.mjs
 // 直 import server/db.ts 渲染 DDL 同一先例）：table() 重构表定义 → pick() 投影 rowSchema 子集。
@@ -101,7 +105,40 @@ function splitTopLevel(text) {
   return parts;
 }
 
-/** 字符串字面量解析（禁插值/拼接——内容含未转义同种引号或 ${ 即错，与 gen-db 同口径） */
+/** 字符串字面量体内文 → 实际值（decodeEscapesCore 同款内联——gen-endpoint.mjs 单源注释；
+ *  行为由 tests/gen-literal-parity.test.ts 跨面对拍钉住）。 */
+function decodeEscapesCore(inner) {
+  let out = "";
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c !== "\\") {
+      out += c;
+      continue;
+    }
+    const d = inner[i + 1];
+    if (d === undefined) return { ok: false, error: "转义序列悬空（字面量以反斜杠结尾）" };
+    if (d === "n") { out += "\n"; i++; continue; }
+    if (d === "t") { out += "\t"; i++; continue; }
+    if (d === "r") { out += "\r"; i++; continue; }
+    if (d === "b") { out += "\b"; i++; continue; }
+    if (d === "f") { out += "\f"; i++; continue; }
+    if (d === '"' || d === "'" || d === "\\" || d === "/" || d === "`") { out += d; i++; continue; }
+    if (d === "u") {
+      const hex = inner.slice(i + 2, i + 6);
+      if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
+        return { ok: false, error: "转义 \\u 需要 4 位十六进制（实际「" + inner.slice(i, i + 6) + "」）" };
+      }
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 5;
+      continue;
+    }
+    return { ok: false, error: "转义序列超出扁平字面量纪律（只认 JSON 转义集 \\n \\t \\r \\b \\f 引号 反斜杠 斜杠 \\uXXXX；\\x/八进制等越界）" };
+  }
+  return { ok: true, value: out };
+}
+
+/** 字符串字面量解析（禁插值/拼接——内容含未转义同种引号或 ${ 即错，与 gen-db 同口径）。
+ *  转义解码 = JSON.parse 语义（R1-C §4.7：此前仅映射 \n/\t，\u4e2d 解成 "u4e2d"） */
 function parseStringLiteral(text, what) {
   const t = text.trim();
   const q = t[0];
@@ -112,7 +149,9 @@ function parseStringLiteral(text, what) {
       if (inner[i] === q) litDie(`${what}：字符串字面量含未转义的 ${q}（拼接/多段字面量超出扁平字面量纪律，§2.1）`, "写成单个普通字符串字面量");
     }
     if (q === "`" && inner.includes("${")) litDie(`${what}：模板字符串插值超出扁平字面量纪律（§2.1）`, "写成普通字符串字面量");
-    return inner.replace(/\\(.)/g, (_, c) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
+    const dec = decodeEscapesCore(inner);
+    if (!dec.ok) litDie(`${what}：${dec.error}`, "字面量转义只认 JSON 转义集（\\n \\t \\r \\b \\f 引号 反斜杠 斜杠 \\uXXXX）——越界转义超出扁平字面量纪律（§2.1）");
+    return dec.value;
   }
   litDie(`${what}：期望字符串字面量，实际「${t.slice(0, 60)}」`, "契约必须是普通对象字面量（扁平纪律，§2.1）——禁计算值/展开/函数调用");
 }
@@ -204,38 +243,9 @@ export function scanContractSchemas(root) {
 
 /* ---------- ② 端点文件扫描（超集元数据：auth/restful/timeoutMs 值） ---------- */
 
-const DEFINE_RE = /\bdefine(Query|Command)\b/g;
-
 /**
- * 匹配平衡的 &lt;…&gt; 泛型类型实参段（defineCommand&lt;Input, Output&gt;(…) 的类型标注——
- * 模板 example.ts / gen-compile-gate 的应用规范形态）。状态感知：字符串/行块注释/嵌套 &lt;&gt;
- * 不误判，`=>`（箭头类型）不当闭合符；返回闭 &gt; 下标，不闭合 = -1（诚实跳过该 match）。
+ * 数字值文本解析（timeoutMs：允许 10_000 数值分隔符；非数字字面量 → 显式错）
  */
-function matchAngle(src, openPos) {
-  let depth = 0;
-  let state = "code";
-  let q = "";
-  for (let i = openPos; i < src.length; i++) {
-    const c = src[i];
-    if (state === "str") {
-      if (c === "\\") { i++; continue; }
-      if (c === q) state = "code";
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") { state = "str"; q = c; continue; }
-    if (c === "/" && src[i + 1] === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
-    if (c === "/" && src[i + 1] === "*") { i += 2; while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++; continue; }
-    if (c === "<") { depth++; continue; }
-    if (c === ">") {
-      if (src[i - 1] === "=") continue; // => 箭头类型：不是层级闭合
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-/** 数字值文本解析（timeoutMs：允许 10_000 数值分隔符；非数字字面量 → 显式错） */
 function parseNumberMeta(valueText, what) {
   const t = stripComments(valueText ?? "").trim();
   if (!/^[+-]?\d[\d_]*$/.test(t)) {
@@ -285,8 +295,10 @@ function parseCacheMeta(valueText, endpointName) {
 
 /**
  * 扫一个端点源文件的 defineQuery/defineCommand → OpenAPI 超集端点清单。
- * 与 gen-endpoint scanEndpointSource 同构（同一原语；live/invalidate/emits/idempotent 语义一致），
- * 另提取 auth/restful/timeoutMs/cache 值。行内契约对象字面量不支持 → 显式报错（绝不静默猜）。
+ * 调用点发现复用 gen-endpoint 的 findEndpointCalls 单一真相 walk（R1-C P1-4：codeMask 掩码 +
+ * ATR-342 名字闸 + live/invalidate/emits/idempotent 公共投影单点——本文件不再持第二份 walk）；
+ * 本函数只保留导出面独有的超集元数据政策与契约取值政策。
+ * 行内契约对象字面量不支持 → 显式报错（绝不静默猜）。
  *
  * opts（默认缺省 = 原行为零变化）：
  *   allowInlineLiterals — 端点级内联契约字面量放行解析（gen auth 产物形态：自包含生成码，
@@ -295,48 +307,24 @@ function parseCacheMeta(valueText, endpointName) {
  *   localSchemas        — 本地标识符 → FlatSchema（gen auth 产物 `const meOutput = pick(…)` 的
  *                         resolveLocalPickSchemas 解析产物）；命中时合成名进文档、flat 随端点带出
  *                         （entry.contractFlat/outputFlat——buildOpenApi 经同一 §2.4 投影管线）。
+ *                         R1-C 起与 gen-endpoint 同语义对 contract/output 两role都生效
+ *                         （此前仅 output 位——auth 产物只对 output 用 pick，行为面等价）。
  */
 export function scanOpenApiEndpoints(src, opts = {}) {
   const { allowInlineLiterals = false, localSchemas = null } = opts;
   const out = [];
-  DEFINE_RE.lastIndex = 0;
-  for (let m; (m = DEFINE_RE.exec(src));) {
-    const kind = m[1] === "Query" ? "query" : "command";
-    let i = m.index + m[0].length;
-    while (i < src.length && /\s/.test(src[i])) i++;
-    // 泛型标注形态 defineCommand<Input, Output>(…)（模板/门禁的应用规范形态）：跳过平衡的
-    // <…> 类型实参段再找 (——类型段不参与文档投影，扁平字面量纪律不受影响
-    if (src[i] === "<") {
-      const closeAngle = matchAngle(src, i);
-      if (closeAngle < 0) continue; // 不闭合——诚实跳过（TS 本身编译不过）
-      i = closeAngle + 1;
-      while (i < src.length && /\s/.test(src[i])) i++;
-    }
-    if (src[i] !== "(") continue;
-    i++;
-    while (i < src.length && /\s/.test(src[i])) i++;
-    if (src[i] !== '"' && src[i] !== "'" && src[i] !== "`") continue; // 非字面量名——诚实跳过（同 gen-endpoint）
-    const q = src[i];
-    i++;
-    const nameStart = i;
-    while (i < src.length && src[i] !== q) i += src[i] === "\\" ? 2 : 1;
-    const name = src.slice(nameStart, i).replace(/\\(.)/g, "$1");
-    i++;
-    while (i < src.length && /\s/.test(src[i])) i++;
-    if (src[i] !== ",") continue;
-    i++;
-    while (i < src.length && /\s/.test(src[i])) i++;
-    if (src[i] !== "{") continue;
-    const close = matchDelim(src, i);
-    if (close < 0) continue;
-    const props = parseProps(src.slice(i + 1, close));
+  for (const call of findEndpointCalls(src)) {
+    const { name, kind, props, line, live, invalidate, emits, idempotent } = call;
 
     // 内联契约字面量 / 本地解析 schema（仅 opts 放行的扫描面——默认面维持显式报错）
     const local = {};
     for (const role of ["contract", "output"]) {
       const raw = props[role];
       const stripped = raw != null ? stripComments(raw).trim() : null;
-      if (stripped != null && stripped.startsWith("{")) {
+      const ref = identOf(raw);
+      if (localSchemas != null && ref != null && localSchemas[ref] != null) {
+        local[role] = { ident: `${name}.${role === "contract" ? "input" : "output"}`, flat: localSchemas[ref] };
+      } else if (stripped != null && stripped.startsWith("{")) {
         if (!allowInlineLiterals) {
           throw exportError(
             `端点 ${name} 的 ${role} 是行内契约对象字面量——OpenAPI 导出不支持（gen endpoint 扫描器同边界）`,
@@ -349,24 +337,6 @@ export function scanOpenApiEndpoints(src, opts = {}) {
           ident: `${name}.${role === "contract" ? "input" : "output"}`,
           flat: parseFlatSchemaLiteral(stripped.slice(0, litClose + 1), `端点 ${name} 的 ${role}`),
         };
-      } else if (role === "output" && localSchemas != null) {
-        const ref = identOf(raw);
-        if (ref != null && localSchemas[ref] != null) {
-          local[role] = { ident: `${name}.output`, flat: localSchemas[ref] };
-        }
-      }
-    }
-
-    let live = false;
-    let invalidate = null;
-    const liveText = props.live;
-    if (liveText != null) {
-      const stripped = stripComments(liveText).trim();
-      if (stripped === "true") live = true;
-      else if (stripped.startsWith("{")) {
-        live = true;
-        const objBody = matchDelim(stripped, 0);
-        if (objBody > 0) invalidate = stringArrayOf(parseProps(stripped.slice(1, objBody)).invalidate);
       }
     }
 
@@ -391,15 +361,14 @@ export function scanOpenApiEndpoints(src, opts = {}) {
       outputFlat: local.output?.flat ?? null,
       live,
       invalidate,
-      emits: stringArrayOf(props.emits),
-      idempotent: stripComments(props.idempotent ?? "").trim() === "true",
+      emits,
+      idempotent,
       timeoutMs,
       auth,
       cache,
       restful,
-      line: src.slice(0, m.index).split("\n").length,
+      line,
     });
-    DEFINE_RE.lastIndex = close + 1; // 越过本次调用体（与 gen-endpoint 同款防御性前进）
   }
   return out;
 }
@@ -551,6 +520,19 @@ function sessionCookieName(root) {
 export function buildOpenApi(root, opts = {}) {
   const mount = normalizeMount(opts.mount);
   const endpoints = scanOpenApiEndpointFiles(root);
+  // 端点重名闸（R1-C，镜像运行时 EndpointRegistry.register() ATR-313）：paths[pathKey] 曾静默
+  // 后者覆盖——文档与注册表二义。导出面同样 die（绝不静默覆盖），诊断带两处声明位置。
+  const seenNames = new Map();
+  for (const ep of endpoints) {
+    const prev = seenNames.get(ep.name);
+    if (prev != null) {
+      throw exportError(
+        `ATR-313: 端点重复注册：${ep.name}（${prev} 与 ${ep.file}:${ep.line}——生成面镜像运行时 register() 语义）`,
+        "换名或先移除其一（重复端点在运行时 register() 同样 ATR-313 硬错）"
+      );
+    }
+    seenNames.set(ep.name, `${ep.file}:${ep.line}`);
+  }
   const contracts = scanContractSchemas(root);
   const cookieName = sessionCookieName(root);
   const notes = [];

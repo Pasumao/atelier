@@ -410,14 +410,14 @@ describe("R1-C：端点名字符集闸（ATR-342 同集——坏名字 die 而�
   it("端点名含双引号 → ATR-342 die（修复前：paths 键静默携带坏字符导出）", () => {
     const root = makeApp();
     w(root, "src/server/endpoints/bad.ts", `export const badCall = defineQuery("we\\"ird", { handler: () => ({}) });\n`);
-    let err: (Error & { fix?: string }) | null = null;
+    let err: (Error & { code?: string; fix?: string }) | null = null;
     try {
       buildOpenApi(root);
     } catch (e) {
-      err = e as Error & { fix?: string };
+      err = e as Error & { code?: string; fix?: string };
     }
     expect(err, "坏名字必须在导出侧 die").toBeTruthy();
-    expect(err!.message).toContain("ATR-342");
+    expect(err!.code ?? err!.message).toContain("ATR-342");
     expect(err!.fix).toBeTruthy();
   });
 });

@@ -71,14 +71,15 @@ describe("R1-C：字面量转义解码跨面对拍（JSON.parse 语义——三�
 
   it("端点名转义同语义：名字面量 \"a\\nb\"（转义序列）解码为真实换行 → ATR-342（修复前静默解成 anb——生成面与运行时名漂移）", () => {
     const src = "export const x = defineQuery(\"a" + BS + "nb\", { handler: () => 1 });";
-    let msg = "";
+    let err: (Error & { code?: string }) | null = null;
     try {
       scanEndpointSource(src);
     } catch (e) {
-      msg = (e as Error).message;
+      err = e as Error & { code?: string };
     }
-    expect(msg).toContain("ATR-342");
-    expect(msg).toContain("a\\nb"); // message 对坏值 JSON.stringify 后呈现（真实换行 → \n 两字符）
+    expect(err, "转义解码为真实换行后必须被名字符集闸拒绝").toBeTruthy();
+    expect(err!.code).toBe("ATR-342");
+    expect(err!.message).toContain("a\\nb"); // message 对坏值 JSON.stringify 后呈现（真实换行 → \n 两字符）
   });
 
   it("越界转义显式拒绝（绝不静默猜）：\\x 十六进制转义超出扁平字面量纪律", () => {

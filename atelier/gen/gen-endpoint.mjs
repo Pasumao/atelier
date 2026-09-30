@@ -28,6 +28,15 @@
  * 合法性（含独立导出名撞 JS 保留字）二次闸——坏名字在生成器侧四段式 die，绝不流入产物破碎
  * api.ts；进生成码的端点名/URL 一律 JSON.stringify 转义（name as const / fetch / EventSource）。
  *
+ * 扫描器掩码与单一真相（R1-C，P1-4）：findEndpointCalls 是 define* 调用点发现的唯一 walk——
+ * codeMask（全文单遍状态机 → Uint8Array，技法参照 compiler/extract-schema.mjs）过滤注释/
+ * 字符串/模板文本里的假命中（①注释掉的 defineQuery 不产幻影端点 ②字符串里的 defineQuery
+ * 忽略 ③多行注释区间不再借 lastIndex 越界吞真实端点）；export-openapi.mjs scanOpenApiEndpoints
+ * 复用本 walk（第二份 define* 扫描器已消灭），仅保留其独有的导出面政策（超集元数据
+ * auth/cache/timeoutMs/restful 解析与行内字面量禁令）。端点重名在 generateApi 产产物前 die
+ * （ATR-313 镜像运行时 register() 语义）；字面量转义解码统一 JSON.parse 语义（decodeEscapesCore，
+ * gen-db/export-openapi 各持同款内联，跨面对拍 tests/gen-literal-parity.test.ts 钉住）。
+ *
  * 自包含红线：本文件在 init/sync 的 vendor 名单内（M7 批），mcp-vendor.test.ts 机械核对
  * import 闭包精确相等——只准 import node: 内建，绝不 import 框架其他文件。与 export-openapi.mjs
  * 各自持有一份 scanner（parseFlatValue / resolveLocalPickTypes / flatSchemaToTs 为其
@@ -37,8 +46,9 @@
  * 本文件 auth 面 describe）。
  *
  * CLI：node atelier/gen/gen-endpoint.mjs --root <appDir> [--mount /api] [--from-specs]
- * 库形态：export 纯函数（scanEndpoints / scanContracts / scanSpecIntents / scanApiClient /
- * generateApi / generateSkeletons），供测试与 impact.mjs 复用（同一扫描器同一真相）。
+ * 库形态：export 纯函数（findEndpointCalls / scanEndpoints / scanContracts / scanSpecIntents /
+ * scanApiClient / generateApi / generateSkeletons / stringArrayOf / RESERVED_WORDS），供测试、
+ * impact.mjs 与 export-openapi.mjs 复用（同一扫描器同一真相）。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -65,8 +75,9 @@ function die(code, message, fix) {
 /** 端点名字符集口径 = server/endpoints.ts 的 NAME_RE（ATR-313 同源：URL 路径拼接的安全前提） */
 const ENDPOINT_NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]*$/;
 
-/** 独立导出名（export const <c> = …）撞即编译不过的 JS 保留字（camelOf 产物闸） */
-const RESERVED_WORDS = new Set([
+/** 独立导出名（export const <c> = …）撞即编译不过的 JS 保留字（camelOf 产物闸）。
+ *  R1-C 起导出共享：gen-db.mjs 的 toCamel CRUD 函数名闸 import 同一词表（单源，绝不两份手抄）。 */
+export const RESERVED_WORDS = new Set([
   "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
   "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "implements", "import",
   "in", "instanceof", "interface", "let", "new", "null", "package", "private", "protected", "public",
@@ -85,6 +96,61 @@ function assertEndpointName(name, line) {
     `端点名非法：「${JSON.stringify(name)}」${line > 0 ? `（端点文件第 ${line} 行）` : ""}——只允许字母开头的 [A-Za-z0-9_.-]（对齐 server/endpoints.ts NAME_RE / ATR-313）`,
     '改成合法端点名，如 "chat.ask" 或 "notes.list"（字母开头，后接字母/数字/下划线/点/连字符）'
   );
+}
+
+/* ---------- 字面量转义解码（R1-C §4.7：JSON.parse 语义单一口径） ---------- */
+
+/**
+ * 字符串字面量体内文 → 实际值（纯核，自包含——gen-db.mjs parseStringLiteral 与
+ * export-openapi.mjs parseStringLiteral 因各自错误形态各持同款内联，行为由
+ * tests/gen-literal-parity.test.ts 跨面对拍钉住：同一组字面量经三条消费链逐字相同）。
+ * 此前三实现分叉：本文件 `\\(.)→$1` 把 `\n` 解成 "n"（端点名 `"a\nb"` 静默漂移成 "anb"），
+ * gen-db/export-openapi 仅映射 \n/\t（`\u4e2d` 解成 "u4e2d"）——统一为 JSON.parse 语义：
+ * 转义集 \n \t \r \b \f \" \' \\ \/ \` \uXXXX（\' 与 \` 是 JS 字面量 clothing 的必然形态，
+ * 按字面字符还原）；越界转义（\x/八进制/未知）与悬空反斜杠 = 超出扁平字面量纪律（§2.1）
+ * → { ok: false }，调用方按各自四段式 die（绝不静默猜）。
+ */
+function decodeEscapesCore(inner) {
+  let out = "";
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c !== "\\") {
+      out += c;
+      continue;
+    }
+    const d = inner[i + 1];
+    if (d === undefined) return { ok: false, error: "转义序列悬空（字面量以反斜杠结尾）" };
+    if (d === "n") { out += "\n"; i++; continue; }
+    if (d === "t") { out += "\t"; i++; continue; }
+    if (d === "r") { out += "\r"; i++; continue; }
+    if (d === "b") { out += "\b"; i++; continue; }
+    if (d === "f") { out += "\f"; i++; continue; }
+    if (d === '"' || d === "'" || d === "\\" || d === "/" || d === "`") { out += d; i++; continue; }
+    if (d === "u") {
+      const hex = inner.slice(i + 2, i + 6);
+      if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
+        return { ok: false, error: "转义 \\u 需要 4 位十六进制（实际「" + inner.slice(i, i + 6) + "」）" };
+      }
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 5;
+      continue;
+    }
+    return { ok: false, error: "转义序列超出扁平字面量纪律（只认 JSON 转义集 \\n \\t \\r \\b \\f 引号 反斜杠 斜杠 \\uXXXX；\\x/八进制等越界）" };
+  }
+  return { ok: true, value: out };
+}
+
+/** 名字面量文本 → 实际端点名（解码失败 = ATR-342 die——越界转义的名字绝不流入产物） */
+function decodeEndpointName(raw, line) {
+  const dec = decodeEscapesCore(raw);
+  if (!dec.ok) {
+    die(
+      "ATR-342",
+      `端点名字面量转义非法：${dec.error}（原文 ${JSON.stringify(raw)}${line > 0 ? `，第 ${line} 行` : ""}）`,
+      "名字面量里只写明文字符或 JSON 转义集——越界转义（\\x/八进制等）超出扁平字面量纪律（§2.1）"
+    );
+  }
+  return dec.value;
 }
 
 /* ---------- 文本扫描原语（字符串/注释感知的括号匹配——无 eval、无 TS 解析器） ---------- */
@@ -266,7 +332,8 @@ export function identOf(valueText) {
   return m ? m[1] : null;
 }
 
-/** [ "a", "b" ] 值文本 → 字符串数组；非数组形态 → null（export-openapi.mjs 复用） */
+/** [ "a", "b" ] 值文本 → 字符串数组；非数组形态 → null（export-openapi.mjs 复用）。
+ *  成员转义解码走 decodeEscapesCore（JSON.parse 语义）——越界转义显式抛错，绝不静默解错 */
 export function stringArrayOf(valueText) {
   if (valueText == null) return null;
   const stripped = stripComments(valueText).trim();
@@ -276,7 +343,11 @@ export function stringArrayOf(valueText) {
   const inner = stripped.slice(1, close);
   const out = [];
   const re = /"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'/g;
-  for (let m; (m = re.exec(inner));) out.push((m[1] ?? m[2] ?? "").replace(/\\(.)/g, "$1"));
+  for (let m; (m = re.exec(inner));) {
+    const dec = decodeEscapesCore(m[1] ?? m[2] ?? "");
+    if (!dec.ok) throw new Error(`字符串数组字面量转义非法：${dec.error}（原文 ${JSON.stringify(m[1] ?? m[2] ?? "")}）`);
+    out.push(dec.value);
+  }
   return out;
 }
 
@@ -296,7 +367,9 @@ function parseFlatValue(text, what) {
     if (t.length < 2 || t[t.length - 1] !== q) throw new Error(`${what}：字符串字面量未闭合`);
     const inner = t.slice(1, -1);
     if (q === "`" && inner.includes("${")) throw new Error(`${what}：模板字符串插值超出扁平字面量纪律（§2.1）`);
-    return inner.replace(/\\(.)/g, "$1");
+    const dec = decodeEscapesCore(inner);
+    if (!dec.ok) throw new Error(`${what}：${dec.error}`);
+    return dec.value;
   }
   if (/^[+-]?\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?$/.test(t)) return Number(t.replace(/_/g, ""));
   if (t === "true") return true;
@@ -412,7 +485,9 @@ function resolveLocalPickTypes(file, src) {
         failures[constIdent] = "表列字面量括号不闭合";
         continue;
       }
-      const name = (tm[2] ?? "").replace(/\\(.)/g, "$1"); // 引号内表名（DDL 白名单校验归 table() 构造期）
+      const nameDec = decodeEscapesCore(tm[2] ?? ""); // 引号内表名（DDL 白名单校验归 table() 构造期）
+      if (!nameDec.ok) throw new Error(`表名字面量转义非法：${nameDec.error}`);
+      const name = nameDec.value;
       const cols = parseFlatValue(tsrc.slice(colsOpen, colsClose + 1), `表定义 ${name}`);
       const keys = parseFlatValue(m[3], `pick 键集（${constIdent}）`);
       if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string")) {
@@ -468,23 +543,99 @@ export function* walkTsFiles(dir, depth = 0) {
 }
 
 /**
- * 扫一个端点源文件的 defineQuery/defineCommand 调用（扁平字面量形态）。
- *
- * opts（缺省 = 原行为零变化；与 export-openapi.mjs scanOpenApiEndpoints 同名同义——文件头互相指认）：
- *   allowInlineLiterals — 端点级内联契约字面量放行解析（gen auth 产物形态：自包含生成码，
- *                         contract/output 就地扁平字面量；src/server/endpoints/ 用户端点面
- *                         维持原禁令——契约提升单源纪律不变）。合成名 `<name>.input/.output`
- *                         （M7-C openapi 导出同款先例），解析值随 contractFlat/outputFlat 带出；
- *                         解析失败 → 该侧 ident 置 null + unresolved 记账（诚实降级，绝不猜）。
- *   localSchemas        — 本地标识符 → FlatSchema 值（resolveLocalPickTypes 解析产物）；
- *                         命中时该侧转合成名 + flat（pick 本地投影，auth.me 形态）。
+ * 全文单遍状态机 → 真实代码区标记（Uint8Array，1 = code）。技法参照 compiler/extract-schema.mjs
+ * 的 codeMaskOf（本文件 vendor 闭包自包含红线只准 import node:——同款技法内联，行为由掩码红绿
+ * 测试钉住）。帧模型：code（顶层或模板插值）/ q（'、"）/ tpl（`，${} 插值推回 code 帧并按花括号
+ * 深度归位）；// 与 /** *\/ 注释、字符串字面量、模板文本均不标记。正则字面量不解析（v1 边界，
+ * 与 extract-schema.mjs 同款诚实边界：正则里嵌 "defineQuery(" 属病理输入）。
  */
-export function scanEndpointSource(src, opts = {}) {
-  const { allowInlineLiterals = false, localSchemas = null } = opts;
-  const out = [];
+function codeMaskOf(src) {
+  const mask = new Uint8Array(src.length);
+  let i = 0;
+  const stack = [{ kind: "code", interp: false, depth: 0 }];
+  while (i < src.length) {
+    const c = src[i];
+    const top = stack[stack.length - 1];
+    if (top.kind === "q") {
+      if (c === "\\") i++;
+      else if (c === top.q) stack.pop();
+      i++;
+      continue;
+    }
+    if (top.kind === "tpl") {
+      if (c === "\\") i++;
+      else if (c === "`") stack.pop();
+      else if (c === "$" && src[i + 1] === "{") {
+        stack.push({ kind: "code", interp: true, depth: 0 });
+        i += 2; // 越过 ${ 整体——若只越 $，{ 会被新插值帧当一层花括号深度计数，闭合 } 永远差一层，
+        continue; //        插值帧吞掉后续真实代码（auth 产物 handler 模板串实证，extract-schema 同款修法）
+      }
+      i++;
+      continue;
+    }
+    // code 帧（顶层或模板插值内；插值帧按花括号深度归位，顶层帧的 } 只是普通代码字符）
+    if (top.interp && c === "}" && top.depth === 0) {
+      stack.pop();
+      mask[i] = 1;
+      i++;
+      continue;
+    }
+    if (top.interp && c === "{") {
+      top.depth++;
+      mask[i] = 1;
+      i++;
+      continue;
+    }
+    if (top.interp && c === "}") {
+      top.depth--;
+      mask[i] = 1;
+      i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      i += 2;
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      stack.push({ kind: "q", q: c });
+      i++;
+      continue;
+    }
+    if (c === "`") {
+      stack.push({ kind: "tpl" });
+      i++;
+      continue;
+    }
+    mask[i] = 1;
+    i++;
+  }
+  return mask;
+}
+
+/**
+ * 端点调用点发现（R1-C P1-4 单一真相 walk——export-openapi.mjs scanOpenApiEndpoints 复用，
+ * 第二份 define* 扫描 walk 已消灭）。codeMask 过滤注释/字符串/模板文本里的假命中：
+ *  ① 注释掉的 defineQuery 不再产幻影端点；② 字符串字面量里的 defineQuery 忽略；
+ *  ③ 多行注释区间里失配的 defineQuery 花括号不再外溢——修复前 `re.lastIndex = close + 1`
+ * 会把匹配延续到的真实端点整体吞掉（api.ts 缺端点 = 运行时 404 面）。
+ * 名字入口即 assertEndpointName（ATR-342，export-openapi 同闸）+ 转义解码 JSON 语义。
+ * 返回调用点含两扫描器语义一致的公共投影（live/invalidate/emits/idempotent——单一解析）
+ * 与原始 props 文本（超集元数据 auth/cache/timeoutMs/restful 由导出面按自身政策解析）。
+ */
+export function findEndpointCalls(src) {
+  const mask = codeMaskOf(src);
+  const calls = [];
   const re = /\bdefine(Query|Command)\b/g;
   for (let m; (m = re.exec(src));) {
+    if (!mask[m.index]) continue; // P1-4：注释/字符串/模板文本里的假命中——查位即弃
     const kind = m[1] === "Query" ? "query" : "command";
+    const line = src.slice(0, m.index).split("\n").length;
     let i = m.index + m[0].length;
     while (i < src.length && /\s/.test(src[i])) i++;
     // 泛型标注形态 defineCommand<Input, Output>(…)（模板 example.ts / 门禁的应用规范形态）：
@@ -503,8 +654,8 @@ export function scanEndpointSource(src, opts = {}) {
     i++;
     const nameStart = i;
     while (i < src.length && src[i] !== q) i += src[i] === "\\" ? 2 : 1;
-    const name = src.slice(nameStart, i).replace(/\\(.)/g, "$1");
-    assertEndpointName(name, src.slice(0, m.index).split("\n").length);
+    const name = decodeEndpointName(src.slice(nameStart, i), line);
+    assertEndpointName(name, line);
     i++;
     while (i < src.length && /\s/.test(src[i])) i++;
     if (src[i] !== ",") continue;
@@ -515,10 +666,60 @@ export function scanEndpointSource(src, opts = {}) {
     if (close < 0) continue;
     const props = parseProps(src.slice(i + 1, close));
 
+    // live/invalidate/emits/idempotent 两扫描器语义一致——walk 层一次解析（单一真相）
+    let live = false;
+    let invalidate = null;
+    const liveText = props.live;
+    if (liveText != null) {
+      const stripped = stripComments(liveText).trim();
+      if (stripped === "true") live = true;
+      else if (stripped.startsWith("{")) {
+        live = true;
+        const objBody = matchDelim(stripped, 0);
+        if (objBody > 0) invalidate = stringArrayOf(parseProps(stripped.slice(1, objBody)).invalidate);
+      }
+    }
+    calls.push({
+      name,
+      kind,
+      props,
+      line,
+      live,
+      invalidate,
+      emits: stringArrayOf(props.emits),
+      idempotent: stripComments(props.idempotent ?? "").trim() === "true",
+    });
+    re.lastIndex = close + 1; // 越过本次调用体（handler 内不会嵌套 define*；防御性前进——
+    // 掩码保证注释/字符串里的 define* 假命中不再进入解析，lastIndex 越界吞真实端点的 bug 随之消失）
+  }
+  return calls;
+}
+
+/**
+ * 扫一个端点源文件的 defineQuery/defineCommand 调用（扁平字面量形态）——走 findEndpointCalls
+ * 单一真相 walk（掩码/名字闸/公共元数据解析单点）。
+ *
+ * opts（缺省 = 原行为零变化；与 export-openapi.mjs scanOpenApiEndpoints 同名同义——文件头互相指认）：
+ *   allowInlineLiterals — 端点级内联契约字面量放行解析（gen auth 产物形态：自包含生成码，
+ *                         contract/output 就地扁平字面量；src/server/endpoints/ 用户端点面
+ *                         维持原禁令——契约提升单源纪律不变）。合成名 `<name>.input/.output`
+ *                         （M7-C openapi 导出同款先例），解析值随 contractFlat/outputFlat 带出；
+ *                         解析失败 → 该侧 ident 置 null + unresolved 记账（诚实降级，绝不猜）；
+ *                         未放行面的行内字面量记 inlineLiterals（导出面据其定政策：显式报错）。
+ *   localSchemas        — 本地标识符 → FlatSchema 值（resolveLocalPickTypes 解析产物）；
+ *                         命中时该侧转合成名 + flat（pick 本地投影，auth.me 形态）。
+ */
+export function scanEndpointSource(src, opts = {}) {
+  const { allowInlineLiterals = false, localSchemas = null } = opts;
+  const out = [];
+  for (const call of findEndpointCalls(src)) {
+    const { name, kind, props, line, live, invalidate, emits, idempotent } = call;
+
     // 契约取值三形态：本地 pick 投影（标识符命中 localSchemas）> 内联字面量（仅放行面）>
     // 契约单源标识符（原路径）。auth 元数据（auth: { type: "none" } 等）不在取值键内——
     // parseProps 捕获后无人读即天然容忍（对本生成器无影响）。
     const unresolved = [];
+    const inlineLiterals = [];
     let contract = identOf(props.contract);
     let output = identOf(props.output);
     let contractFlat = null;
@@ -526,16 +727,21 @@ export function scanEndpointSource(src, opts = {}) {
     for (const role of ["contract", "output"]) {
       const raw = props[role];
       const stripped = raw != null ? stripComments(raw).trim() : null;
-      const local = localSchemas != null && (role === "contract" ? contract : output);
-      if (local && localSchemas[local] != null) {
+      const ref = role === "contract" ? contract : output;
+      if (localSchemas != null && ref != null && localSchemas[ref] != null) {
         if (role === "contract") {
-          contractFlat = localSchemas[local];
+          contractFlat = localSchemas[ref];
           contract = `${name}.input`;
         } else {
-          outputFlat = localSchemas[local];
+          outputFlat = localSchemas[ref];
           output = `${name}.output`;
         }
-      } else if (stripped != null && stripped.startsWith("{") && allowInlineLiterals) {
+      } else if (stripped != null && stripped.startsWith("{")) {
+        if (!allowInlineLiterals) {
+          // 用户端点面行内字面量不识别（契约提升单源纪律，诚实边界）——记账供导出面定政策
+          inlineLiterals.push(role);
+          continue;
+        }
         // 行内字面量（可带 as const / satisfies 后缀——matchDelim 取平衡段，后缀自然忽略）
         const litClose = matchDelim(stripped, 0);
         if (litClose < 0) {
@@ -556,18 +762,6 @@ export function scanEndpointSource(src, opts = {}) {
         }
       }
     }
-    let live = false;
-    let invalidate = null;
-    const liveText = props.live;
-    if (liveText != null) {
-      const stripped = stripComments(liveText).trim();
-      if (stripped === "true") live = true;
-      else if (stripped.startsWith("{")) {
-        live = true;
-        const objBody = matchDelim(stripped, 0);
-        if (objBody > 0) invalidate = stringArrayOf(parseProps(stripped.slice(1, objBody)).invalidate);
-      }
-    }
     out.push({
       name,
       kind,
@@ -576,14 +770,14 @@ export function scanEndpointSource(src, opts = {}) {
       contractFlat,
       outputFlat,
       unresolved,
+      inlineLiterals,
       live,
       invalidate,
-      emits: stringArrayOf(props.emits),
+      emits,
+      idempotent,
       hasTimeout: props.timeoutMs != null,
-      idempotent: stripComments(props.idempotent ?? "").trim() === "true",
-      line: src.slice(0, m.index).split("\n").length,
+      line,
     });
-    re.lastIndex = close + 1; // 越过本次调用体（handler 内不会嵌套 define*；防御性前进）
   }
   return out;
 }
@@ -709,6 +903,13 @@ function relImport(fromDir, toFile) {
   return rel;
 }
 
+/** JSDoc 注入消毒（R1-C）：用户可控文本（--mount、specs 描述）直插块注释前的破坏序列中性化——
+ *  星号+斜杠会提前闭合注释，把注释后半变成顶层代码（破碎产物落盘）；中性化写法「星号+反斜杠+斜杠」
+ *  是注释内的标准转义（JSDoc 渲染不变，注释结构完整）。端点名经 ATR-342 字符集闸（无星与斜杠）天然安全。 */
+function jsDocSafe(text) {
+  return String(text).replaceAll("*/", "*\\/");
+}
+
 /**
  * 生成 src/generated/api.ts 文本（纯函数——不落盘，字节确定性由排序与定长模板保证）。
  * opts: { mount?: string }
@@ -716,6 +917,21 @@ function relImport(fromDir, toFile) {
 export function generateApi(root, opts = {}) {
   const mount = "/" + String(opts.mount ?? "/api").replace(/^\/+|\/+$/g, "");
   const endpoints = scanEndpoints(root);
+  // 端点重名闸（R1-C，镜像运行时 EndpointRegistry.register() ATR-313）：重名端点会产出重复
+  // type 别名与重复 export const 的语法破碎 api.ts——生成器侧先 die，诊断带两处声明位置。
+  const seenEndpoints = new Map();
+  for (const e of endpoints) {
+    const prev = seenEndpoints.get(e.name);
+    if (prev != null) {
+      const loc = (x) => (x.file != null ? `${x.file}:${x.line}` : `第 ${x.line} 行`);
+      die(
+        "ATR-313",
+        `端点重复注册：${e.name}（${loc(prev)} 与 ${loc(e)}——生成器侧镜像运行时 register() 语义；重名会产出语法破碎的 api.ts）`,
+        `换名或先移除其一（运行时 register() 对重名同样 ATR-313 硬错）；本次扫描到的端点：${endpoints.map((x) => x.name).join(", ")}`
+      );
+    }
+    seenEndpoints.set(e.name, e);
+  }
   const contracts = scanContracts(root);
   const genDir = path.join(root, "src", "generated");
   const notes = [];
@@ -819,7 +1035,7 @@ export function generateApi(root, opts = {}) {
     const authNote = e.authSurface
       ? `；同源 fetch 自动携带会话 cookie（浏览器同源默认携带，无需 credentials 配置）——login 响应 Set-Cookie 由浏览器存储、logout 清除`
       : "";
-    L.push(`/** ${e.name}（${kindLabel}${e.authSurface ? "·auth 面" : ""}）—— POST ${mount}/${e.name}${e.live ? `；live SSE GET ${mount}/${e.name}/live（§4.3）` : ""}${authNote} */`);
+    L.push(`/** ${e.name}（${kindLabel}${e.authSurface ? "·auth 面" : ""}）—— POST ${jsDocSafe(mount)}/${e.name}${e.live ? `；live SSE GET ${jsDocSafe(mount)}/${e.name}/live（§4.3）` : ""}${authNote} */`);
     L.push(`export const ${camelOf(e.name)} = Object.freeze({`);
     // P1-8：端点名进生成码一律 JSON.stringify 转义（非法字符已在入口/派生闸 die——此处转义是纵深防御）
     L.push(`  name: ${JSON.stringify(e.name)} as const,`);
@@ -930,7 +1146,7 @@ export function generateSkeletons(root) {
     L.push(`import { AtrEndpointError, defineCommand, endpointError } from "${vendorServer}";`);
     L.push(``);
     for (const it of list) {
-      L.push(`/** 意图：${it.desc || "（specs 未写描述——补上，验收命令序列是 specs 三段式纪律）"} */`);
+      L.push(`/** 意图：${jsDocSafe(it.desc) || "（specs 未写描述——补上，验收命令序列是 specs 三段式纪律）"} */`);
       L.push(`export const ${camelOf(it.name)} = define${it.kind === "command" ? "Command" : "Query"}("${it.name}", {`);
       L.push(`  // contract: /* TODO：从 src/contract.ts 挂输入契约（FlatSchema 单源） */,`);
       if (it.live) L.push(`  // live: { invalidate: ["table:…"] }, /* TODO：显式失效键（键语法 table:<表名> / key:<业务键>） */`);

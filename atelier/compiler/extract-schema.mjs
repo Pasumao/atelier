@@ -57,7 +57,11 @@ function codeMaskOf(src) {
     if (top.kind === "tpl") {
       if (c === "\\") i++;
       else if (c === "`") stack.pop();
-      else if (c === "$" && src[i + 1] === "{") stack.push({ kind: "code", interp: true, depth: 0 });
+      else if (c === "$" && src[i + 1] === "{") {
+        stack.push({ kind: "code", interp: true, depth: 0 });
+        i += 2; // 越过 ${ 整体——若只越 $，{ 会被新插值帧当一层花括号深度计数，闭合 } 永远差一层，
+        continue; //        插值帧吞掉后续代码区标记（R1-C 在端点扫描器同款状态机中实证后归零）
+      }
       i++;
       continue;
     }

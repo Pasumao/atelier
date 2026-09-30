@@ -122,9 +122,9 @@ export function table(
     }
     const field: FlatField = { type: flatFieldType(col) };
     if (col.enum != null) {
-      // FlatField.enum 类型标注为 string[]（既有契约域以字符串字面量为主）；数值枚举的
-      // includes 值比较运行时同样成立——此处经 as 透传（不改 runtime 契约形状）。
-      field.enum = [...col.enum] as string[];
+      // FlatField.enum 已放宽为 (string|number)[]（R1-C §4.7——此前 string[] 标注是撒谎窄化，
+      // 数值枚举须经 as 硬转透传）；table() 构造期已校验同质，直接透传零窄化。
+      field.enum = [...col.enum];
     }
     const required = col.notNull === true || col.primaryKey === true;
     if (required) reqProps[key] = field;
