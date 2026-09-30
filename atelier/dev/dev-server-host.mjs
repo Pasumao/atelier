@@ -221,7 +221,7 @@ export function createServerSupervisor({ root, port = 5174, mount = "/api", dbPa
         // 子进程绝不越过握手超时存活
         timedOut = true;
         killChildTree(c);
-        settle(new Error(`ATR-403: server 面握手超时（${readyTimeoutMs}ms 未收到 ATELIER_SERVER_READY 行）——子进程已终止；检查 ${entryAbs} 是否按契约在 listen 后输出就绪行（上方 [server] 行是子进程原样输出）`));
+        settle(new Error(`ATR-403: server 面握手超时（${readyTimeoutMs}ms 未收到 ATELIER_SERVER_READY 行）——子进程击杀已发出（win32 taskkill /T /F 同步终止；POSIX SIGTERM 已发、SIGKILL 1.5s 兜底——忽略 SIGTERM 的子进程可能短暂仍活）；检查 ${entryAbs} 是否按契约在 listen 后输出就绪行（上方 [server] 行是子进程原样输出）`));
       }, readyTimeoutMs);
 
       // stdio pipe 必须持续消费（防缓冲死锁）；就绪行解析，其余行 [server] 前缀透传
