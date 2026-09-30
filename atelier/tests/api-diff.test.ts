@@ -174,7 +174,9 @@ describe("diff 分类与门禁语义", () => {
     });
     expect(d.summary.breaking).toBe(0);
     expect(d.summary.ok).toBe(false);
-    const j = judge(d);
+    // P-C#8：judge 改显式 strict 传参（修前从 summary.ok 反推——budget 超限同样压 ok=false，
+    // 非 strict 的 added 被误标）。行为契约有意变更，调用点随批更新。
+    const j = judge(d, [], { strict: true });
     expect(j.violations.some((v) => v.kind === "added(strict)")).toBe(true);
   });
 
