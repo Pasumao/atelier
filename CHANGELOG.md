@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-**R 收口批进行中**（2026-09-30 全仓架构评审立项：R1 安全与正确性 → R2 契约面单源化机检 → R3 结构债；任务书 = `atelier/docs/research/2026-09-30-architecture-review.md`，15 项 P1 全部实读/实跑坐实）。以下为已合并部分；阶段四 npm 发布（D-3）以 R1 完成为硬前置。
+**P 批（发布前硬化）收口——1.1.0 可进入发布工程批**（2026-09-30 第三遍全仓架构复校立项：任务书 = `atelier/docs/research/2026-09-30-third-architecture-review.md`，5 项新 P1 + ~15 项 P2 逐项实读坐实；主/子智能体 git worktree 协作四支并行 + 两路 fresh-context 独立评审。R 批条目见下方既有节；阶段四 npm 发布（D-3）前置 = push 310 commits + 远端 CI 首跑摘 snapshot continue-on-error）。
 
 ### 安全与加固
 
@@ -36,6 +36,14 @@
 - `sourceFingerprint` 重复实现单点化（checkpoint.mjs 并入 snapshot.mjs）；export-openapi 第三份字面量解码副本消灭（gen-endpoint 单源导出）
 - 反代韧性：上游响应头 15s 超时（504，SSE 头后流式豁免有测试）+ 客户端真断开销毁上游（SSE 生成器及时收尾）+ MCP resolved Map 200 上限 FIFO 修剪
 - snapshot.diff（MCP）基线路径 per-platform 平台感知（与 CLI 同阶梯；旧平铺只读回落）
+
+### 修复（P 批：发布前硬化，第三遍架构复校）
+
+- **runtime 正确性九件（P1×3 + P2×6）**：derived 计算抛错后与上游永久脱订（上游退订移至成功路径+失败保留旧订阅叠挂部分依赖+`failedDirty` 过同 tick 去重——UI 错误卡不再永久停留）（`f75395a`）；双 `<style scoped>` 块 last-wins（同组件名复用首铸 scope class，前序块选择器命中 root）；字面量 `<` 静默丢弃（按文本并入对齐 HTML「< 后非标签名即文本」，`</` 残缺闭合仍 ATR-101 显式拒）；bind:value×`<select>` 初始选中丢失（下行定版延至微任务，对齐 bindGroup 先例）；`$effect` 首跑抛错逃逸 dispose 登记（sink 登记移到首跑前，错误路径僵尸 effect 关闭）；bindAttr 错误哨兵流入属性（onError 独立通道，25 项布尔属性「存在即真」面摘除）；`html`` ` 误用静默吞插值（rest 参数双卫卫 ATR-101 四段式拒）；keyed `{#each}` 行内 index 永久陈旧（行内 index 信号随 i 写入 + codegen emitEach keyed 支路委托 `rt.eachRowScope` 同源——解释器≡编译路径 golden parity 钉死）；表达式一元 `±` 与 `not` 假支持（primary 补 unary、`not` 映射 `!`）
+- **server 三件**：契约端点收 JSON 标量/null 体 `k in data` TypeError 500→400 族（ATR-312 形状闸提升 + `payload = input ?? {}` 归一提前，未鉴权远程 500 面关闭、两分支口径归一）；jobs `handlers[row.type]` 原型链查找假成功（`Object.hasOwn` 判未注册——`type:"constructor"` 不再零执行落 done，兑现「绝不静默吞行」）；uploads 鉴权资产下载发 `public, max-age=31536000, immutable`（按下载面鉴权合取派生 private/public 档，共享缓存旁路授权关闭）（`618924f`）
+- **MCP 五件**：ATR-402→405 拆分漏改两处（认证失败恒 ATR-405，与 confirm 拒绝双语义拆清）；`ATELIER_TOOLSETS` 只滤 tools/list 广告不滤执行（callTool 入口执行闸——隐藏工具凭名直呼 ATR-404，「权限面收敛」注释成真）；`endpoint.impact` 广告参数 `root` 静默丢弃（真实消费 + FS6 消费面元数据 `FS6_CONSUMED_ARGS` 单源 + 机检扩双向 consumes∪gate=广告）；HTTP 通道 tasks/update 携标准体形 `_meta` 被拒（params 构造时剥离，对齐 tools/call 先例）；`ui.screenshot` TOOL_META timeoutMs 4s 与同端点 snapshot.diff 60s 自相矛盾（提至 60s + fetch 超时/不可达文案分列）
+- **CLI/生成器十三件（P1×2 + P2×11）**：`build --out` 无根目录关系守卫（越 root/==root/覆盖 package.json+src die 2——`--emptyOutDir` 清空应用源码面关闭；「..」判据整段化免误伤 `..foo`）（`4c6d1d0`）；dump stage② 扫描器无视注释/字符串（接入 extract-schema codeMaskOf——注释幻影模板/注释单反引号吞真模板/幻影组件三例关闭，无注释代码 dump 字节不变）；`review --target`/`sync --target` 缺值与 `struct --json` 旗标当子命令崩栈三件（套 init 同款 die 2 守卫）；checkpoint+struct 台账 jsonl 坏行裸 TypeError（逐行 try/catch die 1 指行号）；tokens-dtcg `--out` 同径覆写 token SSOT（samePath 拒 + atelier.config.json 告警）；api-diff `--allow` 坏档静默空表（die 2 诚实档）+ judge strict 双向反推（--budget 超限误标/--strict+removed 漏标修正，显式第三参）；gen-db SQLite 关键字只挡 JS 词表（db.ts assertIdent 加官方 147 词全集闸——构造期单一真相源，gen-db 回灌复验同闸）；gen-endpoint 派生标识符跨端点撞名无闸（camelOf/pascalOf seen-set，ATR-313 die 列双源名）；export-openapi 表名解码残留修复前旧语义（decodeEscapesCore 归一 + parity 测试）；字面量解析器 `__proto__` 原型键族（gen-db/extract-schema 显式 die、openapi/project-json `in`→`Object.hasOwn`）
+- **文档诚实面八件**：三处「未 push 远端」口径改真实（origin/main 滞后 310 commits、末次 2026-09-06、CI 2026-09-06 实跑在案——「R 批与 1.1.0 门禁未在远端验证，push 后首跑再摘 continue-on-error」，旗标本批不动）（`fb4c1fc`）；`.atelier/approval-secret` HMAC 密钥入模板 .gitignore + init 兜底名单；快照瞬态捕获模式三处统一 `.atr/snapshots/**/current*.png`（per-platform 形态不再进 git 锚点）；`/__atelier/stream-intro` 营销演示路由下线（文案与实现脱节且从未入队追踪）；Node 地板 ≥22.12 统一（README ×2 + package.json engines；sqlite ATR-330 fix 改 ≥22.13 免旗真实阈值诚实口径）；docs/README.md 导航刷新（1.1.0 / design-decisions 0-35，ARCHITECTURE 行如实标注 0-28 未并入）；init 收尾提示改真实 CLI 形态（框架无全局 bin）；模板 main-server.ts fix 措辞「改 server.port」→「新增 server.port 键」
 
 ## [1.1.0] - 2026-09-29
 
