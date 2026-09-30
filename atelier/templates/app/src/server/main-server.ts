@@ -88,7 +88,7 @@ if (invokedDirectly()) {
   const port = Number(process.env.ATELIER_SERVER_PORT ?? 5174);
   serve(createAppHandler(), { port, host: "127.0.0.1" }).catch((e: unknown) => {
     console.error(`[atelier] server 启动失败：127.0.0.1:${port} —— ${(e as Error)?.message ?? String(e)}`);
-    console.error("[atelier] fix：改 atelier.config.json 的 server.port 换端口，或释放被占端口后重跑。");
+    console.error("[atelier] fix：设 ATELIER_SERVER_PORT 环境变量换端口（dev 托管链路另可改 atelier.config.json 的 server.port——监督器会读取并注入该 env），或释放被占端口后重跑。");
     process.exit(1);
   });
 }

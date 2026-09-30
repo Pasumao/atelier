@@ -1,5 +1,6 @@
 # Atelier CI — P2-4 matrix (BACKLOG).
-# Gates: framework vitest · check-skills (single-source discipline) · struct check ·
+# Gates: framework vitest · check-skills (single-source discipline) · contract-checks (R2: ATR codes /
+# §8 CLI table / runtime barrel) · struct check ·
 # api-diff (public API surface drift, P3-4) · init smoke (template → install → app tests).
 # The snapshot-smoke job additionally exercises dev-face capture + the P2-2 未检不锚 checkpoint gate,
 # but is continue-on-error: visual capture is environment-sensitive and stays a smoke (not a gate) until
@@ -43,6 +44,9 @@ jobs:
 
       - name: skills consistency (CLI/MCP/skill single-source)
         run: node atelier/scripts/check-skills.mjs
+
+      - name: contract face checks (R2 — ATR codes / ARCHITECTURE §8 ↔ dispatch / runtime barrel)
+        run: node atelier/scripts/contract-checks.mjs
 
       - name: M3 grader negative-control (mutations must FAIL)
         run: node atelier/benchmarks/m3/negative-check.mjs

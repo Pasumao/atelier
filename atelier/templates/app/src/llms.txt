@@ -1,4 +1,4 @@
-# Atelier v0.1-prototype — API 速查（llms.txt 雏形）
+# Atelier 1.1.0 — API 速查（llms.txt）
 
 注册表自查询：GET /__atelier/registry
 文档：GET /__atelier/docs
@@ -6,7 +6,7 @@
 ## 组件编写（.atr.ts）
 
 ```ts
-import { component, $state, html } from "../src/runtime";
+import { component, $state, html } from "../runtime";
 
 // 首选：props 注解即 schema（决策 26 v1）——类型注解经编译期提取自动注册进 sink，
 // 见 src/components/SchemaProbe.atr.ts（ starter 核对物：无手写 schema 元数据）
@@ -28,21 +28,25 @@ export const Greeting2 = component((props: { name: string }) => {
 - `$state(init)` → 信号 { value, get, set }；模板表达式读取自动建立依赖
 - `$derived(fn)` → 派生信号（惰性缓存）
 - `$effect(fn)` → 副作用（依赖变化时重跑）
-- `streamValue<T>()` → { values, value, push, done, pending }：流式值原语
-- `optimisticList<T>()` → { values, optimisticAdd, commit, revertAll }：乐观更新+回滚
-- `store.commit(name) / rollback() / timeTravel(id) / list()`：事务状态层
+- `streamValue<T>()` → { values, value, done, error, push, finish }：流式值原语（错误帧覆盖旧值，失败不断流）
+- `optimisticList<T>()` → { values, rollbacked, revertErrors, optimisticAdd, commit, revert }：乐观更新+回滚
+- `store.commit(name) / rollback() / timeTravel(id) / list()`：事务状态层（`store.graph()`/`store.log()` 可查询）
 - `validateFlat(schema, data)`：扁平 schema 校验 → AtrError 四段式
 - props 注解即 schema（决策 26 v1）：`(props: {...})` 类型注解经编译期提取注册——映射面
   string / number / boolean / `Array<叶>` / 字面量联合→enum；`?:` → optProps、必有 → reqProps；
   显式手写 schema 仍优先（并存手写胜，删除手写件避免漂移）；注解缺省 → 跳过不校验；
   超出映射面（泛型/交叉/工具类型/非字面量联合/嵌套对象/any/unknown）→ ATR-102（fix 指路手写
   schema）；vendored 应用经 `atelier sync` 获得提取器（缺失时 dev 注入诚实降级）
-- 模板 DSL：{expr}、{#if}/{:else}/{/if}、{#each arr as item}/{/each}、on:click={fn}（.prevent/.stop 修饰符：on:click.prevent={fn}，ATR-326 白名单外拒绝）、bind:value={sig}/bind:checked={sig}/bind:group={sig}（双向，目标须可写 $state：$derived→ATR-305、目标非法/组合越面→ATR-324、同槽重复/冲突→ATR-325、radio 缺 value 身份键→ATR-327；bind:group × radio，组身份=静态 value 属性）、<StyleBlock scoped>
+- 模板 DSL：{expr}、{#if}/{:else}/{/if}、{#each arr as item}/{/each}、on:click={fn}（.prevent/.stop 修饰符：on:click.prevent={fn}，ATR-326 白名单外拒绝）、bind:value={sig}/bind:checked={sig}/bind:group={sig}（双向，目标须可写 $state：$derived→ATR-305、目标非法/组合越面→ATR-324、同槽重复/冲突→ATR-325、radio 缺 value 身份键→ATR-327；bind:group × radio，组身份=静态 value 属性）
 - 样式：只允许 var(--token) 或 utility 类，引用不存在 token 报 ATR-204
 - 错误：{code, message, context, fix}
 
-## 原型局限（v0.1 编译器待办）
+## 诚实边界（1.1.0 现状）
 
-- 作用域注入用显式 `.locals({...})`（编译器将从 AST 闭包捕获）
-- 扁平 schema 现支持 props 注解自动提取（决策 26 v1，注解即唯一来源可省手写件）与手写两种来源（并存手写优先）；编译产物流（codegen 嵌入 schema）尚未接线——工件 `schema` 字段已备位
-- 查询面为 HTTP 形式（完整 MCP 协议 / 状态快照 / 截图 / 审计为后续）
+- 作用域注入用显式 `.locals({...})`（运行时机制）；编译产物流已落地——`atelier compile` ② AST
+  dump（与解释器同一解析器）+ codegen ③ 静态 effect 图，registerCompiled 接入零 tokenize 快路径
+- 扁平 schema 两种来源：props 注解自动提取（决策 26 v1，注解可省手写件）与手写（并存手写优先）；
+  codegen 嵌入 schema 已接线（决策 26 v1 留位兑现）
+- 查询/操作面：MCP 工具面齐全（stdio `node atelier/mcp/server.mjs` + 应用 dev 面 `/__atelier/mcp`
+  HTTP 直连；工具数以 `mcp/mcp-definitions.json` 为唯一事实源）+ `/__atelier/*` 检视面
+  （registry / docs / endpoints / review）

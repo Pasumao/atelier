@@ -11,11 +11,16 @@
  *   F. runtime 导入面（import ... from "atelier/runtime" ⊆ API 白名单）
  *   G. 不可执行话术（正文禁词，代码块除外）
  *
+ * C/F 的白名单不再是手抄清单（R2 批退役：手抄曾漂移出 --ai/--static/--electron 与
+ * runtime 根本不导出的 expect/verify）——CLI_VERBS/FLAGS 从 cli.mjs dispatch/HELP 派生，
+ * RUNTIME_API 从 runtime/index.ts 桶出口派生（派生函数与对账机检 = scripts/contract-checks.mjs）。
+ *
  * Exit: 0 = all green; 1 = violations found.
  */
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
+import { extractBarrelApi, extractDispatchVerbs, extractHelpFlags } from "./contract-checks.mjs";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // atelier/
@@ -40,18 +45,11 @@ const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const AGENT_SKILLS_FIELDS = new Set(["name", "description", "license", "allowed-tools", "metadata"]);
 const AGENT_SKILLS_NAME_MAX = 64; // 标准：name ≤64 字符 kebab-case
 const AGENT_SKILLS_DESC_MAX = 1024; // 标准：description ≤1024 字符
-const CLI_VERBS = new Set(["init", "dev", "review", "sync", "check", "lint", "test", "snapshot", "e2e", "build", "package", "struct", "checkpoint", "mcp", "skills", "compile", "bench", "tokens", "impact", "migrate", "call"]); // call = D-F15 端点直调 CLI 通道（技能后续引用不再误报幻觉）
-const FLAGS = new Set([
-  "--ai", "--static", "--electron", "--update", "--no-gate", "--json",
-  "--target", "--name", "--no-ai", "--open", "--root", "--out", "--stdout", "--quiet",
-  "--keep", "--app", "--port", "--no-dsh", "--no-agents", "--no-mcp",
-]);
+/* 派生白名单（单一真相 = cli.mjs dispatch/HELP 与 runtime/index.ts 桶出口；手抄清单已退役） */
+const CLI_VERBS = extractDispatchVerbs(path.join(ROOT, "cli.mjs"));
+const FLAGS = extractHelpFlags(path.join(ROOT, "cli.mjs"));
+const RUNTIME_API = extractBarrelApi(path.join(ROOT, "runtime", "index.ts")).values;
 const TOOL_PREFIXES = /^(?:registry|tokens|state|ui|docs|checkpoint|test|snapshot|diff|audit|feedback|structure|endpoint|db|server|jobs|email|uploads)\./;
-const RUNTIME_API = new Set([
-  "component", "$state", "$derived", "$effect", "html", "streamValue", "optimisticList",
-  "store", "validateFlat", "validateUnknown", "expect", "verify", "initTokens",
-  "mountComponent", "registry",
-]);
 const BANNED_PHRASES = ["应该尽量", "尽量避免", "尽量不要", "应当尽量", "酌情", "视情况而定", "看情况", "when in doubt", "if possible", "as you see fit"];
 
 const findings = [];
@@ -148,7 +146,7 @@ for (const dir of skillDirs) {
   let md = readMd(p).replace(/^---\r?\n[\s\S]*?\r?\n---/, "");
   const prose = stripCode(md);
   for (const m of prose.matchAll(/atelier\s+([a-z][a-z0-9-]*)/g)) {
-    if (!CLI_VERBS.has(m[1])) fail("C.cli", `${dir}/SKILL.md: unknown command "atelier ${m[1]}" (not in ARCHITECTURE §8)`);
+    if (!CLI_VERBS.has(m[1])) fail("C.cli", `${dir}/SKILL.md: unknown command "atelier ${m[1]}" (not in cli.mjs dispatch)`);
   }
   // scan flags only on lines that mention the atelier CLI (bare `--token` names elsewhere are design tokens, not flags)
   const cliLines = prose.split(/\r?\n/).filter((l) => /\batelier\b/.test(l) && !/atelier\.config\.json/.test(l.replace(/`atelier\.config\.json`/g, ""))).join("\n");

@@ -76,7 +76,7 @@ Component.atr.ts
 | contract validator | 扁平 schema 校验（dev 强制/prod 剥离 tree-shake） | 6 |
 | standard schema | `~standard` 互操作口（决策 22）：validate 委托 validateFlat，issues 映射标准列表——tRPC/Hono/TanStack 等生态可直接消费 | 22 |
 | whitelist renderer | D 子集：远程 schema → 注册表组件 + 合法 token（安全渲染） | 12 |
-| env | `atelier.env` 显式访问 window/document，禁隐式全局 | 9 |
+| env | 决策 9 规范位：`atelier.env` 显式 window/document 访问——**原语未落地**（runtime 无此模块；当前口径 = 组件渲染路径不触 DOM 全局，宿主访问收口在应用边缘） | 9 |
 
 ## 5. 契约层产物（决策 6「一份 schema 三用」→ 全站化扩为五用，决策 17/22）
 
@@ -118,30 +118,44 @@ Component.atr.ts
   "agent": { "confirm": "auto",          // auto | ask | deny（破坏性操作）
              "requireToken": true },
   "build": { "ssr": "none" },            // none | static（SSG 可选）
-  "server": { "port": 0 }                // 0 = 自动；固定端口便于 agent 配置
+  "server": { "port": 0, "mount": "/api", "dbPath": ".atelier/dev.db" }
+                                         // server 段由 dev 托管监督链读取（resolveServerConfig →
+                                         // 注入 ATELIER_SERVER_PORT/ATELIER_SERVER_MOUNT 等 env 给
+                                         // 子进程）；port 0 = 自动。直跑 src/server/main-server.ts
+                                         // 不读本文件，只认同名 env 变量
 }
 ```
 
 ## 8. CLI 命令总表
 
+> 本表与 `cli.mjs` dispatch/HELP 的对账由 `scripts/contract-checks.mjs` 机检钉死（动词双向覆盖 +
+> 旗标 ⊆ HELP）——编辑本表请与 cli.mjs 同步改；实现档位（FULL/MINI/STUB）以 cli.mjs HELP 内标注为准。
+
 | 命令 | 用途 |
 |---|---|
-| `atelier init` / `atelier init --ai` | 脚手架（prototype starter 全拷 = 可运行示例即模板）；`--ai` 叠加 agent 层：AGENTS.md + SKILL.md + llms.txt + specs/ + `.mcp.json` 等客户端配置 + 技能包双落点安装 |
-| `atelier dev` | 开发服务（当前 Bun/Vite 脚本态：127.0.0.1）+ **内嵌 MCP Server 与 `/__atelier/*` 检视面** |
-| `atelier review` | 打开 L5 本地验收界面（dev server 的 HTTP 面） |
-| `atelier check` | 硬门槛聚合器：v0.2 = 六层结构矛盾检查（`structure.check` 同源）；类型严格检查 + 契约提取 + token 校验随编译器包并入 |
-| `atelier lint` | @atelier/eslint 规则集（软约束） |
-| `atelier test` | Vitest 单元/组件断言 |
-| `atelier struct [map|check]` | 六层结构地图/门禁（`docs/AI-OPTIMAL-STRUCTURE.md` 公理的机检执行件；OK/WARN/INFO 分级不假红） |
-| `atelier snapshot save \| check [--update]` | 截图基准库管理（`.atr/snapshots/`）：dev-face 无头通道拍摄，字节+像素双档判定（字节差但像素比 ≤ 阈值 = PIXMATCH，字体抗锯齿不算回归），双图人审后 `--update` 才晋升 |
-| `atelier api-diff snapshot \| check` | 公共 API 面漂移门禁（P3-4，`.atelier/api-surface.json` 基线）：框架四面（runtime 导出/CLI 命令/MCP 工具/token 键）+ 应用两面（组件契约/token 键）；removed/changed = breaking（exit 1，`--allow` 豁免，`--strict` 连新增也红），churn 漂移率出数 |
-| `atelier sync [--target <dir>]` | 已有应用拉齐 vendor：runtime + dev 面全量覆盖到框架当前时点，specs 模板补种；应用源码/config 不碰 |
-| `atelier checkpoint save \| list \| rollback` | 源码 checkpoint（决策 15）：save 内建三道门禁（测试套件绿 + 截图快照 MATCH + API 面无未豁免破坏漂移）；台账 `.atelier/checkpoints.jsonl` |
-| `atelier bench --app <dir>` | 性能四指标实测（gzip 体积 / 10³ 节点挂载 / HMR / 截图回环）；数字唯一人工口径 = 仓库根 README 性能表 |
-| `atelier tokens export \| import` | 设计 token DTCG（W3C Design Tokens 稳定版）格式互导 |
-| `atelier e2e` | 浏览器回环（结构断言 + 截图 diff） |
-| `atelier build [--static]` | 产物 `dist/`（静态、相对路径、零依赖）；`--static` 启用 SSG |
-| `atelier package [--electron]` | 默认 Tauri 2 打包 exe；`--electron` 备选模板 |
+| `atelier init --target <dir> --name <Name> [--no-ai]` | 脚手架：模板组装自包含应用；agent 层缺省叠加（AGENTS.md + llms.txt + specs/ + 技能双落点 + 客户端 MCP 配置），`--no-ai` 退出 |
+| `atelier dev [--prod-db <path>]` | 开发服务（127.0.0.1:5173）+ 内嵌 MCP（stdio + `/__atelier/mcp` HTTP 直连）+ server 面托管监督器（缺省 5174：`/api/*` 反代、`src/server/**` 热重启）+ `/__atelier/*` 检视面 |
+| `atelier review [--open]` | 打开 L5 本地验收界面（dev 面 `/__atelier/review`：timeline + 双图判定写回；需 dev server 在跑） |
+| `atelier check` | 硬门槛 = 八层结构矛盾检查（struct check 同源转发）；类型严格检查 + 契约提取 + token 校验随编译器包并入 |
+| `atelier struct [map\|check] [--json]` | 八层结构地图/门禁（`docs/AI-OPTIMAL-STRUCTURE.md` 公理的机检执行件；OK/WARN/ERROR 分级不假红） |
+| `atelier test` | 转发到应用测试 runner（pnpm test） |
+| `atelier snapshot save \| check [--update] [--full]` | 视觉回归基准库（`.atr/snapshots/`）：dev-face 无头通道拍摄，字节+像素双档判定（字节差但像素比 ≤ 阈值 = PIXMATCH），人审后 `--update` 才晋升；`--full` = 整页变体 |
+| `atelier api-diff snapshot \| check [--root <dir>] [--json] [--strict] [--allow <f>] [--budget <0..1>]` | 公共 API 面漂移门禁（P3-4）：框架四面（runtime 导出/CLI 命令/MCP 工具/token 键）+ 应用三面（组件契约/token 键/openapi 面）；removed/changed = breaking（exit 1），churn 漂移率出数 |
+| `atelier checkpoint save <name> [--no-gate] \| list \| rollback <id>` | 源码 checkpoint（决策 15）：save 内建三道门禁（测试套件绿 + 截图快照 MATCH + API 面无未豁免破坏漂移）+ migrationHead 台账联动；`--no-gate` 是 wip 锚逃生口 |
+| `atelier sync [--target <dir>]` | 已有应用拉齐 vendor：runtime + dev 面 + mcp 族全量覆盖到框架当前时点，specs 模板补种；应用源码/config 不碰 |
+| `atelier bench --app <dir> [--port N] [--json] [--keep]` | 性能四指标实测（gzip 体积 / 10³ 节点挂载 / HMR / 截图回环）；数字唯一人工口径 = 仓库根 README 性能表 |
+| `atelier tokens export \| import --in <f> --out <f>` | 设计 token DTCG（W3C Design Tokens 稳定版）互导（atelier.config.json ↔ .tokens.json） |
+| `atelier build --target=node\|bun [--root <dir>] [--out <dir>] [--no-smoke]` | 自托管单容器产物（D-F14）：vite 静态面 + `dist/server.mjs` 启动壳 + spawn 冒烟自证；edge/serverless 不做清单显式拒绝 |
+| `atelier compile [--root <dir>] [--out <dir>] [--stdout]` | 编译器 ②（P0-2）：`*.atr.ts` → 模板 AST JSON（`.atr/ast/`，与解释器同一解析器）；③ codegen：`node atelier/compiler/codegen.mjs --ast <dir> [--graph]`（`--graph-only` = 依赖图查询 stdout） |
+| `atelier gen db \| endpoint \| auth [--root <dir>]` | FS-M2 生成器族：数据契约 → tables/crud + 迁移骨架 + seeds 示例；端点 → `src/generated/api.ts` 类型化客户端（`--mount /api`、`--from-specs` 兼发骨架；auth 产物投影类型含入）；`gen auth [--flows reset,verify]` 鉴权套件 + 流程端点对；产物显式 import 闭合 + regen 字节幂等 |
+| `atelier migrate status \| up \| down \| verify \| seed [--root <dir>] [--db <f>] [--to <name>] [--force]` | 可逆迁移器（FS-4）+ SQL 种子（D-F17）：verify = 影子库干跑幂等；不可逆 down 须 `--force`；seed 逐文件 tx 幂等重跑 |
+| `atelier db backup --out <file> [--root <dir>] [--db <f>] [--force] [--no-verify]` | 在线备份（A3）：VACUUM INTO 单文件快照（读快照不锁写不停机）+ quick_check/sha256 自证行 |
+| `atelier impact <contractKey> [--root <dir>]` | 契约 → 端点 → 调用点 两跳影响面导航（导航不是门禁——exit 恒 0） |
+| `atelier call <endpoint> ['<json>'] [--root <dir>] [--mount /api] [--port N] [--timeout <ms>]` | 端点直调 CLI 通道（D-F15）：POST `<mount>/<name>`，响应 JSON 上 stdout，ATR 结构化错误 stderr + exit 1 |
+| `atelier export openapi [--root <dir>] [--out openapi.json] [--mount /api] [--name <T>]` | 端点面 → openapi-3.0.3 文档（FS-9：schema 走 §2.4 投影器单管线；restful:true 端点映射 GET） |
+| `atelier mcp` | 内建 MCP server（stdio；env `ATELIER_PROJECT_ROOT`/`ATELIER_DEV_URL`；应用 dev 面另有 `/__atelier/mcp` 无状态 HTTP 直连） |
+| `atelier skills install [--target <dir>] [--name <N>] [--no-dsh\|--no-agents\|--no-mcp]` · `atelier skills check` | 技能包双落点安装（模板渲染 + specs 骨架，幂等）+ 一致性校验门禁（CI exit code） |
+| `atelier e2e` · `atelier lint` · `atelier package` | STUB（exit 4，诚实未实现）：spec 位随 review-ui / @atelier/eslint / 打包包落地；Meanwhile 软约束由技能包承载、`check`/`snapshot`/`checkpoint` 覆盖回环核心 |
 
 ## 9. 安全基线（决策 12）
 
