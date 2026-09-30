@@ -6,6 +6,27 @@
 
 ## [Unreleased]
 
+**R 收口批进行中**（2026-09-30 全仓架构评审立项：R1 安全与正确性 → R2 契约面单源化机检 → R3 结构债；任务书 = `atelier/docs/research/2026-09-30-architecture-review.md`，15 项 P1 全部实读/实跑坐实）。以下为已合并部分；阶段四 npm 发布（D-3）以 R1 完成为硬前置。
+
+### 安全与加固
+
+- **资产下载面收口（决策 35，评审 P1#1/#2）**：`defineUpload` 新增 `downloadAuth` 声明位（复用 gateAuth 单源，缺省跟随上传面 auth、全链 fail-closed，多面合取）；下载句柄改 sha256 内容寻址（`GET <mount>/assets/<sha256hex>`，顺序整数 id 退役为内部主键——匿名枚举私有文件面关闭）；下载响应恒 `X-Content-Type-Options: nosniff` + 危险 mime（html/xhtml/svg 族）缺省 `Content-Disposition: attachment`；上传入口拒控制字符 mime、下载发射侧对存量毒化行 fail-safe 回落（独立评审对抗探针补充洞一并收口）（`5b22efe`/`dfc76c4`）
+- **dev 反代 `<mount>/*` Origin 闸（评审 P1#3）**：复用 P1-12 闸单源（无 Origin 放行/Origin:null 拒/selfPort 函数口径）——恶意网页 no-cors fetch 跨站驱动写端点的面关闭（`ebd8a6a`）
+- **confirm 安全三件（评审 §4.2）**：未知档位 fail-closed（`"ask "` 尾空格/拼错不再静默放行破坏性工具，ATR-402）；审批句柄 nonce 一次性台账（TTL 内重放拒绝，「一次审批→N 次回滚」关闭）；审批 HMAC 密钥与 dev-token 分离（`.atelier/approval-secret` 首用生成 0600——持 dev-token 方不可再伪造自批）
+- **mount 前缀 `/` 边界（评审 P1#14）**：`/apifoo` 不再分发、`/apiupload/x` 不再命中上传面（绕过按前缀设防的反代 ACL 面关闭）；restful GET 非有限数（`?n=1e999`）400 ATR-312（`5b22efe`）
+
+### 修复
+
+- **runtime/codegen 同源四件（评审 P1#5/6/9/15）**：`rt.bindAttr` 单点化（编译产物 `disabled={false}` 布尔语义反转修复+双路径 golden parity）；`extractStyleBlocks` 单点统一多 `<style>` 块全注入；effect 泄漏三症状一次修（mount 中途抛错回收/运行期分支 effects 随实例析构/公开 `unmount()`）；`__recordLastError` globalThis 单源（非浏览器环境错误记录器不再抛 ReferenceError 吞错）（`3699bb2`）
+- **生成器六件（评审 P1#4/13 + §4.7）**：端点扫描器 codeMask 掩码（注释掉的 defineQuery 不再产幻影端点、多行注释不再吞真实端点；export-openapi 改复用单一真相 walk）+ 顺带修出 codeMask `${` off-by-one 潜伏 bug；gen-db 保留字闸（表名 `delete` 不再产出 SQLite 语法错误的迁移）；端点重名 die；转义解码统一 JSON.parse 语义（`\n`/`\u4e2d` 三处三值分叉关闭）；desc/mount JSDoc 注入消毒；数值枚举 `(string|number)[]` 跨消费面收口；dump 产物去时间戳/绝对路径恢复 regen 字节幂等（`aacc219`）
+- **dev/CLI 六件（评审 P1#7/8/10/11/12）**：init 对已存在非空目录 die 指路 `atelier sync`（`--force` 显式逃生）+ 参数缺值不再落 `./undefined`；api-diff 坏基线 exit 3 + checkpoint 对「基线存在但不可评估」拒锚（坏基线不再 vacuous 静默放行）；dev 插件 7 处改实际监听端口（strictPort 让位后截图/cookie/MCP 不再打错端口）；握手超时杀子进程+start() re-entry 清场（不再孤儿进程占端口持 SQLite 句柄）；`/__atelier/registry|docs` 错误围栏（文件缺失 500 ATR JSON 而非请求悬挂+unhandledRejection）（`ebd8a6a`）
+- **MCP 契约面（评审 §4.1/§4.3）**：幻影广告参数删除（tokens.list.group/state.snapshot.root/ui.screenshot.format——dev 面零消费）；`min/max` 翻译 `minimum/maximum`（严格宿主校验生效）；受闸三工具 inputSchema 声明 `_approval`（additionalProperties:false 严格宿主审批二轮可达）；ATR-402 双语义拆分（confirm 档拒绝保留 402，dev-token 校验失败独立 **ATR-405**）
+
+### 新增
+
+- **runtime 响亮拒绝两件（评审 R-D4）**：忘写 `.value` 渲染信号 JSON → dev 一次性警示（**ATR-352**）；keyed each 重复 key 折叠行 → dev 一次性警示（**ATR-353**）——均 prod 剥离、渲染语义逐字不变（`3699bb2`）
+- **契约面单源化机检（R2 批）**：新 `atelier/scripts/contract-checks.mjs` 三查（错误码全集反向对账——51 码 ⊆ 总表、12 缺码补齐；ARCHITECTURE §8 CLI 表 ↔ dispatch 双向对账——22 行表再生、`init --ai` 语义反转等漂移修正；runtime 桶出口派生哨兵）+ check-skills CLI_VERBS/FLAGS/RUNTIME_API 手抄白名单退役改派生 + CI 默认门接入；幻影面清账（技能包 expect/verify、`atelier lint/e2e` STUB 如实标注、llms.txt 1.1.0 刷新、gen-auth 过期产物注释等）（R2 支合并）
+
 ## [1.1.0] - 2026-09-29
 
 **全站化 server 面从骨架到生产可用。** 1.0.0（合并锚 `6bb411c`，2026-09-27）之后四批（评审批 / 差距批 W1-W9 / 第三批 W10-W13 / MCP 工具族扩张批）的版本化提炼，条目由 `atelier/docs/BACKLOG.md` 四批归档行逐条对账提炼（代表性 git 锚点，经逐枚核验）；minor 判定依据 = 决策 28（api-diff 历次门禁全为 additive 零 breaking：+4 MCP 工具 / `db` CLI 命令 / `StreamError`·`RevertErrorEntry` 导出等纯加法）。本版新增决策 29-34（journal 持久化 / API key / email / 上传 / cache / GET for query）；新能力的使用者视角边界见根 README「Known Limitations」节。
