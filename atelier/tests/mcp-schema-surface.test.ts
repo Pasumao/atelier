@@ -9,7 +9,13 @@
  * listTools() = stdio 与 HTTP 直连同源（server.mjs 单源），断言它即断言两个通道的广告面。
  */
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
 import { listTools } from "../mcp/server.mjs";
+import { FS6_TOOLS, FS6_CONSUMED_ARGS } from "../mcp/endpoint-tools.mjs";
+
+const DEFS = JSON.parse(fs.readFileSync(new URL("../mcp/mcp-definitions.json", import.meta.url), "utf8")) as {
+  tools: Array<{ name: string; params?: { reqProps?: Record<string, unknown>; optProps?: Record<string, unknown> } }>;
+};
 
 const schemaOf = (name: string): Record<string, any> => {
   const t = (listTools() as Array<{ name: string; inputSchema: unknown }>).find((x) => x.name === name);
@@ -42,5 +48,37 @@ describe("MCP 契约面：广告 = 消费（R3 收口）", () => {
       expect(s.properties._approval, name).toBeDefined(); // 红态：undefined——严格宿主拒绝审批二轮
       expect(s.properties._approval.type).toBe("object");
     }
+  });
+});
+
+/* ---- P2-M3（2026-09-30 第三遍架构复校 §2.2）：机检扩为双向 ----
+ * R3 的 TOOL_META.args ⊆ 广告 只覆盖非 FS6 工具（消费 ⊆ 广告单向），FS6 全族不入 TOOL_META，
+ * server.mjs 注释宣称的「FS6 消费面元数据在 endpoint-tools.mjs 单源」实为不存在——
+ * endpoint.impact 广告 root 被静默丢弃正是该缺口漏进广告面的实例。目标：FS6 消费面元数据
+ * （FS6_CONSUMED_ARGS，consumes + gate 两键）在 endpoint-tools.mjs 单源落档，机检双向：
+ * 消费 ∪ 闸 ⊆ 广告（未广告参数不得消费）且 广告 ⊆ 消费 ∪ 闸（幻影广告参数归零）。
+ * gate 豁免位 = _approval（endpoint.call 的审批参数由 callTool 公共闸消费剥离，不进 handler）。 */
+describe("P2-M3 FS6 消费面元数据：双向机检（消费 ∪ 闸 = 广告，两向都钉）", () => {
+  it("FS6 全族：FS6_CONSUMED_ARGS 与广告 schema 键集双向精确相等（红态：元数据不存在 + endpoint.impact root 幻影广告）", () => {
+    for (const name of FS6_TOOLS as unknown as Iterable<string>) {
+      const meta = (FS6_CONSUMED_ARGS as Record<string, { consumes?: string[]; gate?: string[] }> | undefined)?.[name];
+      if (!meta) throw new Error(`FS6 消费面元数据缺失：${name}（红态：FS6_CONSUMED_ARGS 未落档）`);
+      const params = DEFS.tools.find((t) => t.name === name)?.params ?? {};
+      const advertised = new Set([...Object.keys(params.reqProps ?? {}), ...Object.keys(params.optProps ?? {})]);
+      const consumed = new Set([...(meta.consumes ?? []), ...(meta.gate ?? [])]);
+      for (const k of consumed) {
+        expect(advertised.has(k), `${name} 消费未广告参数 "${k}"`).toBe(true);
+      }
+      for (const k of advertised) {
+        expect(consumed.has(k), `${name} 广告参数 "${k}" 未被任何一方消费（幻影广告——静默丢弃类漂移）`).toBe(true);
+      }
+    }
+  });
+
+  it("endpoint.impact 消费面含 root（红态：广告 root 但实现静默丢弃——R 批宣称清零的幻影参数类存活）", () => {
+    const meta = (FS6_CONSUMED_ARGS as Record<string, { consumes?: string[] }> | undefined)?.["endpoint.impact"];
+    expect(meta?.consumes, "endpoint.impact 元数据").toBeDefined();
+    expect(meta?.consumes).toContain("root");
+    expect(meta?.consumes).toContain("contractKey");
   });
 });

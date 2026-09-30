@@ -386,6 +386,23 @@ describe("FS-M6③ Tasks 扩展（SEP-2133：服务端主导创建 + tasks/get|u
     expect(JSON.parse(upd.body).result.ttlMs).toBe(1000);
   });
 
+  // ---- P2-M4（2026-09-30 第三遍架构复校 §2.2）：_meta 是标准体形（http.mjs:17 头注释明示
+  // 「版本经每次请求的 _meta 携带」），tasks/get、cancel 容忍多余键，唯独 update 因 store.update
+  // 未知字段严格闸（tasks.mjs SETTABLE_FIELDS）携 _meta 即 ATR-401。目标：http.mjs tasks/*
+  // 分支构造 params 时剥 _meta（对齐 tools/call 只取 { name, arguments } 的既有先例）。
+  // 红态：ATR-401「字段 _meta 不可设置」。----
+  it("红（P2-M4）：HTTP 通道 tasks/update 携 _meta（标准体形）→ 正常生效（红态：ATR-401 字段 _meta 不可设置）", async () => {
+    const created = JSON.parse((await call("structure.check", { root: AUTO_ROOT })).body).result.task;
+    const upd = (await handleMcpHttp(
+      mcpRequest("tasks/update", { taskId: created.taskId, ttlMs: 4321, _meta: { protocolVersion: "2026-07-28" } }),
+      deps()
+    )) as any;
+    expect(upd.status).toBe(200);
+    const parsed = JSON.parse(upd.body);
+    expect(parsed.ok, `红态兜底：${parsed.error?.message ?? ""}`).toBe(true);
+    expect(parsed.result.ttlMs).toBe(4321);
+  });
+
   it("tasks/cancel：运行中任务取消 → cancelled 终态，result 不再产出；未知 taskId → ATR-401", async () => {
     const store = createTaskStore();
     let started = false;
