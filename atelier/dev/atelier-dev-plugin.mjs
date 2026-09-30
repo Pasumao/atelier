@@ -93,6 +93,49 @@ function cookieValue(header, name) {
   return "";
 }
 
+/* ---- R3 结构债（评审 §2.2 风险 2 / §4.6）：路由匹配原语导出（可直测）----
+ * P1-14 教训：mount 前缀边界 bug 能活到今天，正说明路由匹配逻辑无法被单独测试——atelierFace
+ * 原为约 470 行 if-chain（20+ 路由整链黑盒）。匹配三原语抽成模块级纯函数（tests/dev-face-routes
+ * 直测），分派面 = configureServer 期的路由表（插件实例 __atelierRouteTable 直测面）。 */
+
+/** dev 面 mount 前缀（尾斜杠是语义的一部分：裸 "/__atelier" 不属 dev 面，交还 Vite）。 */
+export const ATELIER_FACE_PREFIX = "/__atelier/";
+
+/** mount 边界判别：原始 URL（含 query）是否进入 dev 面闸门链。前缀吞噬防线：/、/__atelier、
+ * /__atelierEvil、/api/__atelier/* 一律 false。 */
+export function isAtelierFace(rawUrl) {
+  return String(rawUrl ?? "").startsWith(ATELIER_FACE_PREFIX);
+}
+
+/** 路由键归一：query 剥离（首个 ? 起）。与原 `rawUrl.split("?")[0]` 逐字节同语义。 */
+export function stripQuery(rawUrl) {
+  return String(rawUrl ?? "").split("?")[0];
+}
+
+/** 路由表匹配（exact-match）：完整路径相等才命中，绝不前缀吞噬（/__atelier/review ≠
+ * /__atelier/review-data）。query 必须已由 stripQuery 剥离；同路径重复登记首条胜（find 语义）。 */
+export function matchRoute(table, url) {
+  return table.find((r) => r.path === url) ?? null;
+}
+
+/** 路由表项构造（可读性标签）。handle 签名 (req, res, rawUrl)——rawUrl 为含 query 的原始 URL。 */
+function devRoute(path, handle) {
+  return { path, handle };
+}
+
+/** resolved 命令回执台账上限（§4.6：Map 永不清理 → 有界 FIFO 逐出；dev server 长跑不无界增长）。 */
+export const MAX_RESOLVED = 200;
+
+/** 有界修剪（纯函数，可直测）：超 cap 按插入序逐出最旧条目（Map 迭代序 = 插入序）；cap 内零变化。 */
+export function pruneResolved(map, cap = MAX_RESOLVED) {
+  while (map.size > cap) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+  return map;
+}
+
 export function atelierDevPlugin() {
   const require = createRequire(import.meta.url);
   const fs = require("node:fs");
@@ -200,7 +243,9 @@ export function atelierDevPlugin() {
     return `import { registerExtractedSchemas as __atelierRs } from ${JSON.stringify(rel)};\n__atelierRs(${JSON.stringify(map)});\n`;
   }
 
-  return {
+  /* R3 结构债：具名 api 对象——configureServer 期把路由表挂到实例上（__atelierRouteTable 直测面，
+   * 运行时零消费；见 tests/dev-face-routes.test.ts）。 */
+  const api = {
     name: "atelier-dev-plugin",
     // enforce pre：transform 必须看到**原始 TS 源**——决策 26 的 schema 注入从 (props: {...})
     // 注解提取 schema，而 Vite 7 的内部 esbuild 剥类型先于普通用户插件 transform 跑
@@ -387,7 +432,7 @@ export function atelierDevPlugin() {
           return;
         }
 
-        if (!rawUrl.startsWith("/__atelier/")) return next();
+        if (!isAtelierFace(rawUrl)) return next(); // mount 边界（纯函数可直测——P1-14 教训）
 
         /* ---------- P1-12 ① Origin/Host 闸 ----------
          * Origin 头存在且不属于自身授权方（127.0.0.1/localhost/[::1]/配置 host）也不与 Host 头同源
@@ -416,16 +461,27 @@ export function atelierDevPlugin() {
         if (req.method !== "GET")
           audit("access", { method: req.method, url: rawUrl.split("?")[0], agent: classifyAgent(req.headers["user-agent"]) });
 
-        const url = rawUrl.split("?")[0];
+        const url = stripQuery(rawUrl);
         res.setHeader("Content-Type", "application/json; charset=utf-8");
 
+        /* R3 结构债：表驱动分派（原约 470 行 if-chain → ROUTES 路由表）。exact-match 纯函数匹配
+         * （matchRoute 可直测——P1-14 教训）；表在 atelierFace 之后定义（const 闭包：configureServer
+         * 同步跑完即初始化，请求期才调用，无 TDZ 窗口）。 */
+        const route = matchRoute(ROUTES, url);
+        if (!route) return next();
+        await route.handle(req, res, rawUrl);
+      };
+
+      /* ---------- 路由表（原 if-chain 逐条平移：条目顺序 = 原源顺序，exact-match 互斥保序只为
+       * 可读性；handler 体逐字节未动，第三个参数 rawUrl = 含 query 的原始 URL）---------- */
+      const ROUTES = [
         /* ---------- FS-M6（§10.2）：/__atelier/mcp —— MCP 2026-07-28 无状态 HTTP 直连端点 ----------
          * 逻辑单源 = atelier/mcp/http.mjs（handleMcpHttp，与 stdio server.mjs 同一 callTool 核心）；
          * 这里只接线：token 门之后桥接。桥模块按框架仓布局解析（dev/ 与 mcp/ 同级；应用侧由
          * init/sync vendor 同构布局——scripts/ 与 mcp/ 同级，FS-M7 起名单含 MCP 族十件），vendored
          * 拷贝按同样的相对路径直连可用；旧应用未 sync（缺 mcp/ 族）时诚实降级指路补齐 vendor /
          * stdio 通道，绝不静默。 */
-        if (url === "/__atelier/mcp") {
+        devRoute("/__atelier/mcp", async (req, res, rawUrl) => {
           if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           let out;
@@ -462,11 +518,10 @@ export function atelierDevPlugin() {
           res.statusCode = out.status;
           res.setHeader("Content-Type", out.contentType ?? "application/json; charset=utf-8");
           res.end(out.body);
-          return;
-        }
+        }),
 
         // P2-4：agent 体检出口（token 门内，JSON 结构化）
-        if (url === "/__atelier/agent-health") {
+        devRoute("/__atelier/agent-health", async (req, res) => {
           res.end(
             JSON.stringify({
               ok: true,
@@ -479,12 +534,11 @@ export function atelierDevPlugin() {
               note: "UA 启发式分类（human/headless/tooling），面向检视不面向鉴权",
             }),
           );
-          return;
-        }
+        }),
 
         /* ---------- query face ---------- */
         /* ---------- FS-M6（D-F16/§11.2/§11.3）：server 内省代理 + 调试页 + review 扩展数据 ---------- */
-        if (url === "/__atelier/server-status") {
+        devRoute("/__atelier/server-status", async (req, res) => {
           const status = await fetchChildStatus();
           if (status) res.end(JSON.stringify(status));
           else
@@ -495,14 +549,12 @@ export function atelierDevPlugin() {
                   "server 面未托管/未就绪（src/server/main-server.ts 不存在，或监督器握手/热重启中）——端点注册表/journal/live 是子进程内存态，父进程无事实可报；fix：应用目录 pnpm dev（托管自动拉起）并确认 main-server.ts 装配了端点",
               }),
             );
-          return;
-        }
-        if (url === "/__atelier/endpoints") {
+        }),
+        devRoute("/__atelier/endpoints", async (req, res) => {
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           res.end(endpointsPageHtml()); // P1-12：页面不再内嵌 token——fetch 靠同源 cookie
-          return;
-        }
-        if (url === "/__atelier/review-data") {
+        }),
+        devRoute("/__atelier/review-data", async (req, res, rawUrl) => {
           const anchor = new URL(rawUrl, "http://x").searchParams.get("anchor");
           let childStatus = null;
           try {
@@ -514,46 +566,39 @@ export function atelierDevPlugin() {
           // 见 dev-review-data.mjs readMigrationsSqlite）——dbPath 用托管装配解析出的同一个
           const payload = await buildReviewDataAsync({ root: ROOT, serverStatus: childStatus, anchorId: anchor, dbPath: serverDbPath });
           res.end(JSON.stringify(payload));
-          return;
-        }
-        if (url === "/__atelier/review-ext.js") {
+        }),
+        devRoute("/__atelier/review-ext.js", async (req, res) => {
           // review 页 <script src> 注入件（P1-12：不再带 token 查询——脚本请求同源自动携 cookie）
           res.setHeader("Content-Type", "application/javascript; charset=utf-8");
           res.end(reviewExtScript());
-          return;
-        }
-        if (url === "/__atelier/registry") {
+        }),
+        devRoute("/__atelier/registry", async (req, res) => {
           const manifest = JSON.parse(fs.readFileSync(`${ROOT}/src/manifest.json`, "utf-8"));
           res.end(JSON.stringify({ ok: true, meta: { atelier: "v1.1", server: "dev" }, ...manifest }));
-          return;
-        }
-        if (url === "/__atelier/tokens") {
+        }),
+        devRoute("/__atelier/tokens", async (req, res) => {
           let groups = {};
           try {
             groups = JSON.parse(fs.readFileSync(`${ROOT}/atelier.config.json`, "utf-8")).tokens ?? {};
           } catch { /* guidance via skills layer */ }
           res.end(JSON.stringify({ ok: true, meta: { source: "atelier.config.json" }, groups }));
-          return;
-        }
-        if (url === "/__atelier/state-snapshot") {
+        }),
+        devRoute("/__atelier/state-snapshot", async (req, res) => {
           res.end(JSON.stringify(latestBridgeState ?? { ok: false, note: "no browser has reported yet — open the app once in dev preview" }));
-          return;
-        }
-        if (url === "/__atelier/audit") {
+        }),
+        devRoute("/__atelier/audit", async (req, res, rawUrl) => {
           const lines = Math.max(1, Math.min(500, Number(new URL(rawUrl, "http://x").searchParams.get("lines") ?? 50)));
           let rows = [];
           try {
             rows = fs.readFileSync(AUDIT_FILE, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).slice(-lines);
           } catch { /* empty */ }
           res.end(JSON.stringify({ ok: true, rows }));
-          return;
-        }
-        if (url === "/__atelier/docs") {
+        }),
+        devRoute("/__atelier/docs", async (req, res) => {
           res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.end(fs.readFileSync(`${ROOT}/src/llms.txt`, "utf-8"));
-          return;
-        }
-        if (url === "/__atelier/stream-intro") {
+        }),
+        devRoute("/__atelier/stream-intro", async (req, res) => {
           res.setHeader("Content-Type", "text/plain; charset=utf-8");
           res.setHeader("Cache-Control", "no-store");
           const intro =
@@ -573,9 +618,8 @@ export function atelierDevPlugin() {
             i += 1;
           }, 24);
           req.on("close", () => clearInterval(timer));
-          return;
-        }
-        if (url === "/__atelier/screenshot") {
+        }),
+        devRoute("/__atelier/screenshot", async (req, res, rawUrl) => {
           // snapshot=1 → 页面进入确定性渲染（动画冻结、流式文本一次性落定），见 index.html
           // compare=1 → P1-8 像素级对比：与 .atr/snapshots/baseline.png 同实例 canvas evaluate
           const wantsCompare = rawUrl.includes("compare=1");
@@ -631,11 +675,10 @@ export function atelierDevPlugin() {
             res.statusCode = 500;
             res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
           }
-          return;
-        }
+        }),
 
         /* ---------- P2-2③ a11y 快照（无障碍树文本化；agent 检视语义优先于像素）---------- */
-        if (url === "/__atelier/a11y") {
+        devRoute("/__atelier/a11y", async (req, res) => {
           const appUrl = `http://127.0.0.1:${actualPort}/`;
           const navUrl = `http://127.0.0.1:${actualPort}/?token=${TOKEN}`; // P1-12：先换 cookie 再捕获
           try {
@@ -647,11 +690,10 @@ export function atelierDevPlugin() {
             res.statusCode = 500;
             res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
           }
-          return;
-        }
+        }),
 
         /* ---------- review UI（P2-5 spec L5 最小版）---------- */
-        if (url === "/__atelier/feedback") {
+        devRoute("/__atelier/feedback", async (req, res) => {
           // 与 MCP feedback.read 同一约定：specs/feedback.jsonl 每行 {at,verdict,target,note}
           if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
@@ -673,9 +715,8 @@ export function atelierDevPlugin() {
             res.statusCode = 500;
             res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
           }
-          return;
-        }
-        if (url === "/__atelier/snapshot-image") {
+        }),
+        devRoute("/__atelier/snapshot-image", async (req, res, rawUrl) => {
           // baseline/current 基线图直接从磁盘出（review 页 <img> 用；白名单外一律 404）
           const name = new URL(rawUrl, "http://x").searchParams.get("name") ?? "";
           if (name !== "baseline" && name !== "current") {
@@ -691,9 +732,8 @@ export function atelierDevPlugin() {
           }
           res.setHeader("Content-Type", "image/png");
           res.end(fs.readFileSync(p));
-          return;
-        }
-        if (url === "/__atelier/review") {
+        }),
+        devRoute("/__atelier/review", async (req, res) => {
           // spec L5 最小版：timeline + 双图并排 + approve/disapprove 写回 specs/
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           res.end(`<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Atelier Review</title><style>
@@ -759,20 +799,18 @@ loadState(); loadImages(); loadHistory();
 </script>
 <script src="/__atelier/review-ext.js"></script>
 </body></html>`);
-          return;
-        }
-        if (url === "/__atelier/feedback-history") {
+        }),
+        devRoute("/__atelier/feedback-history", async (req, res) => {
           let rows = [];
           try {
             rows = fs.readFileSync(path.join(ROOT, "specs", "feedback.jsonl"), "utf-8")
               .split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return { raw: l }; } });
           } catch { /* none yet */ }
           res.end(JSON.stringify({ ok: true, rows }));
-          return;
-        }
+        }),
 
         /* ---------- bridge: up-push / downlink ---------- */
-        if (url === "/__atelier/bridge/state") {
+        devRoute("/__atelier/bridge/state", async (req, res) => {
           if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           try {
@@ -781,9 +819,8 @@ loadState(); loadImages(); loadHistory();
             latestBridgeState = { ok: false, parseError: true };
           }
           res.end(JSON.stringify({ ok: true }));
-          return;
-        }
-        if (url === "/__atelier/bridge/commands") {
+        }),
+        devRoute("/__atelier/bridge/commands", async (req, res) => {
           // SSE downlink stream
           const agent = classifyAgent(req.headers["user-agent"]);
           agentLedger.connections[agent] = (agentLedger.connections[agent] ?? 0) + 1;
@@ -795,9 +832,8 @@ loadState(); loadImages(); loadHistory();
           res.write("retry: 2000\n\n");
           sseClients.add(res);
           req.on("close", () => sseClients.delete(res));
-          return;
-        }
-        if (url === "/__atelier/bridge/enqueue") {
+        }),
+        devRoute("/__atelier/bridge/enqueue", async (req, res) => {
           if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           let op = "", args;
@@ -815,14 +851,14 @@ loadState(); loadImages(); loadHistory();
           const payload = `data: ${JSON.stringify({ id, op, args })}\n\n`;
           for (const c of sseClients) c.write(payload);
           res.end(JSON.stringify({ ok: true, id, clients: sseClients.size }));
-          return;
-        }
-        if (url === "/__atelier/bridge/ack") {
+        }),
+        devRoute("/__atelier/bridge/ack", async (req, res) => {
           if (!rejectNonJson(req, res)) return;
           const body = await readBody(req);
           try {
             const j = JSON.parse(body);
             resolved.set(j.id, { status: "done", ok: !!j.ok, result: j.result, error: j.error, at: new Date().toISOString() });
+            pruneResolved(resolved); // §4.6：有界修剪（FIFO 逐出，上限 MAX_RESOLVED）——长跑不无界增长
             if (!j.ok && j.error) agentLedger.lastError = String(j.error).slice(0, 300); // P2-4
             audit("command.ack", { id: j.id, ok: j.ok });
             res.end(JSON.stringify({ ok: true }));
@@ -830,16 +866,16 @@ loadState(); loadImages(); loadHistory();
             res.statusCode = 400;
             res.end(JSON.stringify({ ok: false, error: "invalid ack" }));
           }
-          return;
-        }
-        if (url === "/__atelier/bridge/cmd-status") {
+        }),
+        devRoute("/__atelier/bridge/cmd-status", async (req, res, rawUrl) => {
           const id = new URL(rawUrl, "http://x").searchParams.get("id") ?? "";
           const st = resolved.get(id);
           res.end(JSON.stringify(st ? { ...st, status: "done" } : { status: "pending" }));
-          return;
-        }
-        next();
-      };
+        }),
+      ];
+      // 直测面（P1-14 教训：mount 前缀边界 bug 活到今天正因匹配逻辑无法单测）；运行时零消费
+      api.__atelierRouteTable = ROUTES;
+
       server.middlewares.use((req, res, next) =>
         atelierFace(req, res, next).catch((e) => {
           try {
@@ -865,4 +901,5 @@ loadState(); loadImages(); loadHistory();
       serverSupervisor = null;
     },
   };
+  return api;
 }
