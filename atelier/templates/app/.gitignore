@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .atelier/dev-token
+.atelier/approval-secret
 .atelier/audit.jsonl
 .atelier/dev.db
 .atr/snapshots/current.png
