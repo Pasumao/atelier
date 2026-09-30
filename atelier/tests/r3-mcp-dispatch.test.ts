@@ -72,7 +72,7 @@ describe("R3① callTool 分发 Map：广告实现面 = Map 键集（一件不�
       "registry.get_component": 4_000,
       "tokens.list": 4_000,
       "state.snapshot": 4_000,
-      "ui.screenshot": 4_000,
+      "ui.screenshot": 60_000, // P2-M5（2026-09-30 复校）：与同端点 snapshot.diff 同档——旧 4s 冷路径首拍必超时（有意变更，红检先行）
     };
     for (const [name, ms] of Object.entries(expected)) {
       expect(TOOL_META[name]?.timeoutMs, `${name} timeoutMs`).toBe(ms);

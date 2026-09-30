@@ -134,7 +134,12 @@ async function route(request, d) {
     case "tasks/get":
     case "tasks/update":
     case "tasks/cancel": {
-      const reply = await handleMessage({ jsonrpc: "2.0", id: 0, method: mcpMethod, params: body }, ctxOf(d));
+      // P2-M4（2026-09-30 第三遍架构复校）：_meta 是标准体形（本文件头线协议节：版本经每次请求
+      // 的 _meta 携带）——构造 params 时剥 _meta 再下发（对齐 tools/call 只取 { name, arguments }
+      // 的既有先例）；tasks/update 的未知字段严格闸（tasks.mjs SETTABLE_FIELDS）只对业务键生效，
+      // 不再被协议层 _meta 误触 ATR-401。
+      const { _meta, ...params } = body ?? {};
+      const reply = await handleMessage({ jsonrpc: "2.0", id: 0, method: mcpMethod, params }, ctxOf(d));
       if (reply.error) return errEnvelope(400, "ATR-401", reply.error.message.split("\n")[0], "以服务端创建时返回的 taskId 句柄调用；句柄过期则重发长操作");
       return okEnvelope(reply.result);
     }
