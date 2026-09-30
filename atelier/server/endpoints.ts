@@ -565,7 +565,8 @@ const TIMEOUT_BREACH = Symbol("atelier-endpoint-timeout");
  * 每参数值是字符串，按端点输入契约（FlatSchema reqProps/optProps，runtime/contract.ts FlatField
  * 类型全集 = string | number | boolean | array）做**显式类型投影**——有什么类型投影什么，不猜：
  *   string   原样透传（URLSearchParams 已解码）；
- *   number   Number(v)；空串（`?n=`——Number("")===0 的无声陷阱）与 NaN 显式拒绝；
+ *   number   Number(v)；空串（`?n=`——Number("")===0 的无声陷阱）、NaN 与非有限数（1e999/Infinity
+ *            ——JSON.stringify 静默变 null）显式拒绝；
  *   boolean  只认 "true"/"false"（URL 惯例两值——"1"/"yes" 不猜）；
  *   array    重复键收集（URLSearchParams.getAll，Web 标准——?tag=a&tag=b → ["a","b"]；单值 =
  *            单元素数组），元素按 items 逐个投影（无 items = 原样字符串，与 collectFlatIssues
@@ -588,6 +589,10 @@ function projectQueryLeaf(field: FlatField, raw: string): { ok: true; value: unk
       if (raw === "") return { ok: false, reason: "空串不是数值字面量（?n= 会被 Number 静默转 0——显式拒绝）" };
       const n = Number(raw);
       if (Number.isNaN(n)) return { ok: false, reason: `"${raw}" 不是数值字面量` };
+      // R1 批（§4.5）：非有限数显式拒绝——Number("1e999")=Infinity 溜过 isNaN 闸、JSON.stringify
+      // 静默变 null（handler 拿到 null 还自以为校验通过——「响亮拒绝」哲学的兑现缺口）。码位复用
+      // ATR-312 投影失败槽位（零新码）。
+      if (!Number.isFinite(n)) return { ok: false, reason: `"${raw}" 不是有限数值（Infinity/-Infinity 超出 JSON 数值域——JSON.stringify 会静默变 null）` };
       return { ok: true, value: n };
     }
     case "boolean":
@@ -1223,7 +1228,10 @@ export class EndpointRegistry {
       }
       const url = new URL(req.url);
       let rest = url.pathname;
-      if (mount && rest.startsWith(mount)) rest = rest.slice(mount.length);
+      // R1 批（P1#14）：mount 前缀须有 "/" 边界（对照 static-host.ts 同款正确口径）——裸 startsWith
+      // 会把 /apifoo 切成端点 foo、/apiupload/x 切成 upload/x 命中上传路由（可绕过按路径前缀设防的
+      // 反代 ACL）；根路径 rest === mount 照常剥离（mount 根语义不变）。
+      if (mount && (rest === mount || rest.startsWith(mount + "/"))) rest = rest.slice(mount.length);
       const name = rest.replace(/^\/+|\/+$/g, "");
 
       // ---- FS-7 live 路由：GET /<mount>/<name>/live → SSE（仅声明 live 的 query 端点；其余非 POST 维持 ATR-311） ----
@@ -1272,12 +1280,16 @@ export class EndpointRegistry {
       }
 
       // ---- B1 差距批（2026-09-28，决策 32）：上传/资产面路由（兄弟注册表——不入端点表，
-      //      introspect 端点表形状零变化）。POST <mount>/upload/<name> + GET <mount>/assets/<id>。
-      //      端点名文法不含 "/"，upload//assets/ 前缀与端点名空间天然不相交（assets 限数字 id、
-      //      upload 限 NAME_RE 名，不匹配的形态照旧落既有 404/405 路径——端点面零扰动）。
-      //      面未装配 = 诚实 404 ATR-310 指路装配（落回既有路径会把 GET 资产误报成 405「改
-      //      POST」、把上传路由报成「未知端点」——都误导指路）。限流闸（本函数最前）对上传/
-      //      下载同样计数（上传是最贵的请求形态——闸位单一不分路由豁免）。 ----
+      //      introspect 端点表形状零变化）。POST <mount>/upload/<name> + GET <mount>/assets/<sha256hex>。
+      //      端点名文法不含 "/"，upload//assets/ 前缀与端点名空间天然不相交（assets/ 命名空间整族
+      //      归资产面：sha 限 64 位十六进制、upload 限 NAME_RE 名，形态不匹配诚实 404 ATR-310——
+      //      端点面零扰动）。面未装配 = 诚实 404 ATR-310 指路装配（落回既有路径会把 GET 资产误报成
+      //      405「改 POST」、把上传路由报成「未知端点」——都误导指路）。限流闸（本函数最前）对上传/
+      //      下载同样计数（上传是最贵的请求形态——闸位单一不分路由豁免）。
+      //      R1 收口批（2026-09-30，P1#1 + R-D2 拍板缺省）：下载句柄 = sha256 内容寻址（64 hex 形态
+      //      闸在分发器；旧整数 id 与非法形态统一 404 ATR-310——顺序 id 可匿名枚举，整数主键退役为
+      //      内部不再对外）；下载鉴权闸 = UploadDef.downloadAuth 缺省跟随该面 auth（再缺省 session
+      //      fail-closed），gateAuth 单源同链（见下块内注）。 ----
       const uploadRoute = name.startsWith("upload/") ? name.slice("upload/".length) : null;
       if (uploadRoute != null) {
         if (uploadsFace == null) {
@@ -1308,7 +1320,10 @@ export class EndpointRegistry {
         }
         return uploadsFace.handleUpload({ req, def: upDef, mount: mount || "" });
       }
-      const assetRoute = /^assets\/(\d+)$/.exec(name)?.[1] ?? null;
+      // assets/ 命名空间整族归资产面（端点名不含 "/"——天然不相交）：形态闸（64 hex 内容寻址 id）
+      // 在面未装配/动词闸之后——未装配先 404 指路装配、非 GET 先 405 指路动词，旧整数 id 与一切
+      // 非法形态统一 404 ATR-310（不落「改 POST」误导兜底）。
+      const assetRoute = name.startsWith("assets/") ? name.slice("assets/".length) : null;
       if (assetRoute != null) {
         if (uploadsFace == null) {
           return errorResponse(
@@ -1316,14 +1331,41 @@ export class EndpointRegistry {
             endpointError(
               "ATR-310",
               `上传/资产面未装配：${url.pathname}`,
-              "装配点显式接线：createHandler({ db, uploads: createUploadsFace({ db, dir }) })（uploads.ts 决策 32）；上传定义经 reg.registerUpload(defineUpload({ name, accept?, maxBytes?, auth? })) 注册（兄弟注册表，不入端点表）"
+              "装配点显式接线：createHandler({ db, uploads: createUploadsFace({ db, dir }) })（uploads.ts 决策 32）；上传定义经 reg.registerUpload(defineUpload({ name, accept?, maxBytes?, auth?, downloadAuth? })) 注册（兄弟注册表，不入端点表）"
             )
           );
         }
         if (req.method !== "GET") {
-          return errorResponse(405, endpointError("ATR-311", `资产面只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/assets/${assetRoute}（内容寻址不可变——响应带 Cache-Control: immutable）`));
+          return errorResponse(405, endpointError("ATR-311", `资产面只接受 GET：${req.method} ${url.pathname}`, `改为 GET ${mount || ""}/assets/<sha256hex>（内容寻址不可变——响应带 Cache-Control: immutable）`));
         }
-        return uploadsFace.handleDownload({ id: assetRoute, mount: mount || "" });
+        if (!/^[0-9a-fA-F]{64}$/.test(assetRoute)) {
+          return errorResponse(
+            404,
+            endpointError(
+              "ATR-310",
+              `资产 id 形态非法：assets/${assetRoute}`,
+              "下载句柄 = 上传响应的 sha256/url 字段（64 位十六进制内容寻址 id，天然不可枚举）；1.1 起整数自增 id 退役为内部主键不再对外（R1 批 R-D2——顺序 id 可枚举私有文件），存量引用以重传同内容或账面 sha256 重建"
+            )
+          );
+        }
+        // 下载鉴权闸（R1 批 P1#1 + R-D2 拍板缺省，gateAuth 单源同链）：声明位 = UploadDef.downloadAuth，
+        // 缺省**跟随该上传面 auth**（再缺省 session——fail-closed 链 downloadAuth ?? auth ?? session，
+        // 不存在匿名可下载的缺省路径）。下载路由无面名（资产池按 sha 全局共享），闸取**全部已注册
+        // 上传面有效声明的合取**：单面 = 该面声明精确语义；多面任一面要求鉴权即全池要求（新增受保护
+        // 面只会收紧不会放松——fail-closed）；全部面显式 none 才开放（每面显式消警，显式选择优于沉默
+        // 缺省）；零注册面按 session 兜底。拦截在查表/读盘之前——「被拒之门前不触碰存储」（与端点
+        // 「不进 handler」同款语义）。sha 入闸名前小写归一（内容寻址大小写不敏感——句柄即内容指纹）。
+        const dlDecls = this.uploadNames().map((n) => {
+          const d = this.uploadsDefs.get(n)!;
+          return (d.downloadAuth ?? d.auth ?? { type: "session" }) as EndpointAuthMeta;
+        });
+        for (const decl of dlDecls.length > 0 ? dlDecls : [{ type: "session" } as EndpointAuthMeta]) {
+          if (decl.type === "none") continue;
+          const sha = assetRoute.toLowerCase();
+          const gate = gateAuth("资产面", `assets/${sha}`, decl, readAuth, apiKeys, req);
+          if (!gate.ok) return gate.response;
+        }
+        return uploadsFace.handleDownload({ sha: assetRoute.toLowerCase(), mount: mount || "" });
       }
 
       // ---- 差距批 A7（决策 34）：restful GET 分发（D-F11 留门的运行时扩张）——声明 restful:true 的

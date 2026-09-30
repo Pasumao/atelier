@@ -105,6 +105,17 @@ describe("atelier-server 端点运行时（决策 18/20，FS-1）", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("红（R1-A P1#14）：mount 前缀须有 / 边界——/apifoo 不得分发给端点 foo（现状 startsWith 裸前缀切片命中并分发 200）", async () => {
+    const reg = new EndpointRegistry();
+    reg.register(defineQuery("foo", { handler: () => ({ ok: true }) }));
+    const handler = reg.createHandler({ mount: "/api" });
+    const leak = await handler(new Request("http://local.test/apifoo", { method: "POST", body: JSON.stringify({}) }));
+    expect(leak.status).toBe(404); // 红态：200——"apifoo" 裸前缀命中 "/api"，切成端点 foo 正常分发（可绕过按前缀设防的反代 ACL）
+    expect(((await leak.json()) as { code: string }).code).toBe("ATR-310");
+    const ok = await handler(new Request("http://local.test/api/foo", { method: "POST", body: JSON.stringify({}) }));
+    expect(ok.status).toBe(200); // 正控：真前缀路径照常分发（边界修复不误伤）
+  });
+
   it("handler 抛错 → 500 ATR-320（四段式，message 带根因）", async () => {
     const reg = new EndpointRegistry();
     reg.register(defineQuery("boom", { handler: () => { throw new Error("内部炸了"); } }));

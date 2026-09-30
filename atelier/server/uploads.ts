@@ -11,13 +11,25 @@
  *   const assets = createUploadsFace({ db, dir: "…" });        // 本模块：解析/存储/记账/下载单源
  *   reg.registerUpload(defineUpload({ name: "avatar", accept: ["image/"] }));  // 兄弟注册表
  *   reg.createHandler({ db, uploads: assets });                // 路由 = POST <mount>/upload/<name>
- *                                                             //        GET  <mount>/assets/<id>
+ *                                                             //        GET  <mount>/assets/<sha256hex>
  * 上传面是**端点面的兄弟注册表**（reg.registerUpload，endpoints.ts 收口）——不混入端点表：
  * introspect 端点表形状零变化、api-diff/OpenAPI 投影/契约层三层零触碰。
  *
+ * 下载面（R1 收口批 A 支，2026-09-30，架构评审 P1#1/#2，决策缺省 R-D2 拍板）：
+ * - **下载句柄 = sha256 内容寻址 id**（磁盘布局本就按 sha 去重，决策 32）：`GET <mount>/assets/<sha256hex>`
+ *   查账按 sha 精确匹配；AUTOINCREMENT 整数 id 退役为**内部主键不再对外**（顺序 id 可匿名枚举私有
+ *   文件——旧整数 id 与一切非 64 hex 形态统一 404 ATR-310，路由归 endpoints.ts 闸后进入本模块）。
+ *   上传响应把 sha 作为下载句柄返回（url = `<mount>/assets/<sha256>`）。1.1 预发布期 breaking 可接受
+ *   （测试即行为定义）。
+ * - **下载鉴权闸**在分发器 gateAuth 单源（endpoints.ts 资产路由块）——声明位 = UploadDef.downloadAuth
+ *   （缺省跟随该上传面 auth，再缺省 session fail-closed），本模块不做鉴权判定（与上传面同链同款）。
+ * - **下载响应头闸**（本模块单源）：恒 `X-Content-Type-Options: nosniff`（mime 为上传方自报不可信，
+ *   嗅探面封死）；危险 mime（text/html / application/xhtml+xml / image/svg+xml 族——浏览器直接导航
+ *   即同源执行面）缺省 `Content-Disposition: attachment`；其余 mime 行为不变（P1#2 存储型 XSS 收口）。
+ *
  * 磁盘布局 = `<dir>/<yyyy-mm>/<sha256>.<ext>`（**内容寻址 = 天然去重**）：sha256 流式无关——本批
  * 请求体经桥缓冲后解析（诚实边界：不流式入盘，桥内存上界见闸位），hash 对缓冲一次算得。同 sha
- * 重传 = 同 id/同 url/单文件单行（记账层去重）；「账在盘不在」（备份恢复半态/人工删除）→ 重传
+ * 重传 = 同句柄（同 sha/同 url）/单文件单行（记账层去重）；「账在盘不在」（备份恢复半态/人工删除）→ 重传
  * **幂等补写**修复（不产生第二行）——两态都有用例钉住。写盘**先临时文件再 rename**（半文件对
  * 下载不可见——rename 同卷原子）+ **记账失败删孤儿文件**（不留无账字节）。
  *
@@ -86,18 +98,21 @@ export type UploadDef = {
   accept?: string[];
   /** 单请求体上限字节（缺省 20MB——独立于 JSON maxBodyBytes，见闸位说明） */
   maxBytes?: number;
-  /** 鉴权声明（端点 EndpointAuthMeta 同构；缺省 = { type: "session" } fail-closed，auth:"none" 显式开放） */
+  /** 上传面鉴权声明（端点 EndpointAuthMeta 同构；缺省 = { type: "session" } fail-closed，auth:"none" 显式开放） */
   auth?: { type: string } & Record<string, unknown>;
+  /** 下载面鉴权声明（R1 批 R-D2：缺省**跟随该上传面 auth**——再缺省 session，fail-closed 链
+   *  downloadAuth ?? auth ?? session；无任何匿名可下载的缺省路径。分发器资产路由消费，见 endpoints.ts） */
+  downloadAuth?: { type: string } & Record<string, unknown>;
 };
 
 /** defineUpload：纯定义构造器（命名/上限/accept 校验在注册期 registerUpload 闸——与端点同款「注册期显式失败」纪律） */
-export function defineUpload(def: { name: string; accept?: string[]; maxBytes?: number; auth?: { type: string } & Record<string, unknown> }): UploadDef {
+export function defineUpload(def: { name: string; accept?: string[]; maxBytes?: number; auth?: { type: string } & Record<string, unknown>; downloadAuth?: { type: string } & Record<string, unknown> }): UploadDef {
   return { ...def };
 }
 
-/** 上传响应六事实（url = `<mount>/assets/<id>`——资产引用以此形态进端点契约） */
+/** 上传响应五事实（url = `<mount>/assets/<sha256hex>`——sha 即下载句柄，内容寻址天然不可枚举；
+ *  整数 id 退役为内部主键不再对外，R1 批 R-D2） */
 export type UploadResult = {
-  id: number;
   name: string;
   mime: string;
   size: number;
@@ -144,10 +159,10 @@ export type CreateUploadsFaceOptions = {
 
 /** 上传面（createUploadsFace 产物；createHandler({ uploads }) 装配项——分发器路由后委托） */
 export type UploadsFace = {
-  /** POST <mount>/upload/<name>：解析 multipart 单文件 → accept/maxBytes 精闸 → 内容寻址落盘 → 记账 → 六事实 */
+  /** POST <mount>/upload/<name>：解析 multipart 单文件 → accept/maxBytes 精闸 → 内容寻址落盘 → 记账 → 五事实 */
   handleUpload(args: { req: Request; def: UploadDef; mount: string }): Promise<Response>;
-  /** GET <mount>/assets/<id>：查表 → 流式回文件（mime/Cache-Control immutable） */
-  handleDownload(args: { id: string; mount: string }): Promise<Response>;
+  /** GET <mount>/assets/<sha256hex>：按 sha 查账 → 流式回文件（mime/Cache-Control immutable/nosniff，危险 mime attachment） */
+  handleDownload(args: { sha: string; mount: string }): Promise<Response>;
   /** 内省窄口（MCP 批 A）：资产台账聚合 + 尾部投影（introspect.ts server-status uploads 段数据源——命名对齐 jobs.stats() 先例；纯读不建表，SQL 单源在本文件） */
   stats(): UploadsStats;
 };
@@ -365,6 +380,17 @@ function storageErrorResponse(what: string, e: unknown): Response {
   );
 }
 
+/**
+ * 危险 inline mime 判定（R1 批 P1#2 下载响应头闸）：mime 为上传方自报（multipart 头原文入库），
+ * 按不可信输入处理——media type 取 ";" 参数前并大小写归一。危险集 = text/html / application/xhtml+xml /
+ * image/svg+xml 族（svg 可内嵌脚本；带参数形态以 startsWith 覆盖）——浏览器直接导航即同源执行面，
+ * 缺省强制 Content-Disposition: attachment；其余 mime 行为不变（nosniff 恒加不在此判定内）。
+ */
+function isDangerousInlineMime(mime: string): boolean {
+  const m = mime.split(";")[0]!.trim().toLowerCase();
+  return m === "text/html" || m === "application/xhtml+xml" || m.startsWith("image/svg+xml");
+}
+
 /* ---------------- createUploadsFace ---------------- */
 
 /** 行 → 读回投影（列名逐一逆向——形状兼容红线） */
@@ -512,15 +538,15 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
         if (existing != null) {
           const abs = resolveAssetPath(existing.path);
           if (abs != null && fs.existsSync(abs)) {
-            // 去重命中：同内容 = 同资产（同 id/同 url/单文件单行）——重传零写零插
-            return new Response(JSON.stringify({ id: existing.id, name: existing.name, mime: existing.mime, size: existing.size, sha256: existing.sha256, url: `${mount}/assets/${existing.id}` }), {
+            // 去重命中：同内容 = 同资产（同 sha/同 url/单文件单行）——重传零写零插
+            return new Response(JSON.stringify({ name: existing.name, mime: existing.mime, size: existing.size, sha256: existing.sha256, url: `${mount}/assets/${existing.sha256}` }), {
               status: 200,
               headers: { "content-type": "application/json; charset=utf-8" },
             });
           }
           // 账在盘不在（备份恢复半态/人工删除）→ 幂等补写修复，不产生第二行
           writeFileAtomic(existing.path, file.data);
-          return new Response(JSON.stringify({ id: existing.id, name: existing.name, mime: existing.mime, size: existing.size, sha256: existing.sha256, url: `${mount}/assets/${existing.id}` }), {
+          return new Response(JSON.stringify({ name: existing.name, mime: existing.mime, size: existing.size, sha256: existing.sha256, url: `${mount}/assets/${existing.sha256}` }), {
             status: 200,
             headers: { "content-type": "application/json; charset=utf-8" },
           });
@@ -528,12 +554,8 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
         writeFileAtomic(rel, file.data);
         // ---- 记账（失败 → 删孤儿文件——不留无账字节）----
         ensureTable();
-        let id: number;
         try {
-          const r = db
-            .prepare(`INSERT INTO ${ASSETS_TABLE} (name, mime, size, sha256, path, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-            .run(file.filename, mime, file.data.byteLength, sha, rel, now.getTime());
-          id = Number(r.lastInsertRowid);
+          db.prepare(`INSERT INTO ${ASSETS_TABLE} (name, mime, size, sha256, path, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(file.filename, mime, file.data.byteLength, sha, rel, now.getTime());
         } catch (e) {
           const abs = resolveAssetPath(rel);
           if (abs != null) {
@@ -545,7 +567,7 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
           }
           throw e;
         }
-        return new Response(JSON.stringify({ id, name: file.filename, mime, size: file.data.byteLength, sha256: sha, url: `${mount}/assets/${id}` }), {
+        return new Response(JSON.stringify({ name: file.filename, mime, size: file.data.byteLength, sha256: sha, url: `${mount}/assets/${sha}` }), {
           status: 200,
           headers: { "content-type": "application/json; charset=utf-8" },
         });
@@ -554,20 +576,22 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
       }
     },
 
-    handleDownload({ id, mount }): Promise<Response> {
+    handleDownload({ sha, mount }): Promise<Response> {
       void mount; // v1 下载响应不依赖 mount（url 已在记账/上传响应侧给出）——参数留位
       try {
         ensureTable();
       } catch {
         // 记账面不可用 = 404（资产不可达是真实事实——不编 500 假象，库句柄状态见 console）
         return Promise.resolve(
-          errorResponse(404, endpointError("ATR-310", `资产不可达（记账面不可用）：assets/${id}`, "检查 createUploadsFace({ db }) 句柄状态；上传重传可修复半态"))
+          errorResponse(404, endpointError("ATR-310", `资产不可达（记账面不可用）：assets/${sha}`, "检查 createUploadsFace({ db }) 句柄状态；上传重传可修复半态"))
         );
       }
-      const row = db.prepare(`SELECT id, name, mime, size, sha256, path, created_at FROM ${ASSETS_TABLE} WHERE id = ?`).get(Number(id));
+      // 查账按 sha 精确匹配（内容寻址下载句柄——R1 批 R-D2；sha 由路由 sha 形态闸保证 64 hex，
+      // 调用方直调时 toLowerCase 归一消化大小写变体；? 绑定防注入不变）
+      const row = db.prepare(`SELECT id, name, mime, size, sha256, path, created_at FROM ${ASSETS_TABLE} WHERE sha256 = ?`).get(sha.toLowerCase());
       if (!row) {
         return Promise.resolve(
-          errorResponse(404, endpointError("ATR-310", `资产不存在：assets/${id}`, "以内容寻址 id 重试；上传响应的 url 字段即规范引用形态（重传同内容得同 id——内容寻址去重）"))
+          errorResponse(404, endpointError("ATR-310", `资产不存在：assets/${sha}`, "下载句柄 = 上传响应的 sha256/url 字段（64 位十六进制内容寻址 id，重传同内容得同句柄——内容寻址去重）；1.1 起整数自增 id 退役为内部主键不再对外"))
         );
       }
       const asset = rowToAsset(row);
@@ -575,22 +599,24 @@ export function createUploadsFace(opts: CreateUploadsFaceOptions): UploadsFace {
       if (abs == null || !fs.existsSync(abs)) {
         // 账在盘不在：404 + 指路重传修复（幂等补写——不产生第二行）
         return Promise.resolve(
-          errorResponse(404, endpointError("ATR-310", `资产文件缺失（账在盘不在）：assets/${id}`, "重传同内容文件即可幂等修复（内容寻址补写，不产生新行）；排查 uploads.dir 卷状态"))
+          errorResponse(404, endpointError("ATR-310", `资产文件缺失（账在盘不在）：assets/${sha}`, "重传同内容文件即可幂等修复（内容寻址补写，不产生新行）；排查 uploads.dir 卷状态"))
         );
       }
       const stream = Readable.toWeb(fs.createReadStream(abs)) as unknown as ReadableStream<Uint8Array>;
-      return Promise.resolve(
-        new Response(stream, {
-          status: 200,
-          headers: {
-            "content-type": asset.mime,
-            "content-length": String(asset.size),
-            // 内容寻址不可变：同 URL 恒同字节——激进缓存安全（决策 32）
-            "cache-control": "public, max-age=31536000, immutable",
-            "x-atelier-asset": asset.sha256,
-          },
-        })
-      );
+      // 响应头闸（R1 批 P1#2）：nosniff 恒加（mime 是上传方自报，嗅探执行面封死）；危险 mime
+      // 缺省 attachment（浏览器直接导航 = 同源脚本执行面）；其余 mime 行为不变。
+      // attachment 不带 filename 参数——下载名回落 URL 末段 <sha256>.<ext>（ext 白名单清洗过，
+      // 库内 name 为攻击者可空原文，进响应头有注入面——不给）。
+      const headers: Record<string, string> = {
+        "content-type": asset.mime,
+        "content-length": String(asset.size),
+        // 内容寻址不可变：同 URL 恒同字节——激进缓存安全（决策 32）
+        "cache-control": "public, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        "x-atelier-asset": asset.sha256,
+      };
+      if (isDangerousInlineMime(asset.mime)) headers["content-disposition"] = "attachment";
+      return Promise.resolve(new Response(stream, { status: 200, headers }));
     },
 
     // 内省窄口（MCP 批 A，jobs.stats()/email.tail() 同款先例）：聚合 + 尾部一次读出。
