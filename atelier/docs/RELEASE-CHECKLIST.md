@@ -8,7 +8,7 @@
 | # | 项 | 命令 | 期待结果 |
 |---|---|---|---|
 | 1 | 框架测试全绿 | `cd atelier && pnpm test` | 全绿 + 8 skip（实验台用例无 env 按环境跳过）；1.0.0 基线 = 618 绿 + 8 skip（含 `tests/release-form.test.ts` 3 例发布形态钉） |
-| 2 | 发布形态钉 | `cd atelier && npx vitest run tests/release-form.test.ts` | 3/3 绿（version=1.0.0 / CHANGELOG 含 [1.0.0] / private:true）——版本号改动必过此钉 |
+| 2 | 发布形态钉 | `cd atelier && npx vitest run tests/release-form.test.ts` | 3/3 绿（version=当前版本 / CHANGELOG 含 `[<当前版本>] - <切版日期>` 条目 / private:true）——版本号改动必过此钉（断言随版翻转先红后绿；1.1.0 时点 = version 1.1.0 + `[1.1.0] - 2026-09-30`） |
 | 3 | 技能包一致性 | `node atelier/scripts/check-skills.mjs` | 56-0，exit 0 |
 | 4 | API 面漂移门禁 | `node atelier/cli.mjs api-diff check` | PASS（removed/changed = breaking exit 1；发布前终检可加 `--strict` 连新增也红——1.0 后新增默认 additive，破坏性变更必须升 minor/major 且 `--allow` 豁免留痕，决策 28） |
 | 5 | 数字标记位机检 | `node atelier/scripts/docs-numbers.mjs sync && node atelier/scripts/docs-numbers.mjs check` | sync 后 check PASS（tests/tools 两标记位与实跑一致；禁止手写） |

@@ -143,12 +143,12 @@ AGENTS.md · Agent Skills（agentskills.io 格式门禁全过）· MCP（<!--@nu
 | `atelier/docs/README.md` | 文档导航（每份一行：定位 + 状态 + 时点） |
 | `atelier/docs/ARCHITECTURE.md` | 系统是什么（五层 + S0 服务层、仓库布局、模块边界） |
 | `atelier/docs/SPEC-Agentic-DX-v0.2.md` | 代理怎么用（硬约定 / 错误导航表 / DoD / 工作循环 / 全站化行为契约；v0.1 留档 superseded） |
-| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-28 + 未决项） |
+| `atelier/docs/design-decisions.md` | 为什么这样设计（决策 0-35 + 未决项） |
 | `atelier/docs/AI-OPTIMAL-STRUCTURE.md` | 六层 AI 友好结构公理与机检规则集 |
 | `atelier/docs/ROADMAP.md` | 路线计划（方向与里程碑） |
 | `atelier/docs/BACKLOG.md` | 缺口与改进执行队列（唯一源） |
 | `atelier/docs/SKILLS-PLAN.md` | 技能包设计规格（已落地转规格） |
-| `atelier/docs/research/` | 2026-09 三路深度调研（决策 17-23 证据基线） |
+| `atelier/docs/research/` | 调研与评审档案（8 份：三路深度调研〔决策 17-23 证据基线〕+ 全栈差距调研 + 0930 两遍架构复校 + REL 批任务书 + 代码评审建议书；每份一行见 docs/README 导航） |
 | `AGENTS.md` | 本仓库的常用命令与维护纪律 |
 
 ## License

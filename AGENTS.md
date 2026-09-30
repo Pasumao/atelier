@@ -21,7 +21,7 @@
 | `atelier/mcp/` | MCP Server：stdio（`server.mjs`）+ dev 面无状态 HTTP 直连桥（`http.mjs`，2026-07-28 规范：Mcp-Method/Mcp-Name 头路由无会话粘性；经 dev 插件 `/__atelier/mcp` 暴露，FS-M7 起 init/sync vendor mcp 族十件后应用内直连可用，未 sync 旧应用 503 诚实指路 stdio）+ Tasks 任务存储（`tasks.mjs`）+ ask 档多轮审批（`confirm.mjs` requestState HMAC 句柄）；<!--@num:tools-->40<!--@/--> 工具单源生成，live 工具需一个运行中的应用 dev 面。 |
 | `atelier/skills/` | 多工具兼容技能包（8 个 kebab-case 目录包）。 |
 | `atelier/scripts/` + `cli.mjs` | init（组装：模板 + runtime vendor + vendor/atelier 规范布局 + dev vendor）/ dev / struct / checkpoint / snapshot / skills / mcp / gen / migrate / impact / export / build（D-F14：vite 静态面 + server.mjs 启动壳 + 产物冒烟自证）/ call（D-F15：CLI 验证环直调 server 面）/ db backup（A3：VACUUM INTO 在线备份 + quick_check/sha256 自证行），三级诚实标注。 |
-| `atelier/docs/` | 框架规格文档：ARCHITECTURE / SPEC-Agentic-DX / design-decisions 0-28 / AI-OPTIMAL-STRUCTURE / ROADMAP（2026H2→2027H1 路线计划书，阶段 3.5=全站化）/ BACKLOG（执行队列唯一源，含 FS 全站化线）/ SKILLS-PLAN / research/（2026-09 三路调研报告）；导航索引 = `atelier/docs/README.md`。 |
+| `atelier/docs/` | 框架规格文档：ARCHITECTURE / SPEC-Agentic-DX / design-decisions 0-35 / AI-OPTIMAL-STRUCTURE / ROADMAP（2026H2→2027H1 路线计划书，阶段 3.5=全站化）/ BACKLOG（执行队列唯一源，含 FS 全站化线）/ SKILLS-PLAN / research/（调研与评审档案 8 份：三路调研 + 差距调研 + 0930 两遍架构复校 + REL 任务书 + 代码评审建议书）；导航索引 = `atelier/docs/README.md`。 |
 | `.dsh/skills/` | 本会话已安装的技能副本（harness 发现目录；源在 `atelier/skills/`）。 |
 
 ## 常用命令
