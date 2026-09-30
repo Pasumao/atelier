@@ -26,6 +26,16 @@
 
 - **runtime 响亮拒绝两件（评审 R-D4）**：忘写 `.value` 渲染信号 JSON → dev 一次性警示（**ATR-352**）；keyed each 重复 key 折叠行 → dev 一次性警示（**ATR-353**）——均 prod 剥离、渲染语义逐字不变（`3699bb2`）
 - **契约面单源化机检（R2 批）**：新 `atelier/scripts/contract-checks.mjs` 三查（错误码全集反向对账——51 码 ⊆ 总表、12 缺码补齐；ARCHITECTURE §8 CLI 表 ↔ dispatch 双向对账——22 行表再生、`init --ai` 语义反转等漂移修正；runtime 桶出口派生哨兵）+ check-skills CLI_VERBS/FLAGS/RUNTIME_API 手抄白名单退役改派生 + CI 默认门接入；幻影面清账（技能包 expect/verify、`atelier lint/e2e` STUB 如实标注、llms.txt 1.1.0 刷新、gen-auth 过期产物注释等）（R2 支合并）
+- **MCP 长操作 Tasks 化扩充**：HTTP 直连 TASK_ELIGIBLE +4（checkpoint.source_list/source_commit、graph.static、diff.report）——长 spawn 型不再内联阻塞 dev 面事件循环
+
+### 内部质量（R3 结构债，行为等价重构 + 测试面补课）
+
+- `createHandler` 路由表化：237 行十段 if-chain → 6 条目路由表 + 路由匹配层七件纯函数（30 例匹配器矩阵直测——P1#14 类边界 bug「无法被单测」的根因关闭）
+- `callTool` 分发 Map：431 行七段 → 40 件 TOOL_HANDLERS Map + per-tool 元数据表（timeoutMs 单源 + 参数白名单；Map 键集 = 广告面机检钉死）
+- dev 中间件路由表化（23 条，匹配原语可直测）；struct probeChecks 八层各一函数（表驱动分派，表序直调 ≡ 全量输出全等钉）
+- `sourceFingerprint` 重复实现单点化（checkpoint.mjs 并入 snapshot.mjs）；export-openapi 第三份字面量解码副本消灭（gen-endpoint 单源导出）
+- 反代韧性：上游响应头 15s 超时（504，SSE 头后流式豁免有测试）+ 客户端真断开销毁上游（SSE 生成器及时收尾）+ MCP resolved Map 200 上限 FIFO 修剪
+- snapshot.diff（MCP）基线路径 per-platform 平台感知（与 CLI 同阶梯；旧平铺只读回落）
 
 ## [1.1.0] - 2026-09-29
 
