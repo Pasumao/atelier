@@ -38,6 +38,21 @@
 
 ## 活跃队列
 
+### R 收口批（2026-09-30 全仓架构评审立项——阶段四 npm 发布（D-3）硬前置）
+
+> 任务书唯一源：`research/2026-09-30-architecture-review.md`（15 项 P1 全部实读/实跑坐实 + P2 分族 + R1-R3 计划）。主/子智能体 git worktree 协作，红检先红后绿，全套门禁收口。决策默认值按报告 §6 建议执行：**R-D2**=下载鉴权 fail-closed 跟随上传面 + sha256 内容寻址 id（不走「资产公开」成文路线）；**R-D3**=R2 机检门禁上 CI 默认门；**R-D4**=静默错误族两件（忘写 `.value` 警示 + keyed each 重复 key 警示）并入 R1-B（原报告建议入 R1-C，架构师裁定改入 B——同属 template.ts，避免跨支冲突）。
+
+| 批 | 支 | 范围（#号 = 评审报告 §3 P1 清单） | 状态 |
+|---|---|---|---|
+| R1 安全与正确性 | A（server 安全） | #1 下载鉴权声明位+sha 寻址 id · #2 nosniff+危险 mime attachment · #14 mount `/` 边界+/apifoo 负例 · restful Infinity 拒绝（§4.5） | 进行中 |
+| | B（runtime/codegen 同源） | #5 `rt.bindAttr` 单点+双路径 parity · #6 双 `<style>` 统一 · #9 effect 泄漏+实例 cleanup+公开 unmount() · #15 recordRuntimeError globalThis · R-D4 两件 | 进行中 |
+| | C（生成器名字闸与掩码） | #4 端点扫描器 codeMask×2+红绿测试 · #13 gen-db RESERVED_WORDS · 端点重名 die 镜像 ATR-313 · 转义解码统一+对拍 fixture · desc/mount 注入消毒 · export-openapi 名字闸+数值枚举对齐 · dump 产物字节幂等（§4.7） | 进行中 |
+| | D（dev 面与 CLI 写路径） | #3 反代 Origin 闸 · #10 actualPort 单源化 7 处 · #11 握手超时杀子进程 · #12 中间件错误围栏 · #7 init 目录守卫+参数缺值 die · #8 api-diff 退出码区分+checkpoint 拒锚 | 进行中 |
+| R2 契约面单源化机检 | 单支 | 错误码反向对账机检（补 12+ 缺口码、ATR-402 双语义拆分）· CLI_VERBS/FLAGS 从 dispatch+HELP 派生 · RUNTIME_API 从 index.ts 导出派生 · CI 挂默认门 · 技能包幻影面清理（expect/verify、atelier lint/e2e、playtest.fixed_delta、server.port 键、llms.txt 版本标签、gen-auth 过期注释） | 排队 |
+| R3 结构债 | 2-3 支 | createHandler 路由表化（可单测）· callTool 分发 Map+per-tool 元数据（MCP 契约面四件顺带根治）· dev 中间件路由表化 · gen/lib+scripts/lib 共享库（matchAngle/parseStringLiteral/sourceFingerprint 单点，vendor 闭包红线内）· confirm 未知档位 fail-closed+requestState nonce 台账+审批密钥与 dev-token 分离 · probeChecks 八层各一函数 | 排队 |
+
+**评审队列勘误（2026-09-30 评审 §5 复核订正，历史归档行不改写）**：①「server-status 路由级门禁未做」已不成立——statusToken 可选门禁已落地（差距批 W1），残留缺口=可选缺省+构建壳单点旗（§4.5，挂 R3 后议）；②「live×鉴权沿 live!=null 口径」已修——isLiveDeclared 谓词收口（差距批 W1）；③「journalPush 脱敏」已修且为唯一写入口（评审批 W2）。仍在队列且复核确认仍在：dom-shim 二期、scripts/lib 抽取（die 款）、生成器字面量解析统一、巨型函数拆分、MCP 契约面四件、checkpoint --allow 断链、CLI flag-当-子命令、init 目录守卫、dev-server-host 握手超时、SSE 心跳+resolved Map、性能尾巴三项——其中后六件与本批 R1-D/R3 重叠，随 R 批销账。
+
 ### F 线 — 功能债（壮大框架的主菜）
 
 | # | 项 | 状态 | 剩余 |
