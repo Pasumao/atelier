@@ -132,6 +132,8 @@ type AtrError = {
 | ATR-346 | 请求体超上限（413） | 缩小请求体或调装配上限 `createHandler({ maxBodyBytes })`（缺省 1MiB）；超限请求不进 handler、不入 journal |
 | ATR-350 | jobs 投递参数非法（`ctx.jobs.enqueue` / cron 声明：type 非法、payload 不可 JSON 序列化、字段越界、`cron:` 前缀为运行时保留） | 修正 enqueue/cron 参数：type 为 1~256 字符显式分发键、payload 须过 JSON round-trip、maxAttempts ≥ 1；自定义任务勿用 `cron:` 前缀（recurring 行由 `startJobs({ cron })` 管理） |
 | ATR-351 | 幂等键 KV 参数非法（key 空/超 512 字符、value 不可 JSON 序列化） | key 用稳定业务标识（如 `pay:<orderId>`）；value 改可 JSON 序列化纯数据（函数/循环引用不行）；去重纪律 = `ctx.kv.setIfAbsent(键, 结果)` 占领后再执行 |
+| ATR-352 | 插值/属性值直接收到信号对象（忘写 `.value` 典型笔误）——信号被渲染成内部字段 JSON（dev 每信号一次性警示 / prod 剥离，渲染语义不变） | 模板表达式补 `.value`（`{sig.value}` / `{sig.value.name}`）；确要查内部结构用 console.log，绝不渲染信号对象本体 |
+| ATR-353 | keyed each 重复身份键——自第二项起折叠进已有行（appendChild 移动语义），行数少于数据项数（dev 每 each 块一次性警示 / prod 剥离，折叠语义不变） | `by` 表达式对每项取唯一值（如 `by item.id`）；数据含重复键先去重，或改用无 by 形态（全清重建语义） |
 
 **4xx MCP 与 dev 面**
 

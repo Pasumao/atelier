@@ -24,7 +24,7 @@ import {
 } from "../runtime/template.ts";
 import { compileFunction, compileModuleSource, programSource } from "../compiler/codegen.mjs";
 import { evalExpr, exprRootIdents } from "../runtime/expr.ts";
-import { findByTag, makeContainer, serialize } from "./dom-shim.ts";
+import { findByTag, headStyles, makeContainer, serialize } from "./dom-shim.ts";
 
 type CaseResult = { frames: string[] };
 
@@ -813,5 +813,85 @@ describe("事件修饰 v1 codegen 面（m9 批集成收口）：emitAttrs on: �
     } finally {
       setProd(false);
     }
+  });
+});
+
+/* ================= R1-B 支（2026-09-30 架构评审 P1 #5/#6）：bindAttr 单点 + 双 style 块 =================
+ * P1 #5：codegen dynamic attr 支路修复前只发射 setAttribute（bool false → "false" 属性落在 =
+ * 语义反转）——runtime 抽单点 bindAttr（BOOLEAN_ATTRS 25 项 + ATR-328 与解释器同源）后双路径同帧。
+ * P1 #6：双 <style> 块修复前解释器非全局正则只注入首个、codegen /g 全注入——统一 extractStyleBlocks
+ * 单点后 dev/prod、解释器/编译四象限全注入。 */
+describe("R1-B：动态属性单点 bindAttr（P1 #5 编译产物布尔属性语义反转修复）", () => {
+  it("golden parity：disabled={false} 双路径同帧属性不存在；true 落属性；非布尔属性字符串逐字不变", async () => {
+    const raw = `<div><button disabled={off.value}>Go</button><span data-x={off.value}>s</span></div>`;
+    const r = await parity("ParityBindAttr", raw, () => {
+      const off = $state(false);
+      return {
+        scope: { off },
+        steps: [
+          async () => { off.value = true; },
+          async () => { off.value = false; },
+        ],
+      };
+    });
+    expect(r.frames[0], "初始 false → 属性不存在（修复前编译路径落 disabled=\"false\" 帧背离）").not.toContain("disabled");
+    expect(r.frames[0]).toContain('data-x="false"'); // 非布尔属性字符串行为逐字不变
+    expect(r.frames[1]).toContain('disabled="true"'); // true → 存在即真
+    expect(r.frames[2], "回false → 摘除").not.toContain("disabled");
+  });
+
+  it("发射形态锚定：dynamic attr 支路发射 rt.bindAttr 五参族形态（不再内联 removeAttribute/setAttribute）", () => {
+    const raw = `<div><button disabled={off.value}>Go</button></div>`;
+    const body = programSource(parseTemplate(raw));
+    expect(body).toMatch(/rt\.bindAttr\(el\d+, "disabled", "off\.value", scope, "button"\);/);
+    expect(body).not.toContain(`rt.bindExpr("off.value"`); // 未误留 dynamic 单向旧发射
+    const c = compileFunction("BindAttrDeps", raw);
+    expect([...c.deps.reactive]).toEqual(["off"]); // collect 超集不变式保持（bindAttr 内部 bindExpr 订阅）
+  });
+});
+
+describe("R1-B：双 <style> 块全注入（P1 #6 dev/prod 分叉修复）", () => {
+  const TWO_STYLE_RAW =
+    `<style scoped>.s1 { color: var(--atelier-color-accent); }</style>` +
+    `<style scoped>.s2 { color: var(--atelier-color-accent); }</style>` +
+    `<p class="s1">a</p><b class="s2">b</b>`;
+
+  it("解释器路径注入全部块（修复前非全局正则只注入首个 → 红）", () => {
+    tokenState.vars.add("--atelier-color-accent");
+    const before = headStyles().length;
+    const container = makeContainer();
+    mountComponent(
+      { name: "StyleTwoInterp", render: () => ({ raw: TWO_STYLE_RAW, scope: {} }) as never },
+      {},
+      container,
+      new Map(),
+      okValidate as never,
+    );
+    expect(headStyles().length - before, "两个 <style> 块都进 head").toBe(2);
+  });
+
+  it("编译路径注入全部块（既有 /g 语义钉住不回归）", () => {
+    tokenState.vars.add("--atelier-color-accent");
+    const before = headStyles().length;
+    registerCompiled(compileFunction("StyleTwoCompiled", TWO_STYLE_RAW));
+    const container = makeContainer();
+    mountComponent(
+      { name: "StyleTwoCompiled", render: () => ({ raw: TWO_STYLE_RAW, scope: {} }) as never },
+      {},
+      container,
+      new Map(),
+      okValidate as never,
+    );
+    expect(headStyles().length - before, "两个 <style> 块都进 head").toBe(2);
+  });
+
+  it("golden parity：双块模板两路径 DOM 同帧（style 块渲染为 null，不落 DOM）", async () => {
+    tokenState.vars.add("--atelier-color-accent");
+    const r = await parity("ParityStyleTwo", TWO_STYLE_RAW, () => {
+      const t = $state("x");
+      return { scope: { t }, steps: [async () => { t.value = "y"; }] };
+    });
+    expect(r.frames[0]).toContain('"a"');
+    expect(r.frames[0]).not.toContain("<style"); // 块本体不落 DOM（解释器 renderNode 同款跳过）
   });
 });

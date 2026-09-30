@@ -37,7 +37,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { parseTemplate } from "../runtime/template.ts";
+import { extractStyleBlocks, parseTemplate } from "../runtime/template.ts";
 import { exprRootIdents } from "../runtime/expr.ts";
 
 const INVOKED_DIRECTLY =
@@ -57,13 +57,9 @@ class CodegenError extends Error {
   }
 }
 
-/* ---------- 样式抽取：与解释器 mountComponentInner 同一正则（<style scoped> 预提取） ---------- */
-const STYLE_RE = /<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>/gi;
-function extractStyles(raw) {
-  const out = [];
-  for (let m; (m = STYLE_RE.exec(raw));) out.push(m[1]);
-  return out;
-}
+/* ---------- 样式抽取：runtime extractStyleBlocks 单点（R1-B 支 P1 #6）----------
+ * 与解释器 mountComponentInner 同一函数同一正则（修复前本文件 /g 全注入、解释器非全局正则
+ * 只注入首个——同一组件 dev/prod 渲染分叉，且此处注释自称「同一正则」不成立）。 */
 
 /* ---------- 静态依赖提取（决策 3 / F-2 第一期） ----------
  * 每个响应式挂点（bindExpr / {#if} test / {#each} expr+key 及子树）在发射时同步收集其
@@ -160,11 +156,14 @@ function emitAttrs(attrs, SV, el, tag, out, uid, st) {
       collect(st, "reactive", a.value);
       out.push(`  rt.bindTwoWay(${el}, ${esc(a.name)}, ${esc(a.value)}, ${SV}, ${esc(tag)});`);
     } else if (a.dynamic) {
+      // R1-B 支（P1 #5，2026-09-30 架构评审）：动态属性单点 rt.bindAttr——布尔属性存在性语义
+      // （BOOLEAN_ATTRS 25 项 false → removeAttribute + ATR-328 dev 一次性可疑值警示）收在
+      // runtime 单点，与解释器 renderNode dynamic 支路同位同构。修复前本支路只发射
+      // setAttribute——编译应用 disabled={false} 落 disabled="false"（存在即真 ⇒ 语义反转）。
+      // collect 论证与 bind: 同款：bindAttr 内部 bindExpr effect 订阅目标信号 ⇒ 运行时追踪集
+      // 必含目标 ⇒ 超集不变式（F-2 依赖图）保持，同桶收集（reactive）。
       collect(st, "reactive", a.value);
-      out.push(`  rt.bindExpr(${esc(a.value)}, ${SV}, (v) => {`);
-      out.push(`    if (v == null) ${el}.removeAttribute(${esc(a.name)});`);
-      out.push(`    else ${el}.setAttribute(${esc(a.name)}, rt.stringify(v));`);
-      out.push(`  });`);
+      out.push(`  rt.bindAttr(${el}, ${esc(a.name)}, ${esc(a.value)}, ${SV}, ${esc(tag)});`);
     } else {
       out.push(`  ${el}.setAttribute(${esc(a.name)}, ${esc(a.value)});`);
     }
@@ -297,6 +296,8 @@ function emitEach(n, SV, T, out, uid, st) {
     out.push(`      const ${scv} = { ...${SV}, [${esc(n.item)}]: item, [${esc(n.index)}]: i };`);
     out.push(`      let k;`);
     out.push(`      try { k = rt.stringify(rt.evalExpr(${esc(n.keyExpr)}, ${scv})); } catch { k = \`\${i}\`; }`);
+    // R-D4b（ATR-353）：重复身份键 dev 一次性警示单点（与解释器 keyed 支路同源；折叠语义不变）
+    out.push(`      rt.warnEachDupKey(${live}, k, nextKeys);`);
     out.push(`      nextKeys.add(k);`);
     out.push(`      let el = ${live}.get(k);`);
     out.push(`      if (!el) {`);
@@ -363,7 +364,7 @@ export function compileFunction(name, raw) {
   } catch (e) {
     throw new CodegenError(`generated program failed to parse (compiler bug): ${e.message}`);
   }
-  return { name, raw, styles: extractStyles(raw), deps, program };
+  return { name, raw, styles: extractStyleBlocks(raw), deps, program };
 }
 
 /** raw[] → 完整 ES 模块源码（零 import；应用侧 import 后 registerCompiled 即接入快路径）。

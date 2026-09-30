@@ -5,6 +5,7 @@ export { $state, $derived, $effect, $effectStatic, store } from "./core.ts"; // 
 export type { Signal } from "./core.ts";
 export { html, initTokens, tokenState, mountComponent } from "./template.ts";
 export type { HtmlTemplate, ComponentDef, ComponentRegistry } from "./template.ts";
+export { bindAttr } from "./template.ts"; // R1-B 支（P1 #5）：动态属性单点（bind 族五参同款形态；架构师指定进桶出口）
 export { parseTemplate } from "./template.ts"; // compiler face (P0-2②): same parser, same truth
 export type { TemplateNode, TemplateAttr } from "./template.ts";
 export { streamValue, optimisticList } from "./primitives.ts";
@@ -16,7 +17,7 @@ export type { StandardSchemaFace, StandardSchemaProps, StandardValidateResult, S
 export { component, registry } from "./component.ts";
 export { registerExtractedSchemas } from "./component.ts"; // 决策 26：提取 schema sink 注册口（__resetExtractedSchemas test-only，不出桶）
 export { installStateBridge } from "./bridge.ts";
-export { hmrRemountAll } from "./template.ts"; // P0-5: 保值热交换（dev 插件注入的 accept 回调经 window 钩子调用）
+export { hmrRemountAll, unmount } from "./template.ts"; // P0-5: 保值热交换（dev 插件注入的 accept 回调经 window 钩子调用）；R1-B 支（P1 #9③）: 公开实例卸载（SPA 路由切换销账）
 export { registerCompiled, compiledTemplateCount } from "./template.ts"; // P0-2③: 编译产物注册（codegen 模块接入零 tokenize 快路径）
 export type { CompiledTemplate } from "./template.ts";
 

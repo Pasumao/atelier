@@ -40,8 +40,9 @@ export const ChatMessage = component(function ChatMessage(props: { text: string;
 ## $state rules
 
 - Create signals **inside** the component function; never module-level state (implicit global ban)
-- Mutate via `.value =`; read in templates via `{sig.value}` — subscription is automatic
+- Mutate via `.value =`; read in templates via `{sig.value}` — subscription is automatic. Rendering the signal object itself (`{sig}`) leaks internal-fields JSON → **ATR-352** dev warning (forgotten `.value`)
 - `$derived` is read-only (write → ATR-305). Derive, don't cache by hand.
+- Keyed `{#each … by key}`: the `by` expression must be **unique per item** — duplicate keys fold rows silently (appendChild move semantics) → **ATR-353** dev warning; rendered row count < data length is the symptom to watch for
 
 ## bind: two-way binding (v1.2, decision 25)
 
@@ -76,6 +77,8 @@ export const ChatMessage = component(function ChatMessage(props: { text: string;
 | Component name not found | ATR-401 | Import the component file; name = opts.name (`ModelCard` vs `ModelCard2` pitfall: esbuild may rename — always pass `name` explicitly) |
 | State shared across instances | — | Move `$state` call inside the component fn |
 | Template expression not updating | — | Signal values must be **read through `.value`** in expressions (e.g. `meta.value.x`, not `meta.x`) |
+| Interpolation renders `{"_subs":…}` JSON | ATR-352 | Forgot `.value` — read the signal through `.value` in the template expression |
+| Keyed each renders fewer rows than items | ATR-353 | Duplicate `by` keys fold rows — make the key unique per item, or dedupe the data |
 
 ## Related
 
