@@ -1,7 +1,7 @@
 # 框架设计决策记录
 
 > 逐决策留档：每条含选项、取舍、定论、理由。新决策追加在末尾。
-> 已决 **0-34**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3；决策 32 = 文件上传/资产管道，2026-09-28 差距批 B1；决策 33 = cache 元数据档位，2026-09-29 差距批 A5；决策 34 = GET for query 运行时分发，2026-09-29 差距批 A7）；未决项 2 条见文末。
+> 已决 **0-35**（决策 25/26/27 = bind 批/schema 批/prod 批，2026-09-26 同日三批；决策 28 = 1.0 版本化与语义化版本承诺，2026-09-27 m12 批；决策 29 = command journal 持久化，2026-09-28 差距批 B5；决策 30 = API key 最小切口，2026-09-28 差距批 A6；决策 31 = email 适配边界，2026-09-28 差距批 B3；决策 32 = 文件上传/资产管道，2026-09-28 差距批 B1；决策 33 = cache 元数据档位，2026-09-29 差距批 A5；决策 34 = GET for query 运行时分发，2026-09-29 差距批 A7；决策 35 = 资产下载面鉴权与内容寻址句柄，2026-09-30 R1 收口批）；未决项 2 条见文末。
 
 ## 已决全景（速查表）
 
@@ -491,6 +491,13 @@
 - **取舍与诚实边界**：未知参数 GET 与 POST **有意分叉**——POST JSON 体的未知键经 validateFlat 静默放行是既有口径（runtime/contract.ts 零改动），GET 查询串显式拒绝：URL 是代理日志/浏览器历史里的公共面，utm_source 等寄生参数静默流进 handler 输入不可接受；推论 = **敏感输入走 POST** 的开发者纪律（GET URL 进代理日志/浏览器历史——鉴权与契约校验照常挡滥用，但输入值本身不再有请求体那层遮蔽，文档/llms.txt 引导敏感查询改 POST）。内省不呈报（EndpointSummary 零形状——restful 已在 OpenAPI/源码可查，v1 不进 server-status，留门）；gen-endpoint 生成的 api.ts 客户端 v1 不扩（仍 POST——触碰面不含生成器，留门）；OpenAPI 响应头（Cache-Control headers）投影 v1 不做维持决策 33 口径。
 - 测试钉：`tests/restful-get.test.ts`（25 用例：路由五态含未知端点 GET 仍 405 顺序保持/显式投影全集两态/未知参数拒绝 vs POST 静默放行两通道差异钉死/缺必填与范围违规 GET-POST 逐字一致/session+apikey 鉴权双通道+handler 不执行/readAuth 每请求恰一次/限流 429 计数/cache 双通道逐字节一致+错误路径无头/live×restful 两不误/journal 零入账/内省零形状负例/node-host serve() 真实端口一轮）+ `tests/openapi-golden.test.ts` restful GET 形翻转（真 loopback server 文档驱动 GET 期望 200 + 响应过输出契约——「文档即真相」机检随运行时扩张自动升级）。
 - 时间：2026-09-29（差距批 A7）。
+
+## 决策 35：资产下载面鉴权与内容寻址句柄——下载与上传同链 fail-closed（R1 收口批 A 支）
+
+- **定论**：决策 32 的上传面有 gateAuth 缺省 session fail-closed，下载路由却直通无闸——框架没有提供任何给下载面加鉴权的方式，且资产 id 是 AUTOINCREMENT 顺序整数，`/assets/1`、`/assets/2`… 可匿名枚举私有文件（2026-09-30 架构评审 P1#1，「发布了就是 CVE」级）。本决策补齐下载面：① `defineUpload` 增加 **`downloadAuth` 下载鉴权声明位**，与上传 `auth` 同构同链（gateAuth 单源）；缺省语义 = **跟随该上传面的 auth 声明**（再缺省 `{ type: "session" }`），全链 fail-closed——框架不提供任何匿名可下载的缺省路径，公开下载须全部已注册上传面显式 `none`（零注册面按 session 兜底）。② 下载路由 `GET <mount>/assets/<sha256hex>` 采用 **sha256 内容寻址句柄**（磁盘布局本按 sha 去重——决策 32 之自然延伸）：内容指纹天然不可枚举、同内容同句柄、Cache-Control immutable 语义严格成立；AUTOINCREMENT 整数 id 保留为 `atelier_assets` 内部主键**不再对外**（顺序 id 匿名枚举面就此关闭；1.1 预发布期 breaking 可接受，测试即行为定义）。③ 下载响应恒 `X-Content-Type-Options: nosniff`；`text/html` / `application/xhtml+xml` / `image/svg+xml` 族缺省 `Content-Disposition: attachment`（自报 mime 不可信——上传入口另拒控制字符 mime，下载发射侧对存量毒化行 fail-safe 回落 octet-stream+attachment，双面封死存储型 XSS 与头注入：评审 P1#2 + 独立评审对抗探针补充洞一并收口）。
+- **取舍与诚实边界**：下载路由无面名（资产池按 sha 全局共享），多上传面共存时下载闸取各面有效声明的**合取**——任一面要求鉴权即全池要求，新增受保护面只会收紧不会放松；introspect 对 downloadAuth **零投影**（多面合取语义下单值投影必失真——诚实呈现优于失真呈现，server-status 形状零变化）；完整 64 hex 精确匹配而非前缀匹配（前缀会引入二次扫描面与歧义）；危险 mime attachment 不带 filename 参数（库内 name 是攻击者原文，进响应头有注入面——下载名回落 URL 末段 `<sha>.<ext>`）。
+- 测试钉：`tests/uploads.test.ts` R1-A 段（缺省 401/downloadAuth 声明位/五事实响应/整数 id 退役/nosniff+attachment 矩阵/sha 句柄形态闸/mime 控制字符双面钉）+ 独立评审对抗探针（截断/穿越/CRLF/NUL 全负例）。
+- 时间：2026-09-30（R1 收口批 A 支；评审报告 §6 决策点 R-D2 拍板落地）。
 
 ## 未决项
 - slogan 已定稿（2026-09-06，用户拍板）：「意图进，界面出 / *Intent in, interface out.*」，以仓库根 README 为准。
