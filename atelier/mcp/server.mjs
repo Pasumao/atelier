@@ -64,13 +64,30 @@ const ENDPOINT_MAP = {
 };
 
 /* ---------- schema translation: flat (decision 6) → standard JSON Schema ---------- */
+/** R3 收口（评审 §4.1）：flat 约束键 min/max → JSON Schema 标准键 minimum/maximum——原样
+ * clone 时做入参校验的严格 MCP 宿主不识别 min/max（校验失效）。 */
+function translateConstraintKeys(node) {
+  if (Array.isArray(node)) return node.map(translateConstraintKeys);
+  if (node === null || typeof node !== "object") return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) out[k] = translateConstraintKeys(v);
+  if (out.min !== undefined) {
+    out[out.type === "string" ? "minLength" : "minimum"] = out.min;
+    delete out.min;
+  }
+  if (out.max !== undefined) {
+    out[out.type === "string" ? "maxLength" : "maximum"] = out.max;
+    delete out.max;
+  }
+  return out;
+}
 function flatToJsonSchema(params) {
   if (!params || params.type !== "object") return { type: "object", properties: {}, required: [] };
   const req = params.reqProps ?? {};
   const opt = params.optProps ?? {};
   return {
     type: "object",
-    properties: { ...structuredClone(req), ...structuredClone(opt) },
+    properties: { ...translateConstraintKeys(structuredClone(req)), ...translateConstraintKeys(structuredClone(opt)) },
     required: Object.keys(req),
     additionalProperties: false,
   };

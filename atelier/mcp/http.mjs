@@ -30,8 +30,19 @@ import { INPUT_REQUIRED_TAG, isAskGated } from "./confirm.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
-/** 服务端主导创建的长操作清单（spawn 子进程型/全量型；随长操作入库扩充） */
-const TASK_ELIGIBLE = new Set(["structure.check", "test.run"]);
+/** 服务端主导创建的长操作清单（spawn 子进程型/全量型；随长操作入库扩充）。
+ * R3 收口（评审 §4.6）扩充长 spawn 型四件——checkpoint.source_list/source_commit（git spawn，
+ * 601s 档）、graph.static（构建期图查询，60s 档）、diff.report（git 基线对照）——HTTP 直连下
+ * 内联执行会阻塞 dev 面（Vite 事件循环）同端口的一切请求，与握手监督/取消语义的整改动机
+ * 精神一致。受闸工具不入（confirm 闸先行，:158 条件）；导出仅供测试钉住清单。 */
+export const TASK_ELIGIBLE = new Set([
+  "structure.check",
+  "test.run",
+  "checkpoint.source_list",
+  "checkpoint.source_commit",
+  "graph.static",
+  "diff.report",
+]);
 
 const REMOVED_OR_UNSUPPORTED = new Map([
   ["initialize", { message: "initialize/initialized 握手已在 MCP 2026-07-28 无状态形态移除（SEP-2575）", fix: "直接发业务请求；版本/能力信息放每次请求的 _meta（应答 _meta.protocolVersion = 2026-07-28）；能力预取用 server/discover" }],

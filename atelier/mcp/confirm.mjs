@@ -8,10 +8,13 @@
  * 真正的多轮审批——SEP-2322 InputRequiredResult + requestState 原语：
  *   首轮调用受闸工具 → 不执行，返回 inputRequired 结果 + HMAC 签名的 requestState 句柄；
  *   客户端二轮携 `_approval { requestState, decision: "approve" | "deny" }` 重新提交 →
- *   放行执行 / ATR-402 拒绝。句柄 = 显式显式句柄（SEP-2567 handles 形态）：签名密钥取
- *   项目 .atelier/dev-token（dev 面既有信任锚），状态全部在句柄内——无服务端会话态，
- *   stdio 与 HTTP 直连双通道任意实例可续。诚实边界：句柄短时有效（缺省 5 分钟）且
- *   非一次性作废（作废需服务端状态，违背无状态对齐）；重放可在审计 mcp.approval 流检出。
+ *   放行执行 / ATR-402 拒绝。句柄 = 显式句柄（SEP-2567 handles 形态）：签名密钥取项目
+ *   `.atelier/approval-secret`（R3 收口起与 dev-token 分离——dev-token 可被 dev 面客户端读取，
+ *   能读即能伪造自批；审批密钥首用生成、独立落盘，旧句柄失效 = dev 时点工具可接受），状态
+ *   尽量在句柄内——无服务端会话态，stdio 与 HTTP 直连双通道任意实例可续（同一密钥文件）。
+ *   诚实边界：句柄短时有效（缺省 5 分钟）；nonce 一次性台账为**进程内**消费——TTL 内重放拒绝
+ *   （R3 收口，评审 §4.2「一次审批→N 次回滚」关闭），跨进程重启窗的残留重放仍由审计
+ *   mcp.approval 流检出（台账持久化 = 服务端状态，违背无状态对齐，维持不做）。
  * 审批动作全量入审计（.atelier/audit.jsonl，与 dev 面同格式：kind = "mcp.approval"）。
  */
 import fs from "node:fs";
@@ -50,8 +53,22 @@ export function readAgentConfig(projectRoot) {
  * 纯函数，无 IO——MCP server 调用前先 readAgentConfig；测试直接喂配置。
  * FS-M6 后本函数只承担 deny 墙；ask 档多轮审批在 approvalVerdict 收口。
  */
+/** R3 收口（评审 §4.2）：合法档位集 + 未知档位 fail-closed 拒绝（"ask " 尾空格 / "Ask" /
+ * 拼错不再静默放行破坏性工具）；非受闸工具不受扰（闸只辖破坏性/操作族）。 */
+const CONFIRM_TIERS = new Set(["auto", "ask", "deny"]);
+function unknownTierDenial(toolName, tier) {
+  return {
+    code: "ATR-402",
+    message: `agent.confirm 档位非法：${JSON.stringify(tier)}——拒绝执行受闸操作 ${toolName}（fail-closed）`,
+    fix: 'atelier.config.json → agent.confirm 仅接受 "auto" | "ask" | "deny"（缺省 auto）',
+  };
+}
+
 export function confirmGate(agentConfig, toolName, args) {
   const tier = agentConfig?.confirm ?? "auto";
+  if ((DESTRUCTIVE_TOOLS.has(toolName) || OPERATION_TOOLS.has(toolName)) && !CONFIRM_TIERS.has(tier)) {
+    return unknownTierDenial(toolName, tier);
+  }
   if (DESTRUCTIVE_TOOLS.has(toolName) && tier === "deny") {
     return {
       code: "ATR-402",
@@ -74,11 +91,22 @@ export function confirmGate(agentConfig, toolName, args) {
 
 const HANDLE_TTL_MS_DEFAULT = 5 * 60_000;
 
-/** 签名密钥：项目 .atelier/dev-token（dev 面信任锚，dev/stdio/HTTP 三方同源）；
- * 缺文件降级为项目根路径派生（本地单机信任模型，密级等同 dev-token 缺席场景）。 */
+/** 签名密钥（R3 收口，评审 §4.2）：项目 `.atelier/approval-secret`，首用生成（32 字节 hex，
+ * 0600 落盘）——与 dev-token 分离（dev-token 可被 dev 面客户端读取，能读即能伪造 requestState
+ * 自批，ask 档对持 token 方沦为荣誉制）。落盘即真相：stdio 与 HTTP 直连双通道跨实例同钥，
+ * 句柄可续。旧 dev-token 密钥句柄失效 = dev 时点工具可接受。只读盘等无法落盘场景降级为
+ * 项目根路径派生（密级等同既有缺位兜底，本地单机信任模型）。 */
 export function approvalSecret(projectRoot) {
+  const file = path2join(String(projectRoot ?? ""), ".atelier", "approval-secret");
   try {
-    return fs.readFileSync(path2join(projectRoot, ".atelier", "dev-token"), "utf8").trim() || pathFallback(projectRoot);
+    const cur = fs.readFileSync(file, "utf8").trim();
+    if (cur) return cur;
+  } catch { /* 首用生成 */ }
+  try {
+    fs.mkdirSync(path2join(String(projectRoot ?? ""), ".atelier"), { recursive: true });
+    const fresh = crypto.randomBytes(32).toString("hex");
+    fs.writeFileSync(file, `${fresh}\n`, { mode: 0o600 });
+    return fresh;
   } catch {
     return pathFallback(projectRoot);
   }
@@ -155,17 +183,26 @@ export function verifyRequestState({ requestState, tool, args, secret, now = Dat
  *   { kind: "refused", code, message, fix }         — ask 二轮被拒（人工 deny / 句柄无效过期）
  * 纯判定（secret/now 可注入）；审计由调用方（server.mjs）落，见 auditApproval。
  */
+/** nonce 一次性台账（R3 收口，评审 §4.2）：进程内 Set——同一句柄 nonce 二次呈现即拒
+ * （「一次审批→N 次回滚」关闭）。进程生命周期即台账边界（诚实边界见文件头：跨进程重启窗
+ * 的残留重放由审计流检出）。 */
+const consumedNonces = new Set();
+
 export function approvalVerdict(agentConfig, toolName, args = {}, { secret, now = Date.now(), ttlMs } = {}) {
   const tier = agentConfig?.confirm ?? "auto";
   if (!isAskGated(toolName)) {
     const denial = confirmGate(agentConfig, toolName, args);
     return denial ? { kind: "deny", ...denial } : { kind: "allow" };
   }
+  if (!CONFIRM_TIERS.has(tier)) {
+    const denial = unknownTierDenial(toolName, tier); // fail-closed：未知档位不再静默放行
+    return { kind: "refused", ...denial };
+  }
   if (tier === "deny") {
     const denial = confirmGate(agentConfig, toolName, args);
     return denial ? { kind: "deny", ...denial } : { kind: "allow" }; // deny 墙语义与既有完全一致
   }
-  if (tier !== "ask") return { kind: "allow" }; // auto / 未知档：放行（不误伤）
+  if (tier !== "ask") return { kind: "allow" }; // auto / 缺省：放行（ask 分支在下方）
 
   const approval = args?._approval;
   if (!approval || typeof approval !== "object" || !approval.requestState) {
@@ -200,8 +237,22 @@ export function approvalVerdict(agentConfig, toolName, args = {}, { secret, now 
       fix: `重新调用 ${toolName}（不带 _approval）获取新 requestState，再由人工决定 approve / deny`,
     };
   }
-  if (decision === "approve") return { kind: "execute" };
+  if (decision === "approve") {
+    const nonce = String(check.payload.n ?? "");
+    if (nonce && consumedNonces.has(nonce)) {
+      return {
+        kind: "refused",
+        code: "ATR-401",
+        message: `${toolName} 审批句柄已被使用（nonce 一次性台账）：重放拒绝`,
+        fix: `重新调用 ${toolName}（不带 _approval）获取新 requestState，再由人工决定 approve / deny`,
+      };
+    }
+    if (nonce) consumedNonces.add(nonce);
+    return { kind: "execute" };
+  }
   if (decision === "deny") {
+    const nonce = String(check.payload.n ?? "");
+    if (nonce) consumedNonces.add(nonce); // deny 同样消费句柄——同一句柄不能先拒后批
     return {
       kind: "refused",
       code: "ATR-402",
