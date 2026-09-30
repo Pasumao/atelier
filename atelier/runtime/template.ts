@@ -6,8 +6,9 @@
  *         / HTML void 元素（<br>/<img>/<input>… 无闭合）
  *         / <style scoped>（token 校验）/ 子组件 <ModelCard ... />（大写标签）。
  * 解析期显式拒绝（ATR-101）：未闭合的 {#if}/{#each}/元素标签、错位与游离闭合标签——不静默吞掉
- * （编译路径构建期即抛，解释器路径渲染为可行动错误卡）。字面量花括号（非表达式候选）原样并入
- * 文本，不再静默丢弃。诚实边界：残缺 "</"（无标签名）拒绝；表达式不支持箭头函数/赋值（ATR-301）。
+ * （编译路径构建期即抛，解释器路径渲染为可行动错误卡）。字面量花括号（非表达式候选）与字面量
+ * <（< 后非标签名，HTML 同款语义）原样并入文本，不再静默丢弃。诚实边界：残缺 "</"（无标签名）
+ * 拒绝；表达式不支持箭头函数/赋值（ATR-301）。
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
@@ -93,6 +94,13 @@ class Parser {
   eof(): boolean {
     return this.pos >= this.src.length;
   }
+  /** < 是否开启标记构造（注释 <!-- / 闭合 </ / 开标签 <[A-Za-z]）——真标记交回主循环，
+   * 其余 < 为字面量文本（P-A P1-3）。闭合头一律交回：残缺闭合由主循环显式拒绝（ATR-101 保持）。 */
+  private tagOpensAt(i: number): boolean {
+    if (this.src.startsWith("<!--", i) || this.src.startsWith("</", i)) return true;
+    return /^<[A-Za-z][\w-]*/.test(this.src.slice(i));
+  }
+
   /** 块语法起始判定（{:else if / {:else} / {/if} / {/each}）——主循环与文本扫描共用 */
   private blockStartsAt(i: number): boolean {
     return (
@@ -129,12 +137,14 @@ class Parser {
           parseFail(`多余的闭合标签 </${m[1]}>（无对应开标签）`, `删除 </${m[1]}> 或补上对应的开标签`);
         }
         const tagMatch = /^<([A-Za-z][\w-]*)/.exec(rest);
-        if (!tagMatch) {
-          this.pos++;
+        if (tagMatch) {
+          nodes.push(this.parseElement(tagMatch[1]));
           continue;
         }
-        nodes.push(this.parseElement(tagMatch[1]));
-        continue;
+        // P-A P1-3：字面量 <（< 后非标签名，如 "a < b" / "x <= y"）——不再静默丢弃，对齐
+        // HTML「< 后非标签名即文本」语义，落入下方文本扫描按字面量并入（扫描器对非标记头的
+        // < 同样消费，两分支不会互相踢皮球死循环）。字面量 { 同款问题此前已修（见文本分支注释），
+        // < 是漏网面；真标记头（注释/闭合/开标签）仍由上方分支处理。
       }
       if (c === "{") {
         if (this.blockStartsAt(this.pos)) break; // 块终止符，交给所属块处理
@@ -181,12 +191,18 @@ class Parser {
         }
         // 非表达式 {（{ } 空体 / 配对失败）：不推进、不丢弃——落入下方文本分支原样并入
       }
-      // 文本：字面量 { 原样并入（此前被静默丢弃）；块语法与表达式候选交回主循环
+      // 文本：字面量 { 原样并入（此前被静默丢弃）；字面量 < 同款（P-A P1-3）；块语法与表达式候选交回主循环
       let j = this.pos;
       let buf = "";
       while (j < this.src.length) {
         const ch = this.src[j];
-        if (ch === "<") break;
+        if (ch === "<") {
+          // 标记头（注释/闭合/开标签）交回主循环；其余 < 按字面量并入（P-A P1-3）
+          if (this.tagOpensAt(j)) break;
+          buf += ch;
+          j++;
+          continue;
+        }
         if (ch === "{") {
           const restJ = this.src.slice(j);
           const close2 = matchBrace(this.src, j);
@@ -1077,7 +1093,16 @@ function injectScopedStyle(componentName: string, css: string, file: string): vo
   const key = `${file}:${css.length}:${hashStr(css)}`;
   if (scopedStyles.has(key)) return;
   scopedStyles.add(key);
-  const scopeClass = `atr-scope-${scopeSeq++}`;
+  // P-A P1-2：作用域以组件为单位——同组件多个 <style scoped> 块复用首个 scope class。
+  // 修复前每块新铸 atr-scope-N 且 scopeClasses.set(componentName, …) 同名覆盖（last-wins）：
+  // 每块 CSS 都注入 head，但 root 只挂 map 末值 ⇒ 前序块的选择器前缀永不命中 root
+  // （R 批修了注入面「全注入」，应用面 last-wins 仍在；红检见 tests/codegen.test.ts P1-2 组）。
+  // 复用首类 = 单根单类、改动面最小的修法；作用域类常驻（组件级），无回收面。
+  let scopeClass = scopeClasses.get(componentName);
+  if (scopeClass === undefined) {
+    scopeClass = `atr-scope-${scopeSeq++}`;
+    scopeClasses.set(componentName, scopeClass);
+  }
   // 作用域前缀跳过 @规则头与 @keyframes 的内部选择器（0% / 50% / from / to），
   // 修复：此前 keyframes 百分比帧被误加前缀导致动画静默失效
   const kfSel = /^(?:[\d.,%\s]+|from(?:\s*,.*)?|to(?:\s*,.*)?)$/;
@@ -1109,7 +1134,6 @@ function injectScopedStyle(componentName: string, css: string, file: string): vo
   const el = document.createElement("style");
   el.textContent = prefixed;
   document.head.appendChild(el);
-  scopeClasses.set(componentName, scopeClass);
 }
 const scopeClasses = new Map<string, string>();
 let scopeSeq = 0;
