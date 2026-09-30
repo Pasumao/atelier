@@ -68,7 +68,9 @@ jobs:
   # m10 批 C: the snapshot gate is now FORMAL locally (scripts/snapshot-smoke.mjs — per-platform
   # baselines armed per platform; the framework repo's win32 baseline is committed at
   # .atr/snapshots/win32/baseline.png). Removing continue-on-error here is pending the first
-  # real CI run on a remote (this repo has none yet) — never claimed verified before that.
+  # CI run of the CURRENT gates on a remote: origin exists and CI ran there through 2026-09-06
+  # (last round success), but remote main lags the local tree by 310 commits (2026-09-30) —
+  # the R batch and 1.1.0 gates have never run remotely. Never claim verified before that run.
   snapshot-smoke:
     name: snapshot smoke · ${{ matrix.os }}
     strategy:
