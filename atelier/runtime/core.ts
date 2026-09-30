@@ -47,6 +47,13 @@ function deliver(sub: Subscription): void {
   else sub.run();
 }
 
+/** P2-1 全局「最近错误」单点写入（R1-B 支 P1 #15 统一：调度兜底与 template recordRuntimeError
+ * 共用同一 helper/宿主对象——修复前 template 侧裸引用 `window`，非浏览器环境自身抛 ReferenceError
+ * 且宿主对象与此处分裂）。globalThis 直写：浏览器/node/shim 三态同形，零环境探测。 */
+export function __recordLastError(e: unknown): void {
+  (globalThis as { __ATELIER_LAST_ERROR__?: unknown }).__ATELIER_LAST_ERROR__ = e;
+}
+
 function scheduleFlush(): void {
   if (flushing) return;
   queueMicrotask(() => {
@@ -58,7 +65,7 @@ function scheduleFlush(): void {
         fn();
       } catch (e) {
         // P2-1 调度健壮性：单个订阅失败不得中断同批其他订阅
-        (globalThis as { __ATELIER_LAST_ERROR__?: unknown }).__ATELIER_LAST_ERROR__ = e;
+        __recordLastError(e);
         console.error("[atelier] effect error:", e);
       }
     }

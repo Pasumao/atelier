@@ -89,8 +89,8 @@ describe("决策 27 runtime 双旗（prod-flags）", () => {
     it("旧函数读法不复存在（定义与调用点全灭，含注释残留）", () => {
       expect(src).not.toMatch(/\bisProd\b/);
     });
-    it("调用点全部为 BUILD_PROD || dynProd() 形态且恰好 11 处（增减调用点须同步改此钉；第 8 处 = 决策 27 集成收口 validateProps 失败卡旗控；第 9 处 = 决策 25 后置候选 M9 事件修饰 bindEvent 的 ATR-326 分层；第 10 处 = 决策 25 v1.2 bindGroup 的 ATR-324/305/325 分层；第 11 处 = P1-2 布尔属性 ATR-328 可疑值警示 dev-only 分层）", () => {
-      expect(src.match(/BUILD_PROD \|\| dynProd\(\)/g)?.length).toBe(11);
+    it("调用点全部为 BUILD_PROD || dynProd() 形态且恰好 13 处（增减调用点须同步改此钉；第 8 处 = 决策 27 集成收口 validateProps 失败卡旗控；第 9 处 = 决策 25 后置候选 M9 事件修饰 bindEvent 的 ATR-326 分层；第 10 处 = 决策 25 v1.2 bindGroup 的 ATR-324/305/325 分层；第 11 处 = P1-2 布尔属性 ATR-328 可疑值警示 dev-only 分层；第 12 处 = R1-B 支 R-D4a ATR-352 忘写 .value 警示 stringify 单点；第 13 处 = R1-B 支 R-D4b ATR-353 keyed each 重复 key 警示 warnEachDupKey 单点。第 11 处的动态属性支路实现已随 P1 #5 迁入 bindAttr 单点——计数不变位置迁移）", () => {
+      expect(src.match(/BUILD_PROD \|\| dynProd\(\)/g)?.length).toBe(13);
     });
     it("__ATELIER_PROD__ 读取仅存 dynProd 单点（无 init 捕获、无散落直读）", () => {
       expect(src.match(/globalThis as \{ __ATELIER_PROD__\?: boolean \}\)\.__ATELIER_PROD__ === true/g)?.length).toBe(1);

@@ -74,7 +74,9 @@ describe("P1 #15：非浏览器环境错误记录不吞错（recordRuntimeError 
       // 修复前：bindExpr catch → recordRuntimeError 裸引用 window → ReferenceError 穿透组件级
       // 错误边界第二次 record 再抛 → mountComponent 整体抛 ReferenceError（原错误被吞）
       expect(() => mountComponent(def, {}, container, new Map(), okValidate)).not.toThrow();
-      expect(getLast()?.code, "原错误 ATR-301 被记录（不吞错）").toBe("ATR-301");
+      // expr.ts 抛的是普通 Error（message 携带 ATR-301，无 code 字段）——按 message 断言原错误不吞
+      const last = getLast() as { code?: string; message?: string } | undefined;
+      expect(String(last?.message ?? last?.code ?? ""), "原错误 ATR-301 被记录（不吞错）").toContain("ATR-301");
       expect("__ATELIER_LAST_ERROR__" in G, "宿主对象统一为 globalThis（与 core.ts 调度兜底同源）").toBe(true);
     } finally {
       if (savedWindow !== undefined) G.window = savedWindow;
@@ -115,7 +117,7 @@ describe("P1 #9②：实例析构回收运行期分支/行级 cleanup", () => {
     const container = attachToDocument(makeContainer());
     mountComponent(def, {}, container, reg, okValidate);
     await flush();
-    const b = findByTag(container, "b");
+    const b = findByTag(container, "b")[0];
     expect(b.textContent).toBe("v1");
     show.value = false;
     await flush(); // 换支出空：旧分支 cleanup 正常跑（F-5 既有语义）
@@ -144,7 +146,7 @@ describe("P1 #9②：实例析构回收运行期分支/行级 cleanup", () => {
     await flush();
     items.value = [{ id: "c", name: "C" }]; // flush 期换行：旧行析构、新行 c 的 effect 只挂 rowCleanups
     await flush();
-    const rowC = findByTag(container, "i");
+    const rowC = findByTag(container, "i")[0];
     expect(rowC.textContent).toBe("C-x");
     hmrRemountAll();
     await flush();
@@ -172,7 +174,7 @@ describe("P1 #9③：unmount() 公开导出（SPA 卸载面）", () => {
     const container = attachToDocument(makeContainer());
     mountComponent(def, {}, container, reg, okValidate);
     await flush();
-    expect(findByTag(container, "p")).toBeTruthy();
+    expect(findByTag(container, "p")[0], "实例树在位").toBeTruthy();
     const signalsBefore = store._signals.size;
     expect(tpl.unmount(container), "命中返回 true").toBe(true);
     expect(container.childNodes.length, "实例树已摘除").toBe(0);

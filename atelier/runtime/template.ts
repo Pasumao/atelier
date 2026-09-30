@@ -11,7 +11,7 @@
  * 完整版差异：模板由编译器解析为组件 IR 并闭包捕获作用域（本原型为运行时解析 + 显式 .locals 注入）。
  */
 
-import { $effect, $effectStatic, $state, store, __creationSink, __effectSink, __withTracking, type Signal } from "./core.ts";
+import { $effect, $effectStatic, $state, store, __creationSink, __effectSink, __recordLastError, __withTracking, type Signal } from "./core.ts";
 import { booly, evalExpr, exprRootIdents } from "./expr.ts";
 // 决策 26 v1 留位兑现：registerCompiled 需把编译产物携带的 schema 喂进提取 sink（兜底求值）
 // 并回填既有 registry 条目（后于 component() 注入的时序）。分层核查（无真实循环）：
@@ -345,9 +345,35 @@ export function parseTemplate(src: string): TemplateNode[] {
   return ast;
 }
 
+/** R-D4a（ATR-352）：插值/属性值直接收到信号对象（忘写 .value 的典型笔误）——修复前静默渲染
+ * 信号内部字段 JSON（_subs/_kind/value），不抛错也不警示。dev 一次性警示（每信号对象一次，
+ * WeakSet 去重防重渲刷屏）；prod 剥离（双旗守卫，ATR-328 同款形态）。渲染语义逐字不变
+ * （仍 JSON.stringify——「不静默」不等于「改语义」，既有产物/快照不受扰）。信号形状判定与
+ * exactStaticDeps/checkBindCore 同款（_kind 字符串 + _subs Set），不复用 boolean 属性清单。 */
+const stringifyComplained = new WeakSet<object>();
+function atrSignalLeak(): AtrError {
+  return {
+    code: "ATR-352",
+    message: "插值/属性值收到一个信号对象（常见于忘写 .value）——信号被渲染成内部字段 JSON",
+    context: {},
+    fix: "在模板表达式里补 .value（如 {sig.value}）；确要渲染对象就取其字段（如 {sig.value.name}）。若本意就是调试查看内部结构，请改用 console.log",
+  };
+}
+function warnSignalStringify(v: object): void {
+  if (BUILD_PROD || dynProd()) return; // prod 剥离（双旗守卫，ATR-328 同款形态）
+  const probe = v as { _kind?: unknown; _subs?: unknown };
+  if (typeof probe._kind !== "string" || !(probe._subs instanceof Set)) return;
+  if (stringifyComplained.has(v)) return;
+  stringifyComplained.add(v);
+  recordRuntimeError(atrSignalLeak());
+}
+
 function stringify(v: unknown): string {
   if (v == null) return "";
-  if (typeof v === "object") return JSON.stringify(v, null, 0);
+  if (typeof v === "object") {
+    warnSignalStringify(v);
+    return JSON.stringify(v, null, 0);
+  }
   return String(v);
 }
 
@@ -429,9 +455,16 @@ function exactStaticDeps(expr: string, scope: Record<string, unknown>): Signal[]
  * 双重 dispose 安全（$effect dispose 幂等：alive 翻转 + 订阅清理各执行一次）。
  */
 const teardownStack: Array<Array<() => void>> = [];
+/** R1-B 支（P1 #9）：mount 窗口期节点级 cleanup 收集槽。F-5 teardownStack 只覆盖受控重建
+ * （{#if} 换支/{#each} 行重建）；mount 窗口内 if/each 的节点级收尾（branchCleanup/rowCleanups
+ * 处置）此前 captureCleanup 落空（栈空 no-op）⇒ 实例析构只回收 inst.effects（初始渲染 effects），
+ * 运行期换支/加行 effects 滞留（HMR swap 后僵尸 effect 仍向脱离节点写入）。
+ * mountComponentInner 挂载期置入实例级收集数组（嵌套 mount 栈式恢复），disposeInstance 统一回收。 */
+let mountCleanupSink: Array<() => void> | null = null;
 function captureCleanup(dispose: () => void): void {
   const top = teardownStack[teardownStack.length - 1];
   if (top) top.push(dispose);
+  else if (mountCleanupSink) mountCleanupSink.push(dispose);
 }
 function runCleanup(set: Array<() => void>): void {
   for (const d of [...set].reverse()) {
@@ -520,10 +553,12 @@ function validateProps(
   return __withTracking(() => validate(schema, props)).result;
 }
 
-/** P2-1 全局最近错误暴露（dev 面经由桥上报；工具侧可查） */
+/** P2-1 全局最近错误暴露（dev 面经由桥上报；工具侧可查）。R1-B 支 P1 #15：写入点统一走
+ * core.ts __recordLastError 单源 helper/单宿主对象（globalThis）——修复前裸引用 `window`，
+ * 非浏览器环境（node 直跑/ssr 预热）错误记录器自身抛 ReferenceError 吞掉原始错误；同文件
+ * :1250 的 `typeof window` 守卫先例此处漏配。 */
 function recordRuntimeError(e: unknown): void {
-  const w = window as never as { __ATELIER_LAST_ERROR__?: unknown };
-  w.__ATELIER_LAST_ERROR__ = e;
+  __recordLastError(e);
   console.error("[atelier] render error:", e);
 }
 
@@ -891,6 +926,51 @@ function bindGroup(
   return dispose;
 }
 
+/* ---- R1-B 支（2026-09-30 架构评审 P1 #5）：动态属性单点 bindAttr ----------------
+ * 修复前解释器 dynamic attr 支路内联布尔属性语义（BOOLEAN_ATTRS false → removeAttribute +
+ * ATR-328 dev 一次性可疑值警示），而 codegen 同一支路只发射 setAttribute——编译应用对
+ * disabled={false} 落 disabled="false"（HTML 布尔属性存在即真 ⇒ 语义反转，元素恒禁用）。
+ * 修法对齐 bindTwoWay/bindGroup/bindEvent 先例：语义收进 runtime 单点，进 __compiledRT 注入
+ * （产物零 import），解释器与 codegen 同位同构发射 ⇒ 「编译路径 ≡ 解释器路径」在布尔属性面闭合。
+ * 签名取 bind 族五参同款形态（tag 末位对齐 bindTwoWay/bindGroup；v1 不消费 tag——布尔属性判定
+ * 只看 attr 名，参数位为 bind 族发射形态统一与未来 type 细化面预留）。
+ * 语义 = 既有 P1-2 全集逐字迁移：null/undefined → removeAttribute；已知布尔属性 false →
+ * removeAttribute；true → setAttribute(name,"true")；dev 态字符串化 "false"/"0" 可疑值一次性
+ * 警示（存在即真照常生效）；非布尔属性字符串行为逐字不变。dispose 归属 bindExpr 内部的
+ * captureCleanup（F-5 teardown 链），本函数不重复登记。 */
+export function bindAttr(
+  el: HTMLElement,
+  name: string,
+  expr: string,
+  scope: Record<string, unknown>,
+  tag: string,
+): () => void {
+  void tag; // bind 族五参同款形态位（见上注：v1 不消费）
+  const attrName = name;
+  const isBoolAttr = BOOLEAN_ATTRS.has(attrName.toLowerCase());
+  let suspiciousComplained = false; // 一次性旗标：可疑值警示不随重跑刷屏（bind:group keyComplained 同款）
+  return bindExpr(expr, scope, (v) => {
+    if (v == null) {
+      el.removeAttribute(attrName);
+      return;
+    }
+    if (isBoolAttr) {
+      if (v === false) {
+        el.removeAttribute(attrName); // 存在即真——false 必须摘除，不能落 "false"
+        return;
+      }
+      if (!(BUILD_PROD || dynProd()) && !suspiciousComplained) {
+        const s = stringify(v);
+        if (v !== true && (s === "false" || s === "0")) {
+          suspiciousComplained = true;
+          recordRuntimeError(atrBoolAttrSuspicious(attrName, v));
+        }
+      }
+    }
+    el.setAttribute(attrName, stringify(v));
+  });
+}
+
 /* ---- 决策 25 后置候选（M9）：事件修饰 v1——on: 的 .prevent / .stop ----------------
  * 载体 = attr 全名：on: 后第一段 = 基础事件名，其余按 `.` 切分 = 修饰符序列
  * （on:click.prevent.stop = click + [prevent, stop]，解析产物单 attr {name: 全名,
@@ -1034,6 +1114,18 @@ function injectScopedStyle(componentName: string, css: string, file: string): vo
 const scopeClasses = new Map<string, string>();
 let scopeSeq = 0;
 
+/** R1-B 支（2026-09-30 架构评审 P1 #6）：<style> 块提取单点——解释器 mountComponentInner 与
+ * compiler/codegen extractStyles 共用同一正则与同一语义。修复前解释器非全局正则只注入首个块、
+ * codegen /g 全注入：同一组件 dev（解释器）/prod（编译产物）渲染样式不一致（codegen 注释自称
+ * 「同一正则」不成立）。统一口径 = 全注入（多块各自作用域类，去重键含内容哈希互不吞）。
+ * 局部新建正则（无 /g lastIndex 状态残留），调用方安全复用。 */
+export function extractStyleBlocks(raw: string): string[] {
+  const out: string[] = [];
+  const re = /<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>/gi;
+  for (let m; (m = re.exec(raw));) out.push(m[1]);
+  return out;
+}
+
 export function mountComponent(
   def: ComponentDef,
   props: Record<string, unknown>,
@@ -1070,11 +1162,17 @@ function mountComponentInner(
   // P0-5 HMR：栈式创建收集——本次 render 新建的 $state 与 $effect 归属本实例（嵌套 mount 各自接管）
   const collected: Signal[] = [];
   const collectedEffects: Array<() => void> = [];
+  // R1-B 支（P1 #9）：实例级节点 cleanup 收集（if/each 节点收尾、挂载期 bind 族 dispose、
+  // 嵌套实例析构闭包）+ mount 失败回收旗标
+  const nodeCleanups: Array<() => void> = [];
+  let mounted = false;
   let tplScope: Record<string, unknown> = {}; // m11 边界②：.locals() scope（信号命名的单一来源）
   const prevSink = __creationSink.fn;
   __creationSink.fn = (s) => collected.push(s);
   const prevEffectSink = __effectSink.fn;
   __effectSink.fn = (d) => collectedEffects.push(d);
+  const prevCleanupSink = mountCleanupSink;
+  mountCleanupSink = nodeCleanups;
   mountDepth++;
   let root!: HTMLElement;
   try {
@@ -1091,8 +1189,8 @@ function mountComponentInner(
       for (const css of compiled.styles ?? []) injectScopedStyle(def.name, css, file);
       frag = compiled.program({ scope, registry, validate, file, componentName: def.name, rt: __compiledRT });
     } else {
-      const styleMatch = /<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>/i.exec(tpl.raw);
-      if (styleMatch) injectScopedStyle(def.name, styleMatch[1], file);
+      // R1-B 支（P1 #6）：<style> 块提取单点（extractStyleBlocks，与 codegen 同源）——全注入
+      for (const css of extractStyleBlocks(tpl.raw)) injectScopedStyle(def.name, css, file);
       frag = renderNodes(parseTemplate(tpl.raw), scope, registry, validate, file, def.name);
     }
     root = document.createElement("div");
@@ -1100,10 +1198,27 @@ function mountComponentInner(
     if (scopeClasses.has(def.name)) root.classList.add(scopeClasses.get(def.name)!);
     root.appendChild(frag);
     container.appendChild(root);
+    mounted = true;
   } finally {
+    mountCleanupSink = prevCleanupSink;
     __creationSink.fn = prevSink;
     __effectSink.fn = prevEffectSink;
     mountDepth--;
+    if (!mounted) {
+      // R1-B 支（P1 #9①）：mount 中途抛错——collected/collectedEffects/nodeCleanups 原是局部
+      // 变量，半成品 effects 的 dispose 随栈帧丢失（订阅泄漏 + 僵尸写入）。就地回收：节点收尾
+      // （含嵌套实例析构）→ 半成品 effects 逆序 dispose → 挂载期创建信号注销。错误随后由
+      // mountComponent 边界照常呈现（ATR 错误卡/prod 空占位），回收对呈现零影响。
+      runCleanup(nodeCleanups);
+      for (const d of [...collectedEffects].reverse()) {
+        try {
+          d();
+        } catch {
+          /* 单个 dispose 抛错不阻断回收（runCleanup 同款口径） */
+        }
+      }
+      for (const s of collected) store._signals.delete(s);
+    }
   }
   const inst: LiveInstance = {
     defName: def.name,
@@ -1115,6 +1230,7 @@ function mountComponentInner(
     signals: collected,
     names: buildSignalNames(collected, tplScope),
     effects: collectedEffects,
+    nodeCleanups,
     nested: mountDepth >= 1, // 记录时外层尚未自减：≥2 即嵌套挂载
   };
   liveInstances.add(inst);
@@ -1155,13 +1271,19 @@ type LiveInstance = {
   /** m11 边界②：信号 → .locals() scope 变量名（同名取首个；未入 scope 的信号不在表内） */
   names: Map<Signal, string>;
   effects: Array<() => void>;
+  /** R1-B 支（P1 #9）：节点级 cleanup 收集（if/each 节点收尾 = 运行期 branchCleanup/rowCleanups
+   * 处置、挂载期 bind 族 dispose、嵌套实例析构闭包）——disposeInstance 随实例统一回收 */
+  nodeCleanups: Array<() => void>;
   nested: boolean;
 };
 const liveInstances = new Set<LiveInstance>();
 let mountDepth = 0;
 
-/** 实例级回收：dispose 本实例全部 effects（关闭订阅泄漏）→ 摘树 → 注销信号登记 */
+/** 实例级回收：节点级收尾（运行期分支/行 cleanup 一并析构，P1 #9②）→ dispose 本实例全部
+ * effects（关闭订阅泄漏）→ 摘树 → 注销信号登记。dispose 幂等（$effect dispose alive 翻转 +
+ * runCleanup 清空集合，节点收尾内部 disposeIf/disposeEach 与 inst.effects 双重登记安全）。 */
 function disposeInstance(inst: LiveInstance): void {
+  runCleanup(inst.nodeCleanups);
   for (const d of inst.effects) {
     try {
       d();
@@ -1171,6 +1293,22 @@ function disposeInstance(inst: LiveInstance): void {
   }
   inst.root.remove();
   for (const s of inst.signals) store._signals.delete(s);
+}
+
+/** R1-B 支（P1 #9③）：公开实例卸载——SPA 路由切换/手动摘除的单实例 HMR reap 等价物
+ * （§4.4「无公开 unmount/dispose API——SPA 路由切换即泄漏实例与哨兵订阅」销账）。入参 =
+ * mountComponent 时的 container 或其返回的 root；命中执行完整实例回收（disposeInstance：
+ * 节点收尾 + effects dispose + 摘树 + 信号注销）并从活实例集合移除，返回 true；未命中返回
+ * false（幂等安全，重复调用无副作用）。嵌套实例由节点级收尾级联析构（P1 #9② 同一机制）。 */
+export function unmount(el: Element): boolean {
+  for (const inst of [...liveInstances]) {
+    if (inst.container === el || inst.root === el) {
+      disposeInstance(inst);
+      liveInstances.delete(inst);
+      return true;
+    }
+  }
+  return false;
 }
 
 /** 回收断连实例（父树已移除的嵌套实例 / 上轮遗留）：immediate 而非等下一轮交换 */
@@ -1249,6 +1387,28 @@ export function hmrRemountAll(): number {
 }
 if (typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).__ATELIER_HMR_REMOUNT__ = () => hmrSwap();
+}
+
+/* ---- R-D4b（R1-B 支，ATR-353）：keyed each 重复身份键静默折叠行 ----------------
+ * keyed reconcile 的 appendChild 移动语义使重复 key 自第二项起折叠进已有行（渲染行数静默
+ * 少于数据项数）——与「响亮拒绝」哲学冲突的静默错误族（AI 代理笔误高发面）。语义确定性保留
+ * （不改变渲染，m10 诚实边界「组内重复身份键不校验」同款决策位），dev 一次性响亮警示
+ * （每 each 块一次，token = live Map——块级生命周期对齐 keyComplained 先例）；prod 剥离
+ * （双旗守卫，ATR-328 同款形态）。解释器与 codegen（rt.warnEachDupKey 发射）双路径同源。 */
+const dupKeyComplained = new WeakSet<object>();
+function atrEachDuplicateKey(k: string): AtrError {
+  return {
+    code: "ATR-353",
+    message: `keyed each 收到重复身份键 "${k}"——自第二项起折叠进已有行（appendChild 移动语义），渲染行数少于数据项数`,
+    context: {},
+    fix: '让 by 表达式对每项取唯一值（如 by item.id）；数据本身含重复键时先去重，或改用无 by 形态（全清重建语义）',
+  };
+}
+function warnEachDupKey(token: object, k: string, nextKeys: Set<string>): void {
+  if (BUILD_PROD || dynProd()) return; // prod 剥离（双旗守卫，ATR-328 同款形态）
+  if (!nextKeys.has(k) || dupKeyComplained.has(token)) return;
+  dupKeyComplained.add(token);
+  recordRuntimeError(atrEachDuplicateKey(k));
 }
 
 function renderNodes(
@@ -1353,30 +1513,9 @@ function renderNode(
           continue;
         }
         if (a.dynamic) {
-          // P1-2：布尔属性存在性语义——attr 名在循环外定死（写回调闭包捕获，非 this 敏感面）
-          const attrName = a.name;
-          const isBoolAttr = BOOLEAN_ATTRS.has(attrName.toLowerCase());
-          let suspiciousComplained = false; // 一次性旗标：可疑值警示不随重跑刷屏（bind:group keyComplained 同款）
-          bindExpr(a.value, scope, (v) => {
-            if (v == null) {
-              el.removeAttribute(attrName);
-              return;
-            }
-            if (isBoolAttr) {
-              if (v === false) {
-                el.removeAttribute(attrName); // 存在即真——false 必须摘除，不能落 "false"
-                return;
-              }
-              if (!(BUILD_PROD || dynProd()) && !suspiciousComplained) {
-                const s = stringify(v);
-                if (v !== true && (s === "false" || s === "0")) {
-                  suspiciousComplained = true;
-                  recordRuntimeError(atrBoolAttrSuspicious(attrName, v));
-                }
-              }
-            }
-            el.setAttribute(attrName, stringify(v));
-          });
+          // R1-B 支（P1 #5）：动态属性单点 bindAttr——布尔属性存在性语义（25 项 + ATR-328 警示）
+          // 与 codegen 同源（修复前解释器内联实现、codegen 只发射 setAttribute 语义反转）
+          bindAttr(el, a.name, a.value, scope, node.tag);
         } else {
           el.setAttribute(a.name, a.value);
         }
@@ -1451,6 +1590,7 @@ function renderNode(
               } catch {
                 k = `${i}`; // key 求值失败退化为位置 key（诚实降级而非白屏）
               }
+              warnEachDupKey(live, k, nextKeys); // R-D4b（ATR-353）：重复 key dev 一次性警示（折叠语义不变）
               nextKeys.add(k);
               let el = live.get(k);
               if (!el) {
@@ -1597,6 +1737,8 @@ export const __compiledRT = {
   bindTwoWay, // 决策 25：bind:value/bind:checked 双向绑定单点（codegen emitAttrs 同位支路发射 rt.bindTwoWay，产物零 import 不破）
   bindGroup, // 决策 25 v1.2：bind:group radio group 单点（codegen emitAttrs 同位支路发射 rt.bindGroup，产物零 import 不破）
   bindEvent, // 决策 25 后置候选（M9 事件修饰 v1）：on:event[.mod…] 单点（codegen emitAttrs on: 支路同位发射 rt.bindEvent，分支 B 收口；产物零 import 不破）
+  bindAttr, // R1-B 支（P1 #5）：动态属性单点——布尔属性存在性语义/ATR-328 与解释器同源（codegen emitAttrs dynamic 支路同位发射 rt.bindAttr，产物零 import 不破）
+  warnEachDupKey, // R-D4b（ATR-353）：keyed each 重复身份键 dev 一次性警示单点（codegen emitEach keyed 支路同位发射，双路径同源）
   recordRuntimeError,
   mountComponent,
   bindProp, // F-5：动态属性 = 响应式 prop（编译路径与解释器同源同函数）
