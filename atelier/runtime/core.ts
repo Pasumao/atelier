@@ -257,13 +257,16 @@ export function $effect(fn: () => void): () => void {
     },
   };
 
-  sub.run();
+  // P-A P2-R2：sink 登记先于 sub.run()——首跑（同步执行）抛错时 dispose 已在实例登记表里，
+  // mount 失败回收/组件析构能看到它（修复前登记在 run 之后被抛错跳过 ⇒ 错误路径僵尸 effect：
+  // 订阅滞留上游、store.graph 出幻影节点）。
   const dispose = () => {
     alive = false;
     for (const d of record.deps) d._subs.delete(sub);
     __effects.delete(record); // v0.3：注销依赖图登记，不驻留死节点
   };
   if (__effectSink.fn) __effectSink.fn(dispose); // P1-4：mount 期间创建的 effect 归属实例，HMR 交换时逐个注销
+  sub.run();
   return dispose;
 }
 
@@ -292,13 +295,14 @@ export function $effectStatic(fn: () => void, deps: Iterable<Signal>): () => voi
     },
   };
   for (const d of record.deps) d._subs.add(sub);
-  sub.run();
+  // P-A P2-R2：sink 登记先于 sub.run()（$effect 同款时序修正——首跑抛错不留僵尸 effect）
   const dispose = () => {
     alive = false;
     for (const d of record.deps) d._subs.delete(sub);
     __effects.delete(record);
   };
   if (__effectSink.fn) __effectSink.fn(dispose);
+  sub.run();
   return dispose;
 }
 

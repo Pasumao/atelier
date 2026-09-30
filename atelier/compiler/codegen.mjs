@@ -37,7 +37,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { extractStyleBlocks, parseTemplate } from "../runtime/template.ts";
+import { eachRowScope, extractStyleBlocks, parseTemplate, templateUsesIndex } from "../runtime/template.ts";
 import { exprRootIdents } from "../runtime/expr.ts";
 
 const INVOKED_DIRECTLY =
@@ -287,8 +287,12 @@ function emitEach(n, SV, T, out, uid, st) {
   if (n.keyExpr) {
     const live = uid("live");
     const rows = uid("rows");
+    const idxMap = uid("rowIdx");
+    // P-A P2-R5a：行内 index 引用面（与解释器同源判定——无引用零隐藏信号开销）
+    const usesIdx = templateUsesIndex(n.children, n.index);
     out.push(`  const ${live} = new Map();`);
     out.push(`  const ${rows} = new Map();`);
+    out.push(`  const ${idxMap} = new Map();`);
     out.push(`  const d${rows} = rt.$effect(() => {`);
     out.push(`    const arr = (rt.evalExpr(${esc(n.expr)}, ${SV}) ?? []);`);
     out.push(`    const nextKeys = new Set();`);
@@ -305,6 +309,11 @@ function emitEach(n, SV, T, out, uid, st) {
     out.push(`        box.style.display = "contents";`);
     out.push(`        const rowSet = [];`);
     out.push(`        rt.withTeardown(rowSet, () => {`);
+    // P-A P2-R5a：行作用域单点（rt.eachRowScope——needIdx 时注入隐藏行 index 信号，随行
+    // cleanup 注销；解释器 keyed 支路同函数，双路径同源）
+    out.push(`          const row = rt.eachRowScope(${SV}, item, ${esc(n.item)}, ${esc(n.index)}, i, ${usesIdx});`);
+    out.push(`          const ${scv} = row.scope;`);
+    if (usesIdx) out.push(`          ${idxMap}.set(k, row.index);`);
     out.push(`          const c = document.createDocumentFragment();`);
     emitNodes(n.children ?? [], scv, "c", out, uid, st2);
     out.push(`          box.appendChild(c);`);
@@ -312,6 +321,10 @@ function emitEach(n, SV, T, out, uid, st) {
     out.push(`        ${rows}.set(k, rowSet);`);
     out.push(`        el = box;`);
     out.push(`        ${live}.set(k, el);`);
+    out.push(`      } else {`);
+    // P-A P2-R5a：key 命中复用 DOM——幸存行 index 信号对齐新遍历序（解释器同款；未变化不写）
+    out.push(`        const idxSig = ${idxMap}.get(k);`);
+    out.push(`        if (idxSig && idxSig.value !== i) idxSig.value = i;`);
     out.push(`      }`);
     out.push(`      ${host}.appendChild(el); // 同序 no-op；乱序即重排`);
     out.push(`    });`);
@@ -320,6 +333,7 @@ function emitEach(n, SV, T, out, uid, st) {
     out.push(`        el.remove();`);
     out.push(`        rt.runCleanup(${rows}.get(k) ?? []);`);
     out.push(`        ${rows}.delete(k);`);
+    out.push(`        ${idxMap}.delete(k);`);
     out.push(`      }`);
     out.push(`    }`);
     out.push(`  });`);

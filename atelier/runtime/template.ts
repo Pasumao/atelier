@@ -51,7 +51,22 @@ export type HtmlTemplate = { raw: string; scope?: Record<string, unknown> };
 export interface HtmlTemplateWithScope extends HtmlTemplate {
   locals(scope: Record<string, unknown>): HtmlTemplateWithScope;
 }
-export function html(strings: TemplateStringsArray): HtmlTemplateWithScope {
+export function html(strings: TemplateStringsArray, ...values: unknown[]): HtmlTemplateWithScope {
+  // P-A P2-R4：html`` 只支持标签模板形态，两种误用一律四段式响亮拒绝（不静默哲学，字面量
+  // { / 字面量 < 同款）：
+  //   ① values 非空 = 借 apply/call 展开的标签形态参数——rest 值从未进入模板（修复前被旧
+  //      签名静默丢弃 ⇒ ${} 插值无声消失）；
+  //   ② strings 无 Array 形态的 .raw = 模板字面量先求值成普通字符串才传进来（修复前在
+  //      .raw.join 上抛裸 TypeError，无 code 无 fix 不可诊断）——插值已发生在 html 之外。
+  // 动态值正路：模板内 {expr} 插值，或 .locals({...}) 注入作用域。
+  if (values.length > 0 || !Array.isArray((strings as { raw?: unknown } | undefined)?.raw)) {
+    throw {
+      code: "ATR-101",
+      message: "html`` 收到非标签模板形态的调用——${} 插值不会进入模板（作为普通函数调用，或参数经 apply/call 转发）",
+      context: {},
+      fix: "用标签模板形态：html`<p>{n.value}</p>`；动态值经模板 {expr} 插值或 .locals({ name: value }) 注入作用域，不要用 ${} 拼进模板字符串",
+    } as AtrError;
+  }
   const t: HtmlTemplateWithScope = {
     raw: strings.raw.join(""),
     scope: {},
@@ -421,11 +436,15 @@ function atrBoolAttrSuspicious(name: string, v: unknown): AtrError {
 }
 
 /** 表达式 effect 绑定：求值（track 依赖）→ 变化时执行 write；求值失败渲染 ATR 错误卡而非抛穿白屏。
+ * onError（P-A P2-R3）：属性挂点的错误态出口——缺省时错误哨兵写入 write（prod 空串 / dev ⚠ 文案，
+ * 文本插值语义）；传入时改为执行 onError（bindAttr 传 removeAttribute——错误哨兵不得流入属性：
+ * prod setAttribute(name,"") 对 disabled/checked 等 25 项布尔属性存在即真 = 把错误变成永久真值，
+ * dev 更把错误文案写成属性值）。
  * F-5：返回 dispose 并登记进当前受控重建的 cleanup 集（分支切换/行移除时随之析构，
  * 不再对已脱离节点写入——泄漏修复红检见 tests/f5-kernel.test.ts 红检①）。
  * F-2 二期：exactness 达标（无函数调用 + 全部根标识符解析为信号）→ $effectStatic 静态预订阅，
  * 免除每次重跑的追踪簿记；否则回退动态追踪（宁慢勿错——判据见 exactStaticDeps）。 */
-function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unknown) => void): () => void {
+function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unknown) => void, onError?: () => void): () => void {
   const run = () => {
     let v: unknown;
     try {
@@ -433,6 +452,11 @@ function bindExpr(expr: string, scope: Record<string, unknown>, write: (v: unkno
     } catch (e) {
       const err = e as { code?: string; message?: string; fix?: string };
       recordRuntimeError(err);
+      // P-A P2-R3：属性挂点错误走独立出口（错误态摘属性，console/最近错误已记——不静默）
+      if (onError) {
+        onError();
+        return;
+      }
       // prod 剥离：无错误卡——空文本占位（console 已记，不静默）
       write((BUILD_PROD || dynProd()) ? "" : `⚠ ${err.code ?? "ATR"} ${err.message ?? String(e)}${err.fix ? ` — fix: ${err.fix}` : ""}`);
       return;
@@ -811,14 +835,39 @@ function bindTwoWay(
   const io = el as unknown as { value: string; checked: boolean };
   // 正向下行：信号 → 元素。首跑即完成初始同步；value 不变不写（防光标跳动），
   // checked 恒写（布尔无光标语义）。程序化赋值不触发事件（DOM 规范）= 无回环。
-  const disposeEffect = isChecked
-    ? $effect(() => {
-        io.checked = booly(sig.value);
-      })
-    : $effect(() => {
-        const s = stringify(sig.value);
-        if (io.value !== s) io.value = s;
-      });
+  const writeValue = (): void => {
+    const s = stringify(sig.value);
+    if (io.value !== s) io.value = s;
+  };
+  // P-A P2-R1：bind:value × <select> 初始选中——$effect 首跑同步执行而 bindTwoWay 在 attrs
+  // 循环内被调，option 子节点要等 attrs 全部落定后才 append：首跑写 select.value 时无可匹配
+  // option ⇒ 初始选中静默丢失（bindGroup 的同类时序问题 P1-3 已修，本处漏套；dom-shim 无
+  // option 派生语义时原理上不可见）。仿 bindGroup 先例：下行 effect 延至微任务定版（mount
+  // 全同步完成 ⇒ 首个微任务时点全部 option 已落）；input/textarea 无子节点时序问题，保持
+  // 同步首跑。间隙无丢失：微任务前的信号写入会被首跑整读（首跑读当前值）。
+  // __effectSink 归属保持（bindGroup 同款瞬时回挂）；disposed 守卫防 dispose 早于微任务。
+  const isSelect = name === "bind:value" && tag.toLowerCase() === "select";
+  const effectSinkAtCall = __effectSink.fn;
+  let disposed = false;
+  let disposeEffect: (() => void) | null = null;
+  if (isSelect) {
+    queueMicrotask(() => {
+      if (disposed) return;
+      const prevSink = __effectSink.fn;
+      __effectSink.fn = effectSinkAtCall;
+      try {
+        disposeEffect = $effect(writeValue);
+      } finally {
+        __effectSink.fn = prevSink;
+      }
+    });
+  } else {
+    disposeEffect = isChecked
+      ? $effect(() => {
+          io.checked = booly(sig.value);
+        })
+      : $effect(writeValue);
+  }
   // 反向回写事件（有效组合内由 (attr, tag) 完全决定）：input/textarea → input；
   // select 与 checkbox/radio（bind:checked 仅落 input）→ change。
   const event = name === "bind:value" && tag.toLowerCase() !== "select" ? "input" : "change";
@@ -831,7 +880,8 @@ function bindTwoWay(
   };
   el.addEventListener(event, handler);
   const dispose = () => {
-    disposeEffect();
+    disposed = true;
+    disposeEffect?.();
     // dom-shim（tests/dom-shim.ts）未实现 removeEventListener——可选调用兼容微 shim 宿主，
     // 真 DOM 全量退订；effect 已先行 dispose，脱离节点不再被下行写（响应正确性不受影响）。
     (el as { removeEventListener?: (type: string, fn: () => void) => void }).removeEventListener?.(event, handler);
@@ -965,26 +1015,33 @@ export function bindAttr(
   const attrName = name;
   const isBoolAttr = BOOLEAN_ATTRS.has(attrName.toLowerCase());
   let suspiciousComplained = false; // 一次性旗标：可疑值警示不随重跑刷屏（bind:group keyComplained 同款）
-  return bindExpr(expr, scope, (v) => {
-    if (v == null) {
-      el.removeAttribute(attrName);
-      return;
-    }
-    if (isBoolAttr) {
-      if (v === false) {
-        el.removeAttribute(attrName); // 存在即真——false 必须摘除，不能落 "false"
+  return bindExpr(
+    expr,
+    scope,
+    (v) => {
+      if (v == null) {
+        el.removeAttribute(attrName);
         return;
       }
-      if (!(BUILD_PROD || dynProd()) && !suspiciousComplained) {
-        const s = stringify(v);
-        if (v !== true && (s === "false" || s === "0")) {
-          suspiciousComplained = true;
-          recordRuntimeError(atrBoolAttrSuspicious(attrName, v));
+      if (isBoolAttr) {
+        if (v === false) {
+          el.removeAttribute(attrName); // 存在即真——false 必须摘除，不能落 "false"
+          return;
+        }
+        if (!(BUILD_PROD || dynProd()) && !suspiciousComplained) {
+          const s = stringify(v);
+          if (v !== true && (s === "false" || s === "0")) {
+            suspiciousComplained = true;
+            recordRuntimeError(atrBoolAttrSuspicious(attrName, v));
+          }
         }
       }
-    }
-    el.setAttribute(attrName, stringify(v));
-  });
+      el.setAttribute(attrName, stringify(v));
+    },
+    // P-A P2-R3：错误态摘属性——错误哨兵（prod 空串/dev ⚠ 文案）流入 setAttribute 时，
+    // 布尔属性存在即真 ⇒ disabled/checked 等 25 项被错误点亮，dev 更把文案写成属性值。
+    () => el.removeAttribute(attrName),
+  );
 }
 
 /* ---- 决策 25 后置候选（M9）：事件修饰 v1——on: 的 .prevent / .stop ----------------
@@ -1435,6 +1492,64 @@ function warnEachDupKey(token: object, k: string, nextKeys: Set<string>): void {
   recordRuntimeError(atrEachDuplicateKey(k));
 }
 
+/** P-A P2-R5a：模板子树的动态面是否引用 each 行内 index 变量（表达式根标识符语法扫描，
+ * 挂载/编译期一次性判定 needIdx——无引用的 each 块零隐藏信号开销）。over-approximation：
+ * 嵌套 each 的同名 index 遮蔽不计较（多建一个无害信号）。 */
+export function templateUsesIndex(nodes: TemplateNode[], index: string): boolean {
+  const walk = (n: TemplateNode): boolean => {
+    switch (n.kind) {
+      case "expr":
+        return exprRootIdents(n.expr).includes(index);
+      case "element":
+        return n.attrs.some((a) => a.dynamic && exprRootIdents(a.value).includes(index)) || n.children.some(walk);
+      case "if":
+        return n.blocks.some((b) => (b.test !== null && exprRootIdents(b.test).includes(index)) || b.children.some(walk));
+      case "each":
+        return (
+          exprRootIdents(n.expr).includes(index) ||
+          (n.keyExpr !== undefined && exprRootIdents(n.keyExpr).includes(index)) ||
+          n.children.some(walk)
+        );
+      default:
+        return false; // text
+    }
+  };
+  return nodes.some(walk);
+}
+
+/** P-A P2-R5a：keyed each 行作用域构造单点（解释器 keyed 支路与 codegen emitEach 同源，
+ * codegen 面经 __compiledRT 注入，产物零 import）。needIdx（templateUsesIndex 判定子树引用
+ * 行内 index）时 index 经隐藏 $state 信号 + getter 注入——行内 {idx} 绑定追踪该信号，key
+ * 命中复用 DOM 时由 keyed reconcile 把信号对齐新遍历序 ⇒ 幸存行不再停在建行时旧序号；
+ * 无引用时退化为普通值（零额外信号开销）。index 信号随行 cleanup 注销（bindProp P1-4 同款：
+ * 行重建发生在微任务期 __creationSink 收不到；mount 窗口首建时与实例收集双登记，Set.delete
+ * 幂等无害）。 */
+export function eachRowScope(
+  scope: Record<string, unknown>,
+  item: unknown,
+  itemName: string,
+  indexName: string,
+  i: number,
+  needIdx: boolean,
+): { scope: Record<string, unknown>; index: Signal<number> | null } {
+  const child: Record<string, unknown> = { ...scope, [itemName]: item };
+  if (!needIdx) {
+    child[indexName] = i;
+    return { scope: child, index: null };
+  }
+  const idxSig: Signal<number> = $state(i);
+  // getter 透传信号值：行内 effect 求值读 childScope[index] 即读 idxSig.value（进入追踪）
+  Object.defineProperty(child, indexName, {
+    get: () => idxSig.value,
+    enumerable: true,
+    configurable: true,
+  });
+  captureCleanup(() => {
+    store._signals.delete(idxSig);
+  });
+  return { scope: child, index: idxSig };
+}
+
 function renderNodes(
   nodes: AstNode[],
   scope: Record<string, unknown>,
@@ -1603,14 +1718,19 @@ function renderNode(
         // F-5：每行自带 cleanup 集——行移除时该行 effect/嵌套实例随之析构。
         const live = new Map<string, HTMLElement>();
         const rowCleanups = new Map<string, Array<() => void>>();
+        // P-A P2-R5a：行内 index 引用面（一次性判定）+ 幸存行 index 信号表（key → 信号）
+        const usesIdx = templateUsesIndex(node.children, node.index);
+        const rowIdxSigs = new Map<string, Signal<number>>();
         const disposeEach = $effect(() => {
             const arr = (evalExpr(node.expr, scope) ?? []) as unknown[];
             const nextKeys = new Set<string>();
             arr.forEach((item, i) => {
-              const childScope: Record<string, unknown> = { ...scope, [node.item]: item, [node.index]: i };
+              // key 求值用每轮现值构造（与行作用域解耦——key 表达式若引用 index，
+              // 读 plain i 而非行信号，避免 reconcile effect 反向追踪行 index 信号）
+              const keyScope: Record<string, unknown> = { ...scope, [node.item]: item, [node.index]: i };
               let k: string;
               try {
-                k = stringify(evalExpr(node.keyExpr!, childScope));
+                k = stringify(evalExpr(node.keyExpr!, keyScope));
               } catch {
                 k = `${i}`; // key 求值失败退化为位置 key（诚实降级而非白屏）
               }
@@ -1623,13 +1743,21 @@ function renderNode(
                 const set: Array<() => void> = [];
                 teardownStack.push(set);
                 try {
-                  box.appendChild(renderNodes(node.children, { ...scope, [node.item]: item, [node.index]: i }, registry, validate, file, componentName));
+                  // P-A P2-R5a：行作用域单点（needIdx 时注入隐藏 index 信号，随行 cleanup 注销）
+                  const row = eachRowScope(scope, item, node.item, node.index, i, usesIdx);
+                  if (row.index) rowIdxSigs.set(k, row.index);
+                  box.appendChild(renderNodes(node.children, row.scope, registry, validate, file, componentName));
                 } finally {
                   teardownStack.pop();
                 }
                 rowCleanups.set(k, set);
                 el = box;
                 live.set(k, el);
+              } else {
+                // P-A P2-R5a：key 命中复用 DOM——幸存行 index 信号对齐新遍历序（修复前
+                // {idx} 永远停在建行时旧序号；未变化不写，防无谓失效）
+                const idxSig = rowIdxSigs.get(k);
+                if (idxSig && idxSig.value !== i) idxSig.value = i;
               }
               host.appendChild(el); // 相同顺序时为 no-op；乱序时即完成重排
             });
@@ -1639,6 +1767,7 @@ function renderNode(
                 const set = rowCleanups.get(k);
                 if (set) runCleanup(set);
                 rowCleanups.delete(k);
+                rowIdxSigs.delete(k);
               }
             }
         });
@@ -1762,6 +1891,7 @@ export const __compiledRT = {
   bindGroup, // 决策 25 v1.2：bind:group radio group 单点（codegen emitAttrs 同位支路发射 rt.bindGroup，产物零 import 不破）
   bindEvent, // 决策 25 后置候选（M9 事件修饰 v1）：on:event[.mod…] 单点（codegen emitAttrs on: 支路同位发射 rt.bindEvent，分支 B 收口；产物零 import 不破）
   bindAttr, // R1-B 支（P1 #5）：动态属性单点——布尔属性存在性语义/ATR-328 与解释器同源（codegen emitAttrs dynamic 支路同位发射 rt.bindAttr，产物零 import 不破）
+  eachRowScope, // P-A P2-R5a：keyed each 行作用域单点——隐藏行 index 信号（幸存行 {idx} 随遍历序更新；codegen emitEach keyed 支路同位发射，双路径同源）
   warnEachDupKey, // R-D4b（ATR-353）：keyed each 重复身份键 dev 一次性警示单点（codegen emitEach keyed 支路同位发射，双路径同源）
   recordRuntimeError,
   mountComponent,
