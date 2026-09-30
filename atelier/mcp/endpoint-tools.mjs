@@ -39,6 +39,27 @@ export const FS6_TOOLS = new Set([
   "server.health",
 ]);
 
+/* ---- FS6 消费面元数据（P2-M3，2026-09-30 第三遍架构复校）：每工具实际消费的 args 键集单源 ----
+ * server.mjs TOOL_META 注释与本表对表（「FS6 消费面元数据在 endpoint-tools.mjs 单源」由此成真）；
+ * 机检双向（tests/mcp-schema-surface.test.ts）：consumes ∪ gate = mcp-definitions.json 广告
+ * schema 键集（reqProps+optProps）——消费 ⊆ 广告（未广告参数不得消费）且 广告 ⊆ 消费（幻影
+ * 广告参数归零，endpoint.impact 的 root 曾是漏网实例）。gate 豁免位 = _approval：endpoint.call
+ * 的审批参数由 callTool 公共闸消费剥离、不进 handler——常规「handler 消费」口径对它不适用，单列。 ---- */
+export const FS6_CONSUMED_ARGS = {
+  "endpoint.list": { consumes: [] },
+  "endpoint.contract": { consumes: ["name", "target"] },
+  "endpoint.impact": { consumes: ["contractKey", "root"] },
+  "db.schema": { consumes: ["table"] },
+  "db.migrations": { consumes: [] },
+  "server.introspect": { consumes: [] },
+  "endpoint.call": { consumes: ["name", "mount", "input"], gate: ["_approval"] },
+  "endpoint.journal": { consumes: ["lines"] },
+  "jobs.status": { consumes: [] },
+  "email.log": { consumes: [] },
+  "uploads.status": { consumes: [] },
+  "server.health": { consumes: ["mount"] },
+};
+
 /** 四段式错误工厂（server.mjs toolError 同款形态：ATR 码解析进 e.atr，宿主可结构化消费） */
 export function toolError(codeText, fixText) {
   const e = new Error(`${codeText}\nfix: ${fixText}`);
@@ -295,7 +316,9 @@ async function endpointCall(args, { devUrl, devToken }) {
 
 /** server.mjs callTool 的 FS-6 分流入口 */
 export async function callEndpointTool(name, args, { devUrl, devToken, projectRoot }) {
-  if (name === "endpoint.impact") return endpointImpact(projectRoot, args?.contractKey);
+  // P2-M3（2026-09-30 第三遍架构复校）：消费广告参数 root——旧口径静默丢弃恒扫 ctx.projectRoot
+  //（广告 schema 的 optProps.root 成幻影参数）。缺省回落装配根（无 root 入参时行为零变化）。
+  if (name === "endpoint.impact") return endpointImpact(args?.root ?? projectRoot, args?.contractKey);
   if (name === "server.health") return serverHealth(args, { devUrl, devToken }); // 直探 server 面健康端点——不经 server-status
   const status = await fetchServerStatus(devUrl, devToken);
   switch (name) {

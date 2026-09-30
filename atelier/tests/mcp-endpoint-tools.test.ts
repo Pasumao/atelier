@@ -303,6 +303,20 @@ describe("FS-6 endpoint.impact（静态，不依赖 dev face）", () => {
     expect(res.endpoints).toEqual([]);
     expect(res.notes.length).toBeGreaterThan(0);
   });
+
+  // ---- P2-M3（2026-09-30 第三遍架构复校 §2.2）：mcp-definitions.json 广告 optProps.root
+  //（:491-495）但 endpointImpact(args) 静默丢弃——恒扫 ctx.projectRoot。红态：root 指向的另一
+  // app 根被无视（projectRoot 不回传、该根独有契约键查不到）。目标：endpointImpact(args?.root
+  // ?? projectRoot, …) 消费广告参数。----
+  it("红（P2-M3）：endpoint.impact 广告参数 root 消费生效——按指定根扫描（红态：静默丢弃恒扫装配根）", async () => {
+    const otherRoot = path.join(TMP, "app-impact-root");
+    writeApp(otherRoot, "auto");
+    // 该根独有契约键（装配根无此键——命中与否是「root 是否真被消费」的铁证）
+    fs.appendFileSync(path.join(otherRoot, "src", "contract.ts"), `\nexport const p2RootOnlySchema = ${JSON.stringify({ type: "object", reqProps: { q: { type: "string" } }, optProps: {} }, null, 2)};\n`);
+    const res = (await callTool("endpoint.impact", { contractKey: "p2RootOnlySchema", root: otherRoot })) as any;
+    expect(res.projectRoot).toBe(otherRoot); // 红态：APP_ROOT（root 被丢）
+    expect(res.knownContract).toBe(true); // 红态：false（扫的是没有该键的装配根）
+  });
 });
 
 describe("FS-6 db.schema / db.migrations / server.introspect / endpoint.journal", () => {

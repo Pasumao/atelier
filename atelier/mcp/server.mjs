@@ -112,6 +112,11 @@ export function listTools() {
   return TOOLS;
 }
 
+/** 广告名集（P2-M2 执行闸单源，2026-09-30 第三遍架构复校）：TOOLSETS 过滤后的 tools/list 广告
+ * 面。callTool 入口据此拒绝未广告名——ATELIER_TOOLSETS 的「权限面收敛」语义由此成真（旧口径
+ * 只滤 tools/list 广告不滤执行，客户端凭名直呼被隐藏工具照常执行）。 */
+const ADVERTISED_NAMES = new Set(TOOLS.map((t) => t.name));
+
 /** 执行上下文：stdio 通道从 env 取缺省；HTTP 直连（mcp/http.mjs）由 dev 面显式注入。
  * tasks = Tasks 扩展存储（进程内 + 显式句柄——无会话粘性，句柄随客户端回传）。 */
 function defaultCtx() {
@@ -153,7 +158,10 @@ async function devJson(pathWithQuery, init = {}, ctx = defaultCtx()) {
     );
   });
   if (!r.ok && r.status === 401) {
-    throw toolError("ATR-402: dev token rejected", "read .atelier/dev-token next to the app root and send it as x-atelier-token");
+    // P2-M1（2026-09-30 第三遍架构复校）：认证失败 = ATR-405（R3 402→405 拆分的漏改补钉）——
+    // ATR-402 归 confirm 档拒绝，同码双语义让消费方无法区分「token 错」与「审批被拒」。
+    // 文案对齐 endpoint-tools.mjs fetchServerStatus 的 ATR-405 位。
+    throw toolError("ATR-405: dev token rejected", "读取应用根 .atelier/dev-token 作为 x-atelier-token（dev 面 token 门内资源）");
   }
   return r.json();
 }
@@ -308,12 +316,15 @@ const TOOL_META = {
   "tasks.get": { args: ["taskId"] },
   "tasks.update": { args: ["taskId", "ttlMs"] },
   "tasks.cancel": { args: ["taskId"] },
-  // dev-face 通用路径五件（路由单源 = ENDPOINT_MAP；fetch 兜底超时原通用路径内联 4s）
+  // dev-face 通用路径五件（路由单源 = ENDPOINT_MAP；fetch 兜底超时原通用路径内联 4s）。
+  // P2-M5：ui.screenshot 与 snapshot.diff 同端点（/__atelier/screenshot）同档 60s——旧 4s 与
+  // dev-screenshot 冷路径（看门狗杀常驻浏览器后首拍需拉起浏览器+就绪轮询）必超时自相矛盾；
+  // 其余四件是轻量 JSON 读，4s 档不变。
   "registry.list_components": { args: [], timeoutMs: 4_000 },
   "registry.get_component": { args: ["name"], timeoutMs: 4_000 },
   "tokens.list": { args: [], timeoutMs: 4_000 },
   "state.snapshot": { args: [], timeoutMs: 4_000 },
-  "ui.screenshot": { args: [], timeoutMs: 4_000 },
+  "ui.screenshot": { args: [], timeoutMs: 60_000 },
 };
 
 /* ---- R3 收口（评审 §4.1 末件）：snapshot.diff 基线路径平台感知 ----
@@ -418,13 +429,25 @@ async function callDevFaceTool(name, args, ctx) {
     signal: AbortSignal.timeout(TOOL_META[name]?.timeoutMs ?? 4000),
     headers: { "x-atelier-token": ctx.devToken },
   }).catch((e) => {
+    // P2-M5（2026-09-30 第三遍架构复校）：fetch 超时单列——AbortSignal.timeout 的拒绝形态是
+    // DOMException name "TimeoutError"，与「连接拒绝」（cause.code = ECONNREFUSED 等）是两种
+    // 故障两种指路：超时 = dev 面在但响应慢（截图冷路径首拍要拉起浏览器），指路重试；
+    // 不可达 = 没启动，指路 pnpm dev。旧文案把超时也说成 unreachable，排查方向指错。
+    if (e?.name === "TimeoutError" || e?.code === "ETIMEDOUT") {
+      const budgetSec = Math.round((TOOL_META[name]?.timeoutMs ?? 4000) / 1000);
+      throw toolError(
+        `ATR-4xx-dev: dev surface timed out at ${ctx.devUrl}${route} (over ${budgetSec}s)`,
+        "dev surface is up but answered slowly — cold-path captures spawn a browser on the first shot; retry once, then inspect dev server logs",
+      );
+    }
     throw toolError(
       `ATR-4xx-dev: dev surface unreachable at ${ctx.devUrl} (${e.cause?.code ?? e.name})`,
       "start the dev server ('atelier dev' inside your Atelier app dir) or set ATELIER_DEV_URL",
     );
   });
   if (res.status === 401) {
-    throw toolError("ATR-402: dev token rejected", "read .atelier/dev-token next to the app root and send it as x-atelier-token");
+    // P2-M1：与 devJson 401 映射同批补钉——认证失败恒 ATR-405（非 confirm 拒绝的 ATR-402）。
+    throw toolError("ATR-405: dev token rejected", "读取应用根 .atelier/dev-token 作为 x-atelier-token（dev 面 token 门内资源）");
   }
   if (!res.ok) {
     throw toolError(`ATR-4xx-dev: dev surface returned HTTP ${res.status} for ${route}`, "check dev server logs");
@@ -742,6 +765,12 @@ for (const fs6Name of FS6_TOOLS) {
 }
 
 export async function callTool(name, args, ctx = defaultCtx(), opts = {}) {
+  /* ---- P2-M2（2026-09-30 第三遍架构复校）：TOOLSETS 执行闸（闸序最前——未广告名 = 不可见
+   * 亦不可达，先于 confirm 闸：被 TOOLSETS 隐藏的工具连审批面都不进）。未广告名按未知工具
+   * ATR-404，码与文案与兜底链一致。 ---- */
+  if (!ADVERTISED_NAMES.has(name)) {
+    throw toolError(`ATR-404: unknown tool "${name}"`, "pick a tool from tools/list output");
+  }
   /** P1-11：可选取消信号（Tasks 扩展 server 主导创建时经 http.mjs 注入）——长操作子进程随
    * tasks.cancel 即时树杀；stdio 直调不传，行为与既有完全一致。 */
   const signal = opts?.signal ?? null;

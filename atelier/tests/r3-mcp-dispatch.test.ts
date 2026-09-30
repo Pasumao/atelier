@@ -17,7 +17,7 @@
  * ①②相关用例全红；既有 MCP 全族（mcp-http / mcp-cancel / mcp-confirm / mcp-endpoint-tools /
  * mcp-schema-surface）断言零修改为行为零变化的门。
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -72,7 +72,7 @@ describe("R3① callTool 分发 Map：广告实现面 = Map 键集（一件不�
       "registry.get_component": 4_000,
       "tokens.list": 4_000,
       "state.snapshot": 4_000,
-      "ui.screenshot": 4_000,
+      "ui.screenshot": 60_000, // P2-M5（2026-09-30 复校）：与同端点 snapshot.diff 同档——旧 4s 冷路径首拍必超时（有意变更，红检先行）
     };
     for (const [name, ms] of Object.entries(expected)) {
       expect(TOOL_META[name]?.timeoutMs, `${name} timeoutMs`).toBe(ms);
@@ -92,6 +92,100 @@ describe("R3① callTool 分发 Map：广告实现面 = Map 键集（一件不�
   it("元数据键 ⊆ Map 键（无孤儿元数据）", () => {
     for (const name of Object.keys(TOOL_META as Record<string, unknown>)) {
       expect(TOOL_HANDLERS.has(name), `orphan meta: ${name}`).toBe(true);
+    }
+  });
+});
+
+/* ================================================================== P2-M1/M2/M5（2026-09-30 第三遍架构复校 §2.2） */
+
+describe("P2-M1 MCP 面认证失败恒 ATR-405（R3 402→405 拆分漏改两处的补钉）", () => {
+  /** 401 恒答假 dev 面（token 门拒绝——dev 面真实行为 = 401 ATR-405，dev-review.test.ts:514 同款语义） */
+  let unauth: http.Server;
+  let unauthUrl = "";
+  beforeAll(async () => {
+    unauth = http.createServer((_req, res) => {
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "ATR-405: invalid or missing X-Atelier-Token" }));
+    });
+    await new Promise<void>((r) => unauth.listen(0, "127.0.0.1", r));
+    unauthUrl = `http://127.0.0.1:${(unauth.address() as { port: number }).port}`;
+  });
+  afterAll(async () => {
+    await new Promise<void>((r) => unauth.close(() => r()));
+  });
+
+  it("dev-token 认证失败恒 405：callDevFaceTool 路径（tokens.list）与 devJson 路径（ui.a11y）都钉——红态：ATR-402 与 confirm 拒绝同码双语义", async () => {
+    const root = tmpRoot();
+    writeApp(root);
+    const ctx = { projectRoot: root, devUrl: unauthUrl, devToken: "wrong-token" };
+    try {
+      await expect(callTool("tokens.list", {}, ctx)).rejects.toMatchObject({
+        atr: { code: "ATR-405", message: expect.stringContaining("dev token rejected") },
+      }); // 红态：ATR-402（server.mjs callDevFaceTool 401 映射）
+      await expect(callTool("ui.a11y", {}, ctx)).rejects.toMatchObject({
+        atr: { code: "ATR-405" },
+      }); // 红态：ATR-402（server.mjs devJson 401 映射）
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("P2-M2 ATELIER_TOOLSETS 执行闸：广告面 = 可执行面（单一口径）", () => {
+  it("红：TOOLSETS 排除的工具凭名直呼 → ATR-404（红态：绕过广告过滤照常执行）；广告内工具可达；未设 env 全量可用不回归", async () => {
+    // 正控（未设 env，既有单源实例）：tasks.update 可达执行层——未注册 task → ATR-401 未找到（非 404 未知工具）
+    const root = tmpRoot();
+    writeApp(root);
+    const control = await callTool("tasks.update", { taskId: "task-none" }, { projectRoot: root, devUrl: baseUrl, devToken: "r3-snapshot-token" }).catch((e: any) => e);
+    expect(control?.atr?.code).toBe("ATR-401");
+
+    process.env.ATELIER_TOOLSETS = "query";
+    try {
+      vi.resetModules();
+      const restricted: any = await import("../mcp/server.mjs");
+      // operation 面被 TOOLSETS=query 隐藏——凭名直呼必须 ATR-404（红态：分发 Map 命中照常执行 → ATR-401）
+      await expect(
+        restricted.callTool("tasks.update", { taskId: "task-none" }, { projectRoot: root, devUrl: baseUrl, devToken: "r3-snapshot-token" })
+      ).rejects.toMatchObject({ atr: { code: "ATR-404" } });
+      // 广告内（query 面）工具照常执行——structure.map 本地直算不受闸扰
+      const out = await restricted.callTool("structure.map", { root }, { projectRoot: root, devUrl: baseUrl, devToken: "r3-snapshot-token" });
+      expect(out).toBeDefined();
+    } finally {
+      delete process.env.ATELIER_TOOLSETS;
+      vi.resetModules();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("P2-M5 ui.screenshot 超时预算与超时/不可达文案方向", () => {
+  it("红：TOOL_META ui.screenshot 与同端点 snapshot.diff 同档（≥30s——dev-screenshot 冷路径看门狗杀常驻浏览器后首拍必超 4s）", () => {
+    expect(TOOL_META["ui.screenshot"]?.timeoutMs).toBeGreaterThanOrEqual(30_000); // 红态：4_000
+  });
+
+  it("红：fetch 超时单列文案「timed out」（红态：TimeoutError 也被文案化成 unreachable——排查方向指错）；连接拒绝仍「unreachable」", async () => {
+    const root = tmpRoot();
+    writeApp(root);
+    const ctx = { projectRoot: root, devUrl: baseUrl, devToken: "r3-snapshot-token" };
+    const realFetch = globalThis.fetch;
+    try {
+      // 超时分支：AbortSignal.timeout 的拒绝形态 = DOMException name "TimeoutError"
+      globalThis.fetch = (async () => {
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      }) as typeof fetch;
+      const timedOut = await callTool("ui.screenshot", {}, ctx).catch((e: any) => e);
+      expect(timedOut?.message, "超时分支文案应指「timed out」").toContain("timed out");
+      expect(timedOut?.message, "超时分支不得误报 unreachable（红态：指错排查方向）").not.toContain("unreachable");
+
+      // 不可达分支：连接拒绝（cause.code ECONNREFUSED）——既有语义保持
+      globalThis.fetch = (async () => {
+        throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+      }) as typeof fetch;
+      const unreachable = await callTool("ui.screenshot", {}, ctx).catch((e: any) => e);
+      expect(unreachable?.message).toContain("unreachable");
+    } finally {
+      globalThis.fetch = realFetch;
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

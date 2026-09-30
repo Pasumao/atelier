@@ -414,7 +414,11 @@ export function startJobs(opts: StartJobsOptions): JobsHandle {
   async function runJob(row: ClaimedRow): Promise<void> {
     currentAbort = new AbortController();
     try {
-      const handler = handlers[row.type];
+      // P2-S2（2026-09-30 第三遍架构复校）：hasOwn 判未注册——handlers 是普通对象字面量，裸下标
+      // 访问走原型链，type:"constructor"/"toString"/"valueOf" 会取到继承可调用对象（handler==null
+      // 闸被穿透 → 调用成功假象 → 任务零执行落 done 假成功）。只认自有键：原型链键一律落下方
+      // 未注册失败路径（last_error 指认 + 每 type 一次 warn——「绝不静默吞行」承诺对齐）。
+      const handler = Object.hasOwn(handlers, row.type) ? handlers[row.type] : undefined;
       if (handler == null) {
         // 运行态配置漂移（非 ATR 码面）：走失败路径落 last_error + 每 type 一次 warn（诚实可见）
         const keys = Object.keys(handlers);
