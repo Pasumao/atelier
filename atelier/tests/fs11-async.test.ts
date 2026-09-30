@@ -140,12 +140,13 @@ describe("FS-11 ATR-323：解释器路径（值形态泄漏）", () => {
     expect(serialize(c)).toContain("ATR-323");
   });
 
-  it("动态属性 { p.value } → 属性写 ATR-323 错误文本（守卫前写 \"{}\"）", () => {
+  it("动态属性 { p.value } → 错误态摘属性 + 最近错误记录（P-A P2-R3：错误哨兵不再流入属性——src 是存在即生效面，写入 ⚠ 错误文本同样点亮属性；不静默改由 __ATELIER_LAST_ERROR__ 承担）", () => {
     const p = promiseState("/x.png");
+    setLast(undefined);
     const c = mountOnce("AttrAsync", "<img src={ p.value }>", { p });
     const img = findByTag(c, "img")[0];
-    expect(String(img.getAttribute("src"))).toContain("ATR-323");
-    expect(String(img.getAttribute("src"))).not.toBe("{}");
+    expect(img.hasAttribute("src"), "错误态属性被摘除（修复前把 ATR-323 错误文案写进 src）").toBe(false);
+    expect(getLast()?.code, "不静默：最近错误仍记录 ATR-323").toBe("ATR-323");
   });
 
   it("{#if p.value}（存 Promise.resolve(false)）→ ATR-323 错误卡（守卫前恒真、静默取首支）", () => {

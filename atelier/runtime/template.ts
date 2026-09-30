@@ -1545,7 +1545,7 @@ export function eachRowScope(
     configurable: true,
   });
   captureCleanup(() => {
-    store._signals.delete(idxSig);
+    store._signals.delete(idxSig as Signal); // Set<Signal>（unknown 缺省）的协变收口——$state 创建点同款惯例
   });
   return { scope: child, index: idxSig };
 }
